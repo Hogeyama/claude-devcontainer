@@ -34,6 +34,10 @@ services:
       GH_TOKEN: managed-by-proxy
     volumes:
       - ../..:/workspace
+      # The host builds and runs what is here (compose files, the proxy's
+      # policy, initializeCommand, credential injection), so the agent must
+      # not change it.
+      - ..:/workspace/.devcontainer:ro
       - public-ca:/public-ca:ro
       - dind-run:/var/run/dind:ro
     networks:
