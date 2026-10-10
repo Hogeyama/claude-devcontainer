@@ -286,6 +286,9 @@ echo nested-network-blocked
     def test_actual_claude_bash_uses_bridge_in_distinct_namespace(self):
         result = self.exec('python3', '/workspace/tests/fixtures/claude_probe.py', environment={'FIXTURE_PORT': self.port})
         self.assertIn('actual-claude-sandbox-and-docker-ok', result.stdout)
+        # Bash must not reach Anthropic, where the proxy would add the real credentials.
+        upstream = self.compose_run('exec', '-T', 'proxy', 'sh', '-c', 'cat /tmp/upstream.jsonl 2>/dev/null || true')
+        self.assertNotIn('/api/hello', upstream)
 
     def test_actual_testcontainers_and_ryuk_cleanup(self):
         source = os.environ.get('TESTCONTAINERS_NODE_MODULES')

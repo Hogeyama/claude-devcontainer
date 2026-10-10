@@ -13,7 +13,9 @@ All traffic goes through the proxy in `HTTPS_PROXY`. Only these destinations are
 
 - `github.com`: Git smart HTTP (clone, fetch, push)
 - `api.github.com`: the REST and GraphQL APIs for repositories. `gh` works; the proxy adds the credential, so leave the dummy `GH_TOKEN` as it is.
-- `api.anthropic.com`: Claude's own traffic
+- `api.anthropic.com`: Claude's own traffic only. Bash commands cannot reach it.
+
+The Bash sandbox allows only the two GitHub hosts, and a command that names extra allowed hosts is refused, so do not name any.
 
 Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. WebSearch is disabled.
 

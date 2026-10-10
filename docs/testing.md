@@ -19,6 +19,7 @@
 | proxy停止時 | 外部へ直接接続せず、通信が失敗すること |
 | オフラインDocker | `images.txt`に書いたイメージの読み込み、build、実行 |
 | Docker APIと公開TCPポート | 通常のagent、別のnetwork namespace、agent再起動後、実Claude Code 2.1.295のBash sandboxからの接続 |
+| Bash sandboxの接続先 | `bypassPermissions`モードの実ClaudeのBashから、`api.github.com`にはproxy経由で届き、`api.anthropic.com`はsandboxのproxyが拒否してproxyに届かないこと |
 | Testcontainers 12.1.0 | 起動、HTTP wait、mapped port、exec、Ryukによる残存コンテナの削除 |
 
 ## 未検証の範囲
