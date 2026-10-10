@@ -26,7 +26,7 @@ CA秘密鍵は専用volumeに保存し、agentには公開CAだけを渡しま�
 
 ## コンテナ内の実行権限
 
-agentの起動処理はfirewallとCAを設定してからUID 1000へ切り替えます。通常のプロセスにはcapabilityを与えず、`no-new-privileges`を設定します。コンテナ内でBash sandboxを作れるよう、seccompとAppArmorの制限は緩和しています。
+agentの起動処理はfirewallとCAを設定してから一般ユーザー（既定はUID 1000）へ切り替えます。通常のプロセスにはcapabilityを与えず、`no-new-privileges`を設定します。コンテナ内でBash sandboxを作れるよう、seccompとAppArmorの制限は緩和しています。
 
 Claudeのmanaged settingsでは、Bash sandboxを有効にしています。sandboxを利用できない場合は失敗し、sandbox外でのコマンド実行は許可しません。設定値は`enabled`、`failIfUnavailable`、`allowUnsandboxedCommands=false`、`enableWeakerNestedSandbox=true`です。
 

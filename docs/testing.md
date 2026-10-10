@@ -10,7 +10,7 @@
 
 | 対象 | 確認内容 |
 |---|---|
-| Dev Containersの起動・実行 | 認証用環境変数がない状態でのbuild/up、起動処理の完了を待ってからの接続、権限を落としたUID 1000での実行、認証なし403、注入コマンドでOAuth/API keyを渡した後の通信、通常のCLIからの新規プロセス実行 |
+| Dev Containersの起動・実行 | 認証用環境変数がない状態でのbuild/up、起動処理の完了を待ってからの接続、権限を落としたUID・GIDでの実行、認証なし403、注入コマンドでOAuth/API keyを渡した後の通信、通常のCLIからの新規プロセス実行 |
 | proxyの認証処理 | 認証値の上書き、Cookieなど許可外のheaderの除去、認証値の更新と削除 |
 | proxyの通信制限 | raw TCP、SOCKS、平文HTTP、許可外の接続先へのCONNECT、不正なTLS証明書の拒否 |
 | Anthropic向け要求 | chunked本文・過大本文の早期切断、MCP・server tool・URL sourceの拒否、SSEの逐次配送 |
@@ -33,7 +33,7 @@ GitHubの書込み制限を実サービスで検証するには、専用の許�
 
 すべてホストのターミナルで、このリポジトリのルートから実行します。既存のホストアカウントは読み取らず、合成した認証値を使います。
 
-テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。固定subnetが重ならないよう、通常利用中の本環境は先に停止してください。別のsubnetを使うComposeプロジェクトとは同時に実行できます。
+テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。subnetが重ならないよう、通常利用中の本環境は先に停止するか、`CLAUDE_DEVCONTAINER_PROXY_NET`と`CLAUDE_DEVCONTAINER_DIND_NET`を環境変数で別の値にしてください。`CLAUDE_DEVCONTAINER_UID`と`CLAUDE_DEVCONTAINER_GID`も同様に指定でき、その場合は下のagent imageも同じ値の`--build-arg AGENT_UID=… --build-arg AGENT_GID=…`でビルドします。
 
 `AGENT_TEST_IMAGE`と`PROXY_TEST_IMAGE`でテスト用imageのタグを変更できます。全体試験には実際の`devcontainer`コマンドが必要です。別のCLI起動方法を使う場合は、`DEVCONTAINER_TEST_CLI`にコマンドを指定します。テストは作業ツリーを一時領域へコピーし、CLIのuser-data-folderも専用領域に置きます。Dockerを使う試験を明示的に選んだのにdaemonが使えない場合はエラーになります。
 

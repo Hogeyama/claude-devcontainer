@@ -17,6 +17,10 @@ from proxy_integration_test import ROOT, PROXY_IMAGE, docker, fixtures
 
 CORE = ROOT / '.devcontainer/claude'
 AGENT_IMAGE = os.environ.get('AGENT_TEST_IMAGE', 'claude-devcontainer-agent:task2')
+# The same settings as .devcontainer/.env; AGENT_IMAGE must be built with this UID/GID.
+AGENT_UID = os.environ.get('CLAUDE_DEVCONTAINER_UID', '1000')
+AGENT_GID = os.environ.get('CLAUDE_DEVCONTAINER_GID', '1000')
+DIND_NET = os.environ.get('CLAUDE_DEVCONTAINER_DIND_NET', '10.231.71')
 
 
 @unittest.skipUnless(os.environ.get('RUN_DOCKER_TESTS') == '1', 'Docker integration disabled; set RUN_DOCKER_TESTS=1')
@@ -115,7 +119,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         if result.returncode: raise RuntimeError(result.stdout + result.stderr)
         # No harness polling: up must return with the production gate passed.
         status = cls.exec('cat', '/proc/1/status').stdout
-        for expected in ['Uid:\t1000\t1000\t1000\t1000', 'NoNewPrivs:\t1',
+        for expected in ['Uid:' + ('\t' + AGENT_UID) * 4, 'Gid:' + ('\t' + AGENT_GID) * 4, 'NoNewPrivs:\t1',
                          *[field + ':\t0000000000000000' for field in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')]]:
             assert expected in status, status
         cls.exec('docker', 'info', '--format', '{{.ServerVersion}}')
@@ -205,14 +209,14 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         for mode in ('bridge', 'host'):
             with self.subTest(mode=mode):
                 probe = '''set -eu
-for target in '1.1.1.1 443' '8.8.8.8 53' '172.17.0.1 HOSTPORT' '10.231.71.1 HOSTPORT' 'HOSTIP HOSTPORT'; do
+for target in '1.1.1.1 443' '8.8.8.8 53' '172.17.0.1 HOSTPORT' 'DINDNET.1 HOSTPORT' 'HOSTIP HOSTPORT'; do
   if timeout 2 sh -c 'echo | nc -w 1 $1 $2' -- $target; then echo escaped; exit 1; fi
 done
 if timeout 3 nslookup example.com 127.0.0.11; then echo dns-escaped; exit 1; fi
 if timeout 3 nslookup example.com 8.8.8.8; then echo dns-escaped; exit 1; fi
 if timeout 2 sh -c 'echo | nc -w 1 2001:4860:4860::8888 443'; then echo ipv6-escaped; exit 1; fi
 echo nested-network-blocked
-'''.replace('HOSTPORT', str(self.host_server.server_port)).replace('HOSTIP', self.host_ip)
+'''.replace('HOSTPORT', str(self.host_server.server_port)).replace('HOSTIP', self.host_ip).replace('DINDNET', DIND_NET)
                 result = self.exec('docker', 'run', '--rm', '--network', mode, 'busybox:1.37', 'sh', '-c', probe)
                 self.assertIn('nested-network-blocked', result.stdout)
 

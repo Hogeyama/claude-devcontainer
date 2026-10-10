@@ -10,7 +10,7 @@
 python3 .devcontainer/claude/scripts/inject-credentials.py
 ```
 
-proxyは1環境につき1組の認証値を持ち、次の要求から新しい値を使います。認証値はproxy専用tmpfsに保存され、置き換えるかproxyを停止するまで有効です。ファイルはproxyのUID 1000が所有する0400で、agentやDinDからは読めません。proxyを再起動した場合は、再び同じコマンドで渡してください。
+proxyは1環境につき1組の認証値を持ち、次の要求から新しい値を使います。認証値はproxy専用tmpfsに保存され、置き換えるかproxyを停止するまで有効です。ファイルはproxyのUID 1000（agentのUIDの設定とは無関係）が所有する0400で、agentやDinDからは読めません。proxyを再起動した場合は、再び同じコマンドで渡してください。
 
 期限切れ時の自動更新は行いません。OAuthトークンは、READMEの手順に従ってホストの`claude setup-token`で再発行し、`CLAUDE_CODE_OAUTH_TOKEN`へ貼り付けてから`python3 .devcontainer/claude/scripts/inject-credentials.py`を再実行します。API keyを使う場合はConsoleで更新します。
 
@@ -43,7 +43,7 @@ Testcontainersでは、テスト対象とRyukのイメージを事前に投入�
 ```sh
 DOCKER_HOST=tcp://127.0.0.1:2375
 TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
-TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
 ## VS Codeで開く

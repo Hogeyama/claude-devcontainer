@@ -16,7 +16,7 @@ rm -f /run/dind-bridge/bridge.sock
 /usr/local/bin/dind-bridge serve \
     --socket /run/dind-bridge/bridge.sock \
     --docker-host unix:///var/run/dind/docker.sock \
-    --publish-host 10.231.71.10 --publish-ip 0.0.0.0 \
+    --publish-host "$CLAUDE_DEVCONTAINER_DIND_ADDRESS" --publish-ip 0.0.0.0 \
     --api tcp://127.0.0.1:2375 \
     </dev/null >>/run/dind-bridge/serve.log 2>&1 &
 exec "$@"

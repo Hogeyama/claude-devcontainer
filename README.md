@@ -12,14 +12,15 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 - git subtree（多くのディストリビューションのgitに同梱されています）
 - Python 3
 - privilegedコンテナ、ユーザー・ネットワークnamespace、bubblewrapを利用できるカーネル
-- `10.231.70.0/24`と`10.231.71.0/24`がホスト・VPN・他コンテナと重複せず、ホストのfirewallがコンテナ間通信を許可する環境
+- ホストのfirewallがコンテナ間通信を許可する環境
+- 内部ネットワーク用に、ホスト・VPN・他コンテナと重ならない`/24`のアドレス範囲2つ（既定は`10.231.70.0/24`と`10.231.71.0/24`。[UIDとネットワークを変える](#uidとネットワークを変える)で変更できます）
 
 ## 利用上の制限
 
 * 安全に利用するために、読み取り権限のみのGitHub fine-grained tokenを利用することを前提にしています。
 * package registry、GitHubのrelease assetやLFS、Anthropicのweb searchやMCP connectorなどは使えません。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
-* UID 1000で読み書きできるリポジトリでしか使えません（今のところ）。
+* agentはリポジトリのファイルを1つのUID（既定は1000）で読み書きします。リポジトリの所有者と異なる場合は[UIDとネットワークを変える](#uidとネットワークを変える)で合わせてください。
 * Gitリポジトリのルートで使います。`git worktree`の作業ツリーには対応していません。
 * agentは`.devcontainer/`と`.git`の設定（config、hooks）を書き換えられません。ただし、agentが作ったコミットに含まれる`.devcontainer/`の変更は、ホストで反映する前に確認してください。詳しくは[ホストが実行する設定の保護](docs/network-policy.md#ホストが実行する設定の保護)を参照してください。
 
@@ -132,6 +133,24 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 `agent-setup.sh`はホストでのビルド時に実行されるので、package registryに接続できます。agentの実行時はproxyを通るため接続できません。
 
 `.devcontainer/compose.yaml`では`cap_add`、`privileged`、`networks`なども上書きできてしまいます。agentの隔離はこれらの設定に依存しているので、変更しないでください。
+
+### UIDとネットワークを変える
+
+`.devcontainer/.env`に書きます。書かなかった項目は既定値になります。
+
+```sh
+CLAUDE_DEVCONTAINER_UID=1001             # agentのUID。既定は1000
+CLAUDE_DEVCONTAINER_GID=1001             # agentのGID。既定は1000
+CLAUDE_DEVCONTAINER_PROXY_NET=10.99.0    # agentとproxyの間のネットワーク。既定は10.231.70
+CLAUDE_DEVCONTAINER_DIND_NET=10.99.1     # agentとDinDの間のネットワーク。既定は10.231.71
+```
+
+- UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせます（`id -u`と`id -g`で確認できます）。DinDのdockerdも同じUIDで動きます。UIDは0と、DinDが内部で使う100000〜165535は指定できません。
+- ネットワークは`/24`の先頭3オクテットを書きます。proxyは`.10`、DinDは`.10`、agentは`.20`を使います。同じホストで複数のリポジトリを同時に起動するときは、リポジトリごとに別の値にしてください。
+
+ホストごとに値が変わるので、`.env`はコミットせず`.gitignore`に入れておくとよいです。agentは`.devcontainer/`を書き換えられないので、`.env`も変更できません。
+
+値を変えたら`devcontainer up --remove-existing-container`で作り直します。UIDを変えた場合は、DinDのデータが古いUIDの所有のまま残って起動できなくなるので、先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください。
 
 ## 更新する
 

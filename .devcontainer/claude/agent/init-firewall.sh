@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
+# Set by compose.yaml.
+proxy=${CLAUDE_DEVCONTAINER_PROXY_ADDRESS:?}
+dind=${CLAUDE_DEVCONTAINER_DIND_ADDRESS:?}
 # IPv6 is disabled by sysctl in compose.yaml.
 iptables -P INPUT DROP
 iptables -P FORWARD DROP
@@ -14,5 +17,5 @@ iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -d 10.231.70.10 -p tcp --dport 8080 -j ACCEPT
-iptables -A OUTPUT -d 10.231.71.10 -p tcp -m multiport ! --dports 2375,2376 -j ACCEPT
+iptables -A OUTPUT -d "$proxy" -p tcp --dport 8080 -j ACCEPT
+iptables -A OUTPUT -d "$dind" -p tcp -m multiport ! --dports 2375,2376 -j ACCEPT

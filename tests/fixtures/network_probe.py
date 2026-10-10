@@ -5,10 +5,12 @@ import socket
 import sys
 
 host, port = sys.argv[1], int(sys.argv[2])
-for address, destination in [('1.1.1.1', 443), ('8.8.8.8', 53), ('10.231.70.10', 8081),
-                             ('10.231.71.10', 2375), ('172.17.0.1', port), (host, port),
+proxy = os.environ['CLAUDE_DEVCONTAINER_PROXY_ADDRESS']
+dind = os.environ['CLAUDE_DEVCONTAINER_DIND_ADDRESS']
+for address, destination in [('1.1.1.1', 443), ('8.8.8.8', 53), (proxy, 8081),
+                             (dind, 2375), ('172.17.0.1', port), (host, port),
                              # The host's addresses on the internal network bridges.
-                             ('10.231.70.1', port), ('10.231.71.1', port),
+                             (proxy.rsplit('.', 1)[0] + '.1', port), (dind.rsplit('.', 1)[0] + '.1', port),
                              ('2001:4860:4860::8888', 443)]:
     try:
         connection = socket.create_connection((address, destination), .4)
