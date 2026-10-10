@@ -1,0 +1,4 @@
+# Only production build inputs may reach the Docker daemon.
+**
+!agent/
+!dind-bridge/src/

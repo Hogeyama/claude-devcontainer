@@ -1,0 +1,20 @@
+{
+  "apiKeyHelper": "echo managed-by-proxy",
+  "env": {
+    "CLAUDE_ENV_FILE": "/etc/dind-bridge/env.sh"
+  },
+  "permissions": {
+    "deny": [
+      "WebSearch"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "enableWeakerNestedSandbox": true,
+    "network": {
+      "allowAllUnixSockets": true
+    }
+  }
+}
