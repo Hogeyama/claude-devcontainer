@@ -150,4 +150,4 @@ devcontainer up --remove-existing-container
 
 `.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れていますが、このリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`の雛形から始めてください。検証手順は[確認した範囲と検証手順](docs/testing.md)にあります。
 
-`main`へpushすると、GitHub Actions（[`.github/workflows/dist.yml`](.github/workflows/dist.yml)）が[`scripts/build-dist.sh`](scripts/build-dist.sh)で`dist`ブランチを作り直してpushします。`dist`には、`.devcontainer/claude`を変更した`main`のコミットごとに1つずつコミットがあり、その中身は`.devcontainer/claude`と、元の`main`のコミットのURLを書いた`UPSTREAM`ファイルです。`dist`は手で変更しないでください。作り直すと同じコミットが再現されるので、`dist`は常にfast-forwardで進みます。
+`main`へpushすると、GitHub Actions（[`.github/workflows/dist.yml`](.github/workflows/dist.yml)）が[`scripts/build-dist.sh`](scripts/build-dist.sh)で`dist`ブランチにコミットを1つ足してpushします。中身は`main`の`.devcontainer/claude`と、それを最後に変更した`main`のコミットのURLを書いた`UPSTREAM`ファイルです。コアにもそのコミットにも変化がなければ何もしません。`dist`は先へ足すだけで書き換えないので、`main`をforce pushしても利用者の`git subtree pull`は壊れません。ただし、force pushで消えた`main`のコミットを指す古い`UPSTREAM`のリンクは、いずれ見られなくなります。`dist`は手で変更しないでください。
