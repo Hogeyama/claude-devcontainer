@@ -132,6 +132,7 @@ class PolicyAddon:
         req = flow.request
         LOG.warning('request-denied %s %s%s', req.method, req.pretty_host, urlsplit(req.path).path)
         flow.response = http.Response.make(403, b'blocked: ' + reason.encode(), {'Content-Type': 'text/plain'})
+        flow.metadata['denied'] = True
 
     def http_connect(self, flow):
         if flow.request.host not in HOSTS or flow.request.port != 443:
@@ -202,6 +203,12 @@ class PolicyAddon:
     def responseheaders(self, flow):
         # Responses are not inspected; streaming keeps server-sent events live.
         flow.response.stream = True
+        if flow.metadata.get('denied'):
+            return
+        # As with denials, the query is left out.
+        req, res = flow.request, flow.response
+        LOG.warning('upstream %d %s %s%s %s', res.status_code, req.method, req.pretty_host,
+                    urlsplit(req.path).path, res.headers.get('request-id', '-'))
 
 
 addons = [PolicyAddon()]
