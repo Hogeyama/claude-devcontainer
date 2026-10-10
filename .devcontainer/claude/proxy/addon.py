@@ -25,8 +25,13 @@ ROUTES = {
         ('GET', r'/api/hello'),  # HELLO below
         ('POST', r'/v1/messages'),
         ('POST', r'/v1/messages/count_tokens'),
-        # Artifacts: the claude.ai MCP server list names the Artifacts MCP
-        # server, which checks the organization policy and the account's plan.
+        # Remote managed settings. With an OAuth token, Claude Code warns when
+        # it cannot read them.
+        ('GET', r'/api/claude_code/settings'),
+        # Artifacts: the Artifact tool publishes, reads and lists through
+        # /api/frame/; the claude.ai MCP server list names the Artifacts MCP
+        # server; the organization policy and the account's plan gate both.
+        (None, r'/api/frame/.+'),
         ('GET', r'/v1/mcp_servers'),
         ('GET', r'/api/claude_code/policy_limits'),
         ('GET', r'/api/oauth/profile'),
@@ -55,6 +60,9 @@ SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 
                 'x-github-api-version', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id',
                 'x-mcp-server-id', 'x-mcp-client-session-id', 'mcp-method', 'mcp-name', 'x-upload-token',
                 'anthropic-mcp-client-capabilities', 'anthropic-mcp-discover-protocol-version'}
+# The Artifact tool's headers. Anthropic routes /api/frame/ requests by them
+# (without X-Frame-CP the answer is 404), and new ones keep being added.
+SAFE_HEADER_PREFIXES = ('x-frame-',)
 ANTHROPIC_VERSION = '2023-06-01'
 OAUTH_BETA = 'oauth-2025-04-20'
 
@@ -160,7 +168,8 @@ class PolicyAddon:
         except Exception:
             return self.deny(flow)
         req.headers = http.Headers([(name, value) for name, value in req.headers.fields
-                                    if name.decode('ascii').lower() in SAFE_HEADERS])
+                                    if name.decode('ascii').lower() in SAFE_HEADERS
+                                    or name.decode('ascii').lower().startswith(SAFE_HEADER_PREFIXES)])
         req.headers['Host'] = req.host
         if (req.host, path) == HELLO:
             return

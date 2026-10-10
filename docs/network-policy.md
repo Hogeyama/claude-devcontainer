@@ -8,7 +8,7 @@
 |---|---|
 | `api.github.com` | リポジトリ向けREST API、GraphQL、`GET /user` |
 | `github.com` | Git smart HTTPによるclone、fetch、push |
-| `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`）、Artifacts（MCPサーバー`/api/artifacts/mcp`と、その利用に必要なclaude.ai MCPサーバー一覧、組織のポリシー、アカウント情報の取得） |
+| `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`）、remote managed settingsの取得、Artifacts（公開・読取り・一覧などの`/api/frame/`以下、MCPサーバー`/api/artifacts/mcp`、その利用に必要なclaude.ai MCPサーバー一覧、組織のポリシー、アカウント情報の取得） |
 
 GitHubの認証は、proxyに渡したfine-grained PATで上書きします。GraphQLの本文は解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。
 

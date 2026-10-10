@@ -112,16 +112,20 @@ class PolicyTest(unittest.TestCase):
 
     def test_anthropic_artifacts(self):
         self.credentials = ('managed-pat', 'managed-oauth', 'oauth')
-        for path in ['/v1/mcp_servers?limit=1000', '/api/claude_code/policy_limits', '/api/oauth/profile', '/api/artifacts/mcp']:
+        for path in ['/v1/mcp_servers?limit=1000', '/api/claude_code/policy_limits', '/api/oauth/profile', '/api/artifacts/mcp',
+                     '/api/claude_code/settings']:
             with self.subTest(path=path):
                 f = flow('https://api.anthropic.com' + path, 'GET', b'', [('Authorization', 'Bearer attacker')])
                 del f.request.headers['Content-Length']
                 self.assertEqual(self.allowed(f).get_all('Authorization'), ['Bearer managed-oauth'])
-        mcp = [('Mcp-Session-Id', 's'), ('MCP-Protocol-Version', 'v'), ('X-Upload-Token', 't')]
+        mcp = [('Mcp-Session-Id', 's'), ('MCP-Protocol-Version', 'v'), ('X-Upload-Token', 't'), ('X-Frame-CP', 'go')]
         headers = self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp', 'POST', b'{}', mcp))
-        self.assertEqual([headers[name] for name, _ in mcp], ['s', 'v', 't'])
+        self.assertEqual([headers[name] for name, _ in mcp], ['s', 'v', 't', 'go'])
         self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp/upload/u1', 'PUT', b'page'))
+        self.allowed(flow('https://api.anthropic.com/api/frame/deploy/direct?attempt_id=a', 'POST', b'{}'))
+        self.allowed(flow('https://api.anthropic.com/api/frame/frames?limit=200', 'GET', b''))
         for url, method in [('https://api.anthropic.com/api/artifacts/mcp/other', 'POST'),
+                            ('https://api.anthropic.com/api/frame/', 'GET'),
                             ('https://api.anthropic.com/v1/mcp_servers', 'POST'),
                             ('https://api.anthropic.com/api/oauth/account/settings', 'GET')]:
             with self.subTest(url=url):
