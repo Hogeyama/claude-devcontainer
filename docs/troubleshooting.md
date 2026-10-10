@@ -6,7 +6,7 @@ proxyが要求を拒否しています。本文が`blocked: no credentials`の�
 
 認証値を渡した後も403が返る場合は、proxyのログで拒否された要求を確認します。
 
-ホストのこのリポジトリのルートで実行します。
+ホストで取り込んだリポジトリのルートで実行します。
 
 ```sh
 project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' \
