@@ -14,7 +14,13 @@
     "allowUnsandboxedCommands": false,
     "enableWeakerNestedSandbox": true,
     "network": {
-      "allowAllUnixSockets": true
+      "allowAllUnixSockets": true,
+      "allowManagedDomainsOnly": true,
+      "allowedDomains": ["github.com", "api.github.com"],
+      "deniedDomains": ["api.anthropic.com"]
+    },
+    "filesystem": {
+      "allowWrite": ["/tmp"]
     }
   }
 }

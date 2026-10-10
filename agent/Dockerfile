@@ -35,6 +35,10 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
 RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
+# Managed skills: only Claude in the container loads them (unlike .claude/skills
+# in the workspace), the agent cannot change them, and copying the host's
+# ~/.claude/skills does not replace them.
+COPY agent/skills/ /etc/claude-code/.claude/skills/
 COPY agent/bash-env.sh /etc/bash-env.sh
 COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh /usr/local/bin/
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
