@@ -38,6 +38,8 @@ RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
 # With an OAuth token, an unfinished onboarding makes the CLI check
 # platform.claude.com, which the proxy does not allow, and refuse to start.
+# /workspace is trusted up front: the container and the proxy are the
+# boundary, so its hooks run confined either way.
 COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # Managed skills: only Claude in the container loads them (unlike .claude/skills
 # in the workspace), the agent cannot change them, and copying the host's
