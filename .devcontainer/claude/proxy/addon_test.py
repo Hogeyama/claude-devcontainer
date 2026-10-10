@@ -150,6 +150,16 @@ class PolicyTest(unittest.TestCase):
         self.denied(anthropic(path='/v1/files'))
         self.denied(flow('https://api.anthropic.com/api/event_logging/v2/batch', 'POST'))
 
+    def test_anthropic_feature_flags(self):
+        self.allowed(flow('https://api.anthropic.com/api/eval/sdk-abc', 'POST', b'{"attributes":{}}'))
+        for url, method in [('https://api.anthropic.com/api/eval/sdk-abc', 'GET'),
+                            ('https://api.anthropic.com/api/eval/', 'POST'),
+                            ('https://api.anthropic.com/api/eval/sdk-abc/more', 'POST'),
+                            ('https://api.anthropic.com/api/features/sdk-abc', 'GET'),
+                            ('https://api.anthropic.com/sub/sdk-abc', 'GET')]:
+            with self.subTest(url=url, method=method):
+                self.denied(flow(url, method))
+
     def test_anthropic_bodies_are_not_bounded(self):
         chunked = anthropic()
         del chunked.request.headers['Content-Length']

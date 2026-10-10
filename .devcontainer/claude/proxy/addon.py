@@ -28,6 +28,11 @@ ROUTES = {
         # Remote managed settings. With an OAuth token, Claude Code warns when
         # it cannot read them.
         ('GET', r'/api/claude_code/settings'),
+        # Feature flags (GrowthBook remote evaluation, POST /api/eval/<client
+        # key>). The body carries account and organization attributes. Without
+        # it every flag keeps its default, which turns off Artifact comments and
+        # live updates.
+        ('POST', r'/api/eval/[^/]+'),
         # Artifacts: the Artifact tool publishes, reads and lists through
         # /api/frame/; the claude.ai MCP server list names the Artifacts MCP
         # server; the organization policy and the account's plan gate both.

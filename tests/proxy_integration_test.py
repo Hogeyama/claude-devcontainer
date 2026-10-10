@@ -120,6 +120,25 @@ class ProxyIntegrationTest(unittest.TestCase):
         self.assertEqual(self.request()[0], 403)
         self.assertNotIn(TOKEN, docker('logs', self.name))
 
+    def test_feature_flags_reach_anthropic_and_nearby_paths_do_not(self):
+        self.start()
+        self.inject('oauth')
+        body = json.dumps({'attributes': {'id': 'fixture'}})
+        self.assertEqual(self.request('api.anthropic.com', '/api/eval/sdk-fixture', body,
+                                      {'Content-Type': 'application/json', 'Authorization': 'Bearer attacker'})[0], 200)
+        [captured] = self.captures()
+        self.assertEqual(captured['path'], '/api/eval/sdk-fixture')
+        self.assertEqual(captured['body'], body)
+        self.assertEqual(dict((k.lower(), v) for k, v in captured['headers'])['authorization'], 'Bearer ' + TOKEN)
+        for path in ('/api/eval/sdk-fixture', '/api/features/sdk-fixture'):
+            with self.subTest(path=path):
+                self.assertEqual(self.request('api.anthropic.com', path)[0], 403)
+        # A denied request with a body is closed instead of answered.
+        for path in ('/api/eval/sdk-fixture/more', '/api/event_logging/v2/batch'):
+            with self.subTest(path=path), self.assertRaises((http.client.RemoteDisconnected, ConnectionResetError)):
+                self.request('api.anthropic.com', path, '{}')
+        self.assertEqual(len(self.captures()), 1)
+
     def test_denied_requests_never_reach_upstream(self):
         self.start()
         self.inject()
