@@ -8,7 +8,7 @@ import tempfile
 import threading
 
 requests = []
-command = 'set -e; bash /workspace/tests/fixtures/bridge_probe.sh sandbox; bash /workspace/tests/fixtures/sandbox_network_probe.sh; printf "claude-sandbox-ok\\n"; readlink /proc/self/ns/net'
+command = 'bash /workspace/tests/fixtures/bridge_probe.sh'
 
 def sse(tool):
     base = {'id': 'msg_fixture', 'type': 'message', 'role': 'assistant', 'model': 'claude-sonnet-4-5',
@@ -46,15 +46,14 @@ with tempfile.TemporaryDirectory(prefix='claude-synthetic-') as temporary:
     try:
         result = subprocess.run(['claude', '--bare', '--print', '--model', 'claude-sonnet-4-5', '--tools', 'Bash',
                                  '--no-session-persistence', '--setting-sources', '', '--dangerously-skip-permissions',
-                                 '--system-prompt', 'You are a synthetic test client.', 'Run the sandbox probe.'],
+                                 '--system-prompt', 'You are a synthetic test client.', 'Run the Docker probe.'],
                                 cwd=temporary, env=env, capture_output=True, text=True, timeout=90)
         assert result.returncode == 0, (result.stdout, result.stderr)
         results = [block for body in requests for message in body.get('messages', [])
                    for block in (message['content'] if isinstance(message['content'], list) else []) if block.get('type') == 'tool_result']
         assert results, (result.stdout, result.stderr)
-        successful = [block for block in results if not block.get('is_error', False) and 'bridge-probe-ok' in json.dumps(block) and 'sandbox-network-probe-ok' in json.dumps(block) and 'claude-sandbox-ok' in json.dumps(block)]
+        successful = [block for block in results if not block.get('is_error', False) and 'bridge-probe-ok' in json.dumps(block)]
         assert successful, results
-        assert os.readlink('/proc/self/ns/net') not in json.dumps(successful), successful
-        print('actual-claude-sandbox-and-docker-ok')
+        print('actual-claude-docker-ok')
     finally:
         server.shutdown()

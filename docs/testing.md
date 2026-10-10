@@ -18,8 +18,7 @@
 | ネットワーク隔離 | agentとDinDからの外部IP・DNS・IPv6・ホストへの接続拒否。DinD内ではbridgeとhost networkの両方を確認 |
 | proxy停止時 | 外部へ直接接続せず、通信が失敗すること |
 | オフラインDocker | `images.txt`に書いたイメージの読み込み、build、実行 |
-| Docker APIと公開TCPポート | 通常のagent、別のnetwork namespace、agent再起動後、実Claude Code 2.1.295のBash sandboxからの接続 |
-| Bash sandboxの接続先 | `bypassPermissions`モードの実ClaudeのBashから、`api.github.com`にはproxy経由で届き、`api.anthropic.com`はsandboxのproxyが拒否してproxyに届かないこと |
+| Docker APIと公開TCPポート | agentのシェル、agent再起動後、実Claude Code 2.1.295のBash toolからの接続 |
 | Testcontainers 12.1.0 | 起動、HTTP wait、mapped port、exec、Ryukによる残存コンテナの削除 |
 
 ## 未検証の範囲
@@ -72,7 +71,7 @@ git diff --check
 ```sh
 # 実 mitmproxy／模擬 TLS upstream
 RUN_DOCKER_TESTS=1 python3 -m unittest discover -s tests -p proxy_integration_test.py -v
-# 実 Dev Containers CLI up/exec・別 netns・再起動・実 Claude Bash・SDK/Ryuk
+# 実 Dev Containers CLI up/exec・再起動・実 Claude Bash・SDK/Ryuk
 RUN_DOCKER_TESTS=1 TESTCONTAINERS_NODE_MODULES="$sdk_dir/node_modules" \
   python3 -m unittest discover -s tests -p devcontainer_integration_test.py -v
 ```
@@ -90,11 +89,11 @@ Dev Containersの全体試験はDinDを有効にして実行します。実行�
 CLIとComposeで同じ検証用環境を操作するため、開始時に`export COMPOSE_PROJECT_NAME="cdc-flags-$(date +%s)"`も実行します。ネットワークの範囲は、他の環境と重ならない値に設定してください。
 
 1. `CLAUDE_DEVCONTAINER_DIND=0`、`CLAUDE_DEVCONTAINER_NIX=1`で`devcontainer up`を実行します。`images.txt`には存在しないイメージ名を入れ、DinDが無効な場合に読み込みを待たず起動できることも確認します。
-2. 次のコマンドで、dev shellのツールが使え、Dockerには接続できず、Bashの前に実行するスニペットが空であることを確認します。
+2. 次のコマンドで、dev shellのツールが使え、Dockerには接続できず、dind-bridgeが起動していないことを確認します。
 
    ```sh
    devcontainer exec --workspace-folder . bash -ic 'hello --version'
-   devcontainer exec --workspace-folder . sh -c '! docker info >/dev/null 2>&1 && test ! -s /etc/dind-bridge/env.sh && test ! -S /run/dind-bridge/bridge.sock'
+   devcontainer exec --workspace-folder . sh -c '! docker info >/dev/null 2>&1 && test ! -e /run/dind-bridge/serve.log'
    docker compose -f .devcontainer/compose.yaml ps --services --status running
    ```
 
@@ -118,11 +117,9 @@ rm -rf "$sdk_dir"
 
 ## 検証結果の読み方
 
-SDK依存を指定しなかった場合は、実Testcontainersの試験だけがskippedになります。別のnetwork namespaceを使う代替試験の成功を、Testcontainersの成功とは数えません。
+SDK依存を指定しなかった場合は、実Testcontainersの試験だけがskippedになります。
 
-実Claudeの試験では、agentのloopback上で模擬SSE APIを動かし、ダミーのAPI keyと新規の設定ディレクトリを使い、`--bare`でClaudeにBash toolを実行させます。ホストの認証状態は参照しません。CLIの終了コードだけでなく、`tool_result.is_error`、成功marker、別のnetwork namespaceでの実行、Docker ping、公開TCPポートへの接続を確認します。
-
-`unshare`による代替試験では、子のuser namespace内でrootに対応付けてloopbackを起動します。UID 1000で動く実ClaudeのBash sandbox試験とは別の検証です。
+実Claudeの試験では、agentのloopback上で模擬SSE APIを動かし、ダミーのAPI keyと新規の設定ディレクトリを使い、`--bare`でClaudeにBash toolを実行させます。ホストの認証状態は参照しません。CLIの終了コードだけでなく、`tool_result.is_error`、成功marker、Docker ping、公開TCPポートへの接続を確認します。
 
 模擬HTTPS APIへの接続先の差替えは、production policyが宛先を検査した後にテスト用のaddonで行います。本番のproxyには接続先を差し替えるスイッチを追加していません。
 

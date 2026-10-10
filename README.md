@@ -11,7 +11,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 - Dev Containers CLI（`devcontainer`コマンド）
 - git subtree（多くのディストリビューションのgitに同梱されています）
 - Python 3
-- ユーザー・ネットワークnamespaceとbubblewrapを利用できるカーネル。DinDを使う場合はprivilegedコンテナも必要です
+- DinDを使う場合は、privilegedコンテナを実行できる権限
 - ホストのfirewallがコンテナ間通信を許可する環境
 - nix（使う場合、Optional）
 

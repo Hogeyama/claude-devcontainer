@@ -40,7 +40,7 @@ postgres:16
 
 agentにツールを追加する場合は、[`.devcontainer/agent-setup.sh`](../.devcontainer/agent-setup.sh)に導入手順を書きます。ホストでagentのimageをビルドする際にrootで実行されます。
 
-コンテナのTCPポートは、`docker run -p 8080`または`-p 18080:8080`のように、既定の`0.0.0.0`で公開します。agentやClaudeのBashからは、`127.0.0.1:公開ポート`に接続できます。loopbackだけで公開したポートは中継されません。Docker API用の2375番ポートも公開先としては使えません。
+コンテナのTCPポートは、`docker run -p 8080`または`-p 18080:8080`のように、既定の`0.0.0.0`で公開します。agentからは、`127.0.0.1:公開ポート`に接続できます。loopbackだけで公開したポートは中継されません。Docker API用の2375番ポートも公開先としては使えません。
 
 Testcontainersでは、テスト対象とRyukのイメージを事前に投入します。以下の接続設定はComposeで設定済みです。
 
@@ -72,7 +72,5 @@ Dev Containers拡張機能0.469.0では、以下をホストのuser/profile設�
 ```
 
 これらは認証helperの設置などを抑制する設定です。既存のsocketや拡張機能を通じた認証転送まで遮断できたという検証結果はありません。`remoteEnv`で環境変数を消すだけでも不十分です。
-
-ClaudeのBashでは、Dockerの中継に必要なUnix socketへ接続できるよう`allowAllUnixSockets=true`を設定しています。そのため、VS Codeなどが接続したUnix socketにもアクセスできます。エディタとの通信経路は、追加で信頼する必要のある範囲として扱ってください。
 
 [READMEに戻る](../README.md)

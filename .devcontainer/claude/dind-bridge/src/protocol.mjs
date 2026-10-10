@@ -1,7 +1,7 @@
 import { connect } from "node:net";
 
 export const TIMEOUT = 10_000;
-export const MAX_FRAME = 1024 * 1024;
+export const MAX_BODY = 1024 * 1024;
 
 /**
  * Parse a `tcp://127.0.0.1:PORT` address. Only the IPv4 loopback is accepted:
@@ -29,57 +29,6 @@ export function loopbackEndpoint(value, what) {
   return { host: "127.0.0.1", port: Number(url.port) };
 }
 
-export function readFrame(socket, limit = MAX_FRAME) {
-  return new Promise((resolve, reject) => {
-    let buffered = Buffer.alloc(0);
-    const timer = setTimeout(
-      () => fail(new Error("bridge handshake timed out")),
-      TIMEOUT,
-    );
-    const cleanup = () => {
-      clearTimeout(timer);
-      socket.off("data", data);
-      socket.off("error", fail);
-      socket.off("end", end);
-      socket.off("close", end);
-    };
-    const fail = (error) => {
-      cleanup();
-      reject(error);
-    };
-    const end = () => fail(new Error("bridge disconnected during handshake"));
-    const data = (chunk) => {
-      const newline = chunk.indexOf(10);
-      const length = newline < 0 ? chunk.length : newline;
-      if (buffered.length + length > limit)
-        return fail(new Error("bridge frame exceeds limit"));
-      buffered = Buffer.concat([buffered, chunk.subarray(0, length)]);
-      if (newline < 0) return;
-      cleanup();
-      socket.pause();
-      if (newline + 1 < chunk.length)
-        socket.unshift(chunk.subarray(newline + 1));
-      try {
-        resolve(JSON.parse(buffered.toString()));
-      } catch {
-        reject(new Error("invalid bridge frame"));
-      }
-    };
-    socket.on("data", data);
-    socket.once("error", fail);
-    socket.once("end", end);
-    socket.once("close", end);
-    socket.resume();
-  });
-}
-
-export function writeFrame(socket, value) {
-  const frame = `${JSON.stringify(value)}\n`;
-  if (Buffer.byteLength(frame) > MAX_FRAME)
-    throw new Error("bridge frame exceeds limit");
-  socket.write(frame);
-}
-
 export function openSocket(options) {
   return new Promise((resolve, reject) => {
     const socket = connect({ ...options, allowHalfOpen: true });
@@ -99,26 +48,12 @@ export function openSocket(options) {
   });
 }
 
-export async function gatewayRequest(path, request) {
-  const socket = await openSocket({ path });
-  try {
-    writeFrame(socket, request);
-    const response = await readFrame(socket);
-    if (!response.ok)
-      throw new Error(response.error || "bridge request rejected");
-    return { socket, response };
-  } catch (error) {
-    socket.destroy();
-    throw error;
-  }
-}
-
 // An upgrade request's body (exec start sends JSON) must go upstream with
 // the request: Docker answers only after reading all of it, and the rest is
 // the hijacked stream. Node leaves the body in `head` and on the socket.
 export async function splitUpgradeBody(req, socket, head) {
   const length = Number(req.headers["content-length"] ?? 0);
-  if (!Number.isSafeInteger(length) || length < 0 || length > MAX_FRAME)
+  if (!Number.isSafeInteger(length) || length < 0 || length > MAX_BODY)
     throw new Error("invalid upgrade request body");
   let buffered = head;
   if (buffered.length < length)

@@ -26,8 +26,6 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, CHOWN, DAC_OVERRIDE]
     security_opt:
-      - seccomp=unconfined
-      - apparmor=unconfined
       - no-new-privileges=true
     sysctls:
       net.ipv4.ip_forward: "0"
@@ -45,7 +43,6 @@ services:
       DOCKER_HOST: tcp://127.0.0.1:2375
       TESTCONTAINERS_HOST_OVERRIDE: 127.0.0.1
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock
-      CLAUDE_ENV_FILE: /etc/dind-bridge/env.sh
       CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
       CLAUDE_DEVCONTAINER_NIX: ${CLAUDE_DEVCONTAINER_NIX:-0}
       # A dummy that the proxy replaces with the real credential. Claude gets

@@ -247,7 +247,7 @@ echo nested-network-blocked
         result = self.exec('docker', 'run', '--rm', image)
         self.assertEqual(result.stdout.strip(), 'offline-build-ok')
 
-    def test_docker_published_port_namespace_and_agent_restart(self):
+    def test_docker_published_port_and_agent_restart(self):
         for iteration in range(2):
             if iteration:
                 self.compose_run('restart', 'agent')
@@ -257,10 +257,8 @@ echo nested-network-blocked
                                    env=self.env, check=True, timeout=120)
                 result = self.exec('sh', '-c', json.loads((CORE / 'template/devcontainer.json').read_text())['postStartCommand'])
                 self.assertNotIn('warning', result.stderr)
-            for args in (['bash', '/workspace/tests/fixtures/bridge_probe.sh'],
-                         ['unshare', '--user', '--map-root-user', '--net', 'python3', '/workspace/tests/fixtures/netns_exec.py', 'bash', '/workspace/tests/fixtures/bridge_probe.sh', 'sandbox']):
-                result = self.exec(*args, environment={'FIXTURE_PORT': self.port})
-                self.assertIn('bridge-probe-ok', result.stdout)
+            result = self.exec('bash', '/workspace/tests/fixtures/bridge_probe.sh', environment={'FIXTURE_PORT': self.port})
+            self.assertIn('bridge-probe-ok', result.stdout)
         self.assertNotIn('rror', self.exec('cat', '/run/dind-bridge/serve.log').stdout)
 
     def test_background_injection_reads_the_credentials_config(self):
@@ -283,12 +281,9 @@ echo nested-network-blocked
         self.assertEqual(dict(item['headers'])['Authorization'], 'Bearer synthetic-config-token')
         self.inject_credentials('api-key')
 
-    def test_actual_claude_bash_uses_bridge_in_distinct_namespace(self):
+    def test_actual_claude_bash_uses_docker(self):
         result = self.exec('python3', '/workspace/tests/fixtures/claude_probe.py', environment={'FIXTURE_PORT': self.port})
-        self.assertIn('actual-claude-sandbox-and-docker-ok', result.stdout)
-        # Bash must not reach Anthropic, where the proxy would add the real credentials.
-        upstream = self.compose_run('exec', '-T', 'proxy', 'sh', '-c', 'cat /tmp/upstream.jsonl 2>/dev/null || true')
-        self.assertNotIn('/api/hello', upstream)
+        self.assertIn('actual-claude-docker-ok', result.stdout)
 
     def test_actual_testcontainers_and_ryuk_cleanup(self):
         source = os.environ.get('TESTCONTAINERS_NODE_MODULES')
@@ -299,8 +294,7 @@ echo nested-network-blocked
         self.compose_run('cp', source, 'agent:/tmp/cdc-sdk-modules')
         self.exec('sh', '-c', 'printf \'{"private":true}\' > /tmp/package.json; ln -sfn /tmp/cdc-sdk-modules /tmp/node_modules')
         orphan = 'cdc-sdk-orphan-' + uuid.uuid4().hex[:12]
-        script = 'source "$CLAUDE_ENV_FILE"; exec node /workspace/tests/fixtures/testcontainers_probe.mjs'
-        result = self.exec('unshare', '--user', '--map-root-user', '--net', 'python3', '/workspace/tests/fixtures/netns_exec.py', 'bash', '-c', script,
+        result = self.exec('node', '/workspace/tests/fixtures/testcontainers_probe.mjs',
                            environment={'SDK_PACKAGE_JSON': '/tmp/package.json', 'SDK_ORPHAN_NAME': orphan, 'DEBUG': 'testcontainers*'})
         self.assertIn('actual-testcontainers-start-wait-port-exec-ok', result.stdout)
         for _ in range(100):

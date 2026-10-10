@@ -1,6 +1,6 @@
 ---
 name: claude-devcontainer
-description: Limits of the sandboxed dev container you are running in (all egress through an inspecting proxy, .devcontainer/ and .git/config read-only, Docker only as an offline DinD) and what to do instead of working around them. Use it whenever a network request, package install, or download fails (HTTP 403, `blocked`, timeouts, `Could not resolve host`, `certificate verify failed`, `self-signed certificate in certificate chain`), when using docker, docker build, Testcontainers, or published ports, when `git push -u`, `git remote add`, or `git config` fails, when a write under .devcontainer/ or .git/ fails with `Read-only file system`, and when a task needs a tool, language runtime, or container image that is not installed.
+description: Limits of the isolated dev container you are running in (all egress through an inspecting proxy, .devcontainer/ and .git/config read-only, Docker only as an offline DinD) and what to do instead of working around them. Use it whenever a network request, package install, or download fails (HTTP 403, `blocked`, timeouts, `Could not resolve host`, `certificate verify failed`, `self-signed certificate in certificate chain`), when using docker, docker build, Testcontainers, or published ports, when `git push -u`, `git remote add`, or `git config` fails, when a write under .devcontainer/ or .git/ fails with `Read-only file system`, and when a task needs a tool, language runtime, or container image that is not installed.
 ---
 
 # Working in this dev container
@@ -13,9 +13,7 @@ All traffic goes through the proxy in `HTTPS_PROXY`. Only these destinations are
 
 - `github.com`: Git smart HTTP (clone, fetch, push)
 - `api.github.com`: the REST and GraphQL APIs for repositories. `gh` works; the proxy adds the credential, so leave the dummy `GH_TOKEN` as it is.
-- `api.anthropic.com`: Claude's own traffic only. Bash commands cannot reach it.
-
-The Bash sandbox allows only the two GitHub hosts, and a command that names extra allowed hosts is refused, so do not name any.
+- `api.anthropic.com`: Claude's own traffic only. Do not call it from commands: the proxy adds the real credentials to every request.
 
 Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. WebSearch is disabled.
 
@@ -33,10 +31,6 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
   - `git remote add`, repository-level `git config`, new hooks, and adding or updating submodules are impossible.
 - Committing, creating branches, and pushing work.
 - The working directory `/workspace` is the repository root. `git worktree` is not supported.
-
-## Running commands
-
-The Bash tool runs commands in a sandbox, and running them outside it is not allowed. Asking to disable the sandbox will not work.
 
 ## Docker (DinD)
 

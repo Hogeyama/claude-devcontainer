@@ -6,11 +6,6 @@ if [ "${1:-}" != --as-node ]; then
     cp /public-ca/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/managed-proxy.crt
     update-ca-certificates >/dev/null
     /usr/local/bin/init-firewall.sh
-    if [ "${CLAUDE_DEVCONTAINER_DIND:-0}" != 1 ]; then
-        # Without DinD, the snippet Claude runs before each Bash command would
-        # only report that Docker is unavailable.
-        : > /etc/dind-bridge/env.sh
-    fi
     exec setpriv --reuid=node --regid=node --init-groups \
         --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
         "$0" --as-node "$@"
@@ -19,10 +14,7 @@ shift
 if [ "${CLAUDE_DEVCONTAINER_DIND:-0}" != 1 ]; then
     exec "$@"
 fi
-readlink /proc/self/ns/net > /run/dind-bridge/base-netns
-rm -f /run/dind-bridge/bridge.sock
-/usr/local/bin/dind-bridge serve \
-    --socket /run/dind-bridge/bridge.sock \
+/usr/local/bin/dind-bridge \
     --docker-host unix:///var/run/dind/docker.sock \
     --publish-host "$CLAUDE_DEVCONTAINER_DIND_ADDRESS" --publish-ip 0.0.0.0 \
     --api tcp://127.0.0.1:2375 \

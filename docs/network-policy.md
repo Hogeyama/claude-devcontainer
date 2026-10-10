@@ -26,15 +26,15 @@ CA秘密鍵は専用volumeに保存し、agentには公開CAだけを渡しま�
 
 ## コンテナ内の実行権限
 
-agentの起動処理はfirewallとCAを設定してから一般ユーザー（既定はUID 1000）へ切り替えます。通常のプロセスにはcapabilityを与えず、`no-new-privileges`を設定します。コンテナ内でBash sandboxを作れるよう、seccompとAppArmorの制限は緩和しています。
+agentの起動処理はfirewallとCAを設定してから一般ユーザー（既定はUID 1000）へ切り替えます。通常のプロセスにはcapabilityを与えず、`no-new-privileges`を設定します。seccompとAppArmorはDockerの既定のままです。
 
-Claudeのmanaged settingsでは、Bash sandboxを有効にしています。sandboxを利用できない場合は失敗し、sandbox外でのコマンド実行は許可しません。設定値は`enabled`、`failIfUnavailable`、`allowUnsandboxedCommands=false`、`enableWeakerNestedSandbox=true`です。
+ClaudeのBash sandboxは使いません。sandboxはBashの呼び出しごとに作り直され、終わるときに中で起動したプロセスも消えるので、`playwright-cli`のように呼び出しをまたいでデーモンを使うツールが動かないからです。
 
-Bashから接続できるのは`github.com`と`api.github.com`だけで、`api.anthropic.com`には接続できません。proxyはAnthropicへの要求に本物の認証値を付けるので、Bashから届くと、proxyが拒否していない種類のサーバー側の機能を使って第三者へ送信されるおそれがあるからです。Claude本体の通信はBash sandboxの外にあり、この制限を受けません。`allowManagedDomainsOnly`で許可先をmanaged settingsの`allowedDomains`に固定し、コマンドごとの許可先の追加やユーザー・プロジェクトの設定、`bypassPermissions`モードでは広げられないようにしています。`deniedDomains`にも`api.anthropic.com`を入れています。proxyに許可先を追加するときは、Bashから使うならこの`allowedDomains`にも追加します。
+このため、Bashで実行したコマンドもClaude本体と同じくproxyを通り、`api.anthropic.com`にも届きます。proxyはその要求にも本物の認証値を付けます。proxyが拒否する上記の4種類以外の形で、Anthropicのサーバーから外部へ接続する機能が今後追加された場合、Bashのコマンドからそれを使って第三者へ送信できます。この経路は、VS Codeで人間が起動したビルドなど、agentで動くすべてのプロセスに元からあります。境界はコンテナとproxyで、Claude Codeの設定には頼りません。
 
 managed settingsではWebSearchも禁止しています。検索結果は`api.anthropic.com`の応答としてモデルに届くので、取得元を通信の検査では判定できず、未信頼のWebページの内容が入り込むためです。サーバー側のtoolはproxyでも拒否しているので、この禁止は重ねがけです。
 
-rootless DinDはprivilegedコンテナで動かします。同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentへ中継します。
+rootless DinDはprivilegedコンテナで動かします。同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentのloopbackへ中継します。
 
 agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの操作権限を読取り専用にはしません。ホストのDocker socketは共有しません。
 

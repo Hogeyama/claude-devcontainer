@@ -1,4 +1,4 @@
-"""Run outside the Bash sandbox; no proxy env can hide a direct connect."""
+"""Connect directly, so that no proxy env can hide an escape."""
 import json
 import os
 import socket

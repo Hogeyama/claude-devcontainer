@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync, readlinkSync } from 'node:fs';
 const require = createRequire(process.env.SDK_PACKAGE_JSON);
 const {GenericContainer, Wait} = require('testcontainers');
-assert.notEqual(readlinkSync('/proc/self/ns/net'), readFileSync('/run/dind-bridge/base-netns', 'utf8').trim());
 const fixture = () => new GenericContainer('busybox:1.37')
  .withCommand(['sh', '-c', 'mkdir -p /www; echo sdk-ok > /www/index.html; exec httpd -f -p 8080 -h /www'])
  .withExposedPorts(8080).withWaitStrategy(Wait.forHttp('/', 8080).forStatusCode(200)).withStartupTimeout(30000);
