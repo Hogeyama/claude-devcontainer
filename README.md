@@ -134,7 +134,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 
 `.devcontainer/compose.yaml`では`cap_add`、`privileged`、`networks`なども上書きできてしまいます。agentの隔離はこれらの設定に依存しているので、変更しないでください。
 
-### Claude Codeの設定を引き継ぐ
+### ホストの設定を引き継ぐ
 
 `devcontainer up`のたびに、ホストの`~/.claude`から次のものがagentの`~/.claude`へコピーされます。
 
@@ -143,18 +143,24 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 
 `.credentials.json`、セッション履歴、`plugins/`などはコピーしません。
 
-ほかのファイルを追加したいときは、`~/.config/claude-devcontainer/extra/`に置くとコピーされます。
-これはsymlinkでも構いません。例:
+ほかのファイルは、`~/.config/claude-devcontainer/extra/`にホームディレクトリと同じ構成で置くと、agentのホームディレクトリへコピーされます。
+上の自動コピーの後に重ねるので、`extra/.claude/settings.json`を置けばホストの`settings.json`の代わりにそちらが使われます。
+symlinkでも構いません。例:
 
 ```
-ln -s ~/.claude/statusline.sh ~/.config/claude-devcontainer/extra/statusline.sh
+cd ~/.config/claude-devcontainer/extra
+mkdir -p .claude .config/git
+ln -s ~/.claude/statusline.sh .claude/statusline.sh
+ln -s ~/.config/git/config .config/git/config
 ```
+
+Gitの設定は自動ではコピーしません。credential helper、署名、deltaのようなpagerなど、コンテナでは動かない設定が混ざりやすいからです。ホストの設定をそのまま渡すか、コンテナ用に書いたファイルを置くかを選んでください。`extra/.claude/.credentials.json`はsymlinkで`~/.claude`ごと渡してもコピーしません。
 
 > [!NOTE]
 > - コピーはホストからコンテナへの一方向です。コンテナ内で`/config`などから変えた設定は、次の`up`で上書きされます。
-> - `settings.json`の`env`もそのままagentに見えます。秘密を書いている場合は、`extra/settings.json`でコンテナ用の設定を用意してください。
+> - `settings.json`の`env`もそのままagentに見えます。秘密を書いている場合は、`extra/.claude/settings.json`でコンテナ用の設定を用意してください。
 > - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れます。
-> - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-claude-config.py`を実行すると反映できます。
+> - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映できます。
 
 ### UIDとネットワークを変える
 

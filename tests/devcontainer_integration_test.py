@@ -47,6 +47,9 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         (claude / 'settings.json').write_text(json.dumps({'statusLine': {'type': 'command', 'command': 'sh ~/.claude/statusline.sh'}}))
         (claude / '.credentials.json').write_text('synthetic-credentials')
         cls.env.update(CLAUDE_CONFIG_DIR=str(claude))
+        extra = cls.directory / 'config/claude-devcontainer/extra'
+        extra.mkdir(parents=True)
+        (extra / '.gitconfig').write_text('[user]\n\tname = fixture-user\n')
         cls.start_environment()
         denied = cls.exec('curl', '--max-time', '5', '-s', '-o', '/dev/null', '-w', '%{http_code}',
                           'https://api.github.com/user')
@@ -187,7 +190,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         self.inject_credentials('api-key')
 
     def test_host_claude_configuration_is_copied_before_up_returns(self):
-        result = self.exec('sh', '-c', 'cd ~/.claude && cat skills/fixture/SKILL.md && sh statusline.sh && ls -A')
+        result = self.exec('sh', '-c', 'git config --global user.name; cd ~/.claude && cat skills/fixture/SKILL.md && sh statusline.sh && ls -A')
+        self.assertIn('fixture-user', result.stdout)
         self.assertIn('fixture skill', result.stdout)
         self.assertIn('fixture-status', result.stdout)
         self.assertNotIn('.credentials.json', result.stdout)
@@ -247,7 +251,10 @@ echo nested-network-blocked
             if iteration:
                 self.compose_run('restart', 'agent')
                 # What `devcontainer up` would run after the restart.
-                self.exec('sh', '-c', json.loads((CORE / 'template/devcontainer.json').read_text())['postStartCommand'])
+                subprocess.run([sys.executable, str(self.workspace / '.devcontainer/claude/scripts/copy-host-config.py')],
+                               env=self.env, check=True, timeout=120)
+                result = self.exec('sh', '-c', json.loads((CORE / 'template/devcontainer.json').read_text())['postStartCommand'])
+                self.assertNotIn('warning', result.stderr)
             for args in (['bash', '/workspace/tests/fixtures/bridge_probe.sh'],
                          ['unshare', '--user', '--map-root-user', '--net', 'python3', '/workspace/tests/fixtures/netns_exec.py', 'bash', '/workspace/tests/fixtures/bridge_probe.sh', 'sandbox']):
                 result = self.exec(*args, environment={'FIXTURE_PORT': self.port})
@@ -256,7 +263,7 @@ echo nested-network-blocked
 
     def test_background_injection_reads_the_credentials_config(self):
         config = self.directory / 'config/claude-devcontainer'
-        config.mkdir(parents=True)
+        config.mkdir(parents=True, exist_ok=True)
         (config / 'credentials').write_text('GITHUB_TOKEN=$(echo synthetic-config-token)\n'
                                             'ANTHROPIC_API_KEY=synthetic-config-token\n')
         self.compose_run('exec', '-T', 'proxy', 'rm', '-f', '/run/proxy-credentials/credentials.json')

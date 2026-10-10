@@ -61,6 +61,10 @@ services:
       - dind-run:/var/run/dind:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
+    # Markers of the host's startup work, which wait-ready.sh waits for. A
+    # restart clears them, so a stale one cannot end the wait early.
+    tmpfs:
+      - /run/claude-devcontainer:uid=${CLAUDE_DEVCONTAINER_UID:-1000},gid=${CLAUDE_DEVCONTAINER_GID:-1000},mode=0700,size=1m
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20

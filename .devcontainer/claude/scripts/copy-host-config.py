@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Copy the host's Claude Code configuration into this workspace's agent.
+"""Copy the host's configuration into this workspace's agent's home.
 
-The copy goes one way only: nothing in the agent's ~/.claude reaches the host,
-where an agent-written hook or memory would run or be read outside the
-container. Copied are the entries in ENTRIES, the files under ~/.claude that
+The copy goes one way only: nothing in the agent's home reaches the host, where
+an agent-written hook or memory would run or be read outside the container.
+Copied are the entries of ~/.claude in ENTRIES, the files under ~/.claude that
 statusLine and hooks commands name, and then everything in EXTRA, mirrored onto
-~/.claude. Symbolic links are followed on the host, so they may point anywhere
-the host can read (e.g. /nix/store).
+the home directory (e.g. EXTRA/.gitconfig becomes ~/.gitconfig). Symbolic links
+are followed on the host, so they may point anywhere the host can read (e.g.
+/nix/store).
 
 Without arguments, copy now. With --background, as the Dev Containers
 initializeCommand runs it before the containers start, archive now and hand the
@@ -30,11 +31,11 @@ LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / '
 # Configuration, not state. An allowlist, because ~/.claude also holds
 # credentials and history, and new kinds of state appear with new versions.
 ENTRIES = ('settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
-# Never copied, even when a command names it.
-SECRETS = ('.credentials.json',)
-TARGET = '/home/node/.claude'
+# Never copied, even when a command names it or EXTRA links to all of ~/.claude.
+SECRETS = ('.claude/.credentials.json',)
+TARGET = '/home/node'
 # The agent's postStartCommand waits for this.
-MARKER = '.host-config-copied'
+MARKER = '/run/claude-devcontainer/host-config-copied'
 WAIT_SECONDS = 60
 REFERENCE = re.compile(r'(?:~|\$HOME|\$\{HOME\})/\.claude/([^\s\'"`;|&<>()]+)')
 
@@ -57,13 +58,13 @@ def referenced(settings):
     for command in commands:
         for match in REFERENCE.finditer(command):
             path = Path(match.group(1))
-            if '..' not in path.parts and path.parts[0] not in SECRETS:
+            if '..' not in path.parts and not path.is_absolute():
                 paths.add(path)
     return sorted(paths)
 
 
 def archive(source=SOURCE, extra=EXTRA):
-    """Return a tar of the configuration to extract into the agent's ~/.claude."""
+    """Return a tar of the configuration to extract into the agent's home."""
     names = [Path(name) for name in ENTRIES]
     try:
         names += referenced(json.loads((source / 'settings.json').read_text()))
@@ -72,17 +73,18 @@ def archive(source=SOURCE, extra=EXTRA):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w', dereference=True) as tar:
         for name in names:
-            add(tar, source / name, str(name))
+            add(tar, source / name, '.claude/' + str(name))
         # Later members overwrite earlier ones on extraction.
         if extra.is_dir():
             for path in sorted(extra.iterdir()):
-                if path.name not in SECRETS:
-                    add(tar, path, path.name)
+                add(tar, path, path.name)
     return buffer.getvalue()
 
 
 def add(tar, path, name, parents=()):
     """Add path, following links, and skip what cannot be read instead of failing."""
+    if name in SECRETS:
+        return
     try:
         info = tar.gettarinfo(path, name)
         real = path.resolve()
@@ -126,7 +128,8 @@ def copy(agent, data):
     script = ('set -eu; cd "$1"; shift; chmod -R u+w -- "$@" 2>/dev/null || true; rm -rf -- "$@"; '
               'tar -x --no-same-owner; touch ' + MARKER)
     # Replace ENTRIES, so that what was removed on the host disappears here too.
-    docker('exec', '-i', '--user', 'node', agent, 'sh', '-c', script, 'sh', TARGET, *ENTRIES, data=data)
+    entries = ['.claude/' + name for name in ENTRIES]
+    docker('exec', '-i', '--user', 'node', agent, 'sh', '-c', script, 'sh', TARGET, *entries, data=data)
 
 
 def wait_and_copy(data):
