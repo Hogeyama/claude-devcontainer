@@ -1,0 +1,22 @@
+{
+  "name": "Claude with mandatory proxy and offline Docker",
+  "dockerComposeFile": "compose.yaml",
+  "service": "agent",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "node",
+  "updateRemoteUserUID": false,
+  "overrideCommand": false,
+  "shutdownAction": "stopCompose",
+  "initializeCommand": "./scripts/inject-credentials.py --background",
+  "postStartCommand": "timeout 60 sh -c 'until docker info >/dev/null 2>&1; do sleep 0.2; done'",
+  "waitFor": "postStartCommand",
+  "userEnvProbe": "none",
+  "customizations": {
+    "vscode": {
+      "extensions": ["anthropic.claude-code"],
+      "settings": {
+        "remote.downloadExtensionsLocally": true
+      }
+    }
+  }
+}

@@ -10,7 +10,7 @@ GitHub には、共有を許可した非公開 repo だけを選択した fine-g
 
 ## 構成
 
-Docker Compose で次の3サービスを起動する。
+Dev Containers が Docker Compose の構成を使って次の3サービスを起動する。
 
 | サービス | 役割 | 接続するネットワーク |
 | --- | --- | --- |
@@ -24,6 +24,12 @@ internal network だけでホスト宛て通信や DNS の迂回も防げると�
 
 dind はエージェントが Docker API を通じて操作できる環境として扱う。dind 内の firewall だけを外向き通信の防御にしない。内部コンテナ、host network mode、rootless daemon の namespace から、外部・ホスト・外部 DNS へ到達しないことを実機で検証する。成立しない構成はサポート済みとして出荷しない。
 
+### VS Code から人間が実行するビルド・デバッグ
+
+エージェントが編集したビルド設定やソースは、人間が実行ボタンを押した後も未信頼として扱う。VS Code のビルド、テスト、デバッグ、およびプロジェクトの読込みでコードを実行する処理は、通信を制限した Dev Container 内で動かす。これらは Claude Code の Bash sandbox 外でも動くため、Bash の設定や classifier に防御を依存させない。agent 全体の通信境界と外部 proxy の検査を適用する。
+
+例えば、改変された Gradle 設定を経由して起動したプロセスが Messages API の MCP connector を呼んでも、外部 proxy が拒否することを検証する。人間が同じ作業ツリーをホストで直接ビルドした場合、Dev Container の通信制限は適用されない。そこまで機械的に保護するには、ホスト側の実行にも同等の隔離を設ける必要がある。特定の設定ファイルの書込み禁止だけでは、編集可能なソースやビルドスクリプトを経由した実行全体を保護できない。
+
 ## proxy の責務
 
 ### 共通処理
@@ -34,7 +40,7 @@ dind はエージェントが Docker API を通じて操作できる環境とし
 - hostname は完全一致で扱う。許可先の DNS 応答でも loopback、private、link-local 等への接続を拒否する。検査したアドレスに接続し、再解決による検査の迂回を防ぐ。
 - client が指定した認証 header、Cookie、proxy 用 header を除去してから正規の認証を注入する。query、URL userinfo、別の header による認証の持込みも拒否する。
 - リダイレクト先への次の要求も通常のルールで検査する。許可していない hostname には認証を付けず拒否する。
-- 不正な入力や検査中の例外は拒否に倒す。拒否ログには理由コードだけを出し、URL、query、本文、認証値を記録しない。
+- 不正な入力や検査中の例外は拒否に倒す。通常は固定の 403 を返す。本文付き要求を header 検査で拒否する場合は、mitmproxy が本文を待ってから応答するため、接続を即時切断してバッファリングを防ぐ。拒否ログには理由コードだけを出し、URL、query、本文、認証値を記録しない。
 
 ### GitHub
 
@@ -44,7 +50,7 @@ API では Authorization を正規 PAT の Bearer 認証に、Git では正規 P
 
 PAT の発行条件は次の通り。
 
-- resource owner と repository を明示し、共有を許可した非公開 repo だけを選ぶ。All repositories を使わない。
+- resource owner と repository を明示し、共有を許可した非公開 repo だけを選ぶ。
 - repository permission は必要な Contents / Issues / Pull requests 等に絞る。account / organization の追加権限や管理権限を付けない。
 - 対象 repo が公開された場合や、token の対象が増えた場合は、保証の前提が変わるので運用を停止して見直す。
 
@@ -56,7 +62,9 @@ Claude Code に必要な Messages API と token count の endpoint に限定す�
 
 Messages 本文は JSON として検査し、`mcp_servers` と外部へ接続する server tool を拒否する。初期対応は通常の client tool とテキスト・画像等の明示した内容に絞り、未知の server tool は通さない。不正 JSON、重複 key、検査上限を超える本文を拒否する。GraphQL のパーサーを作らない方針は、この Anthropic 向け JSON 検査には影響しない。
 
-OAuth token の取得・自動更新は初期実装に含めない。有効な token をホストから渡し、期限切れ時には更新して proxy を再起動する。API key を使う起動方法も説明する。
+参照元の nas は `mcp_servers` を拒否する一方、threat model に web fetch 等の他の server tool は未検査と記載している。その拒否条件だけを移植して、Messages API 経由の第三者送信全体を防いだとは扱わない。許可する API 機能を明示し、外部参照を生む入力と未知の機能を拒否する。認証注入だけでは、正規の OAuth token でも利用可能な MCP connector による送信を防げない。
+
+OAuth token の自動更新は初期実装に含めない。有効な token をホストの環境変数から渡し、期限切れ時には更新して注入コマンドを再実行する。proxy の再起動は不要。API key も選択できる。
 
 ### その他の通信先
 
@@ -64,13 +72,13 @@ OAuth token の取得・自動更新は初期実装に含めない。有効な t
 
 ## 秘密と CA の配置
 
-本物の PAT、Anthropic の認証情報、mitmproxy CA の秘密鍵は proxy にだけ渡す。認証値を image に焼き込まず、ホスト上の作業ツリー外に置いたファイルを Compose secrets で proxy に渡す。agent と dind にはそのファイルも volume も共有しない。agent に共有する CA は公開証明書だけにし、system trust、Node.js、Git、curl が検証に使えるようにする。
+本物の PAT、Anthropic の認証情報、mitmproxy CA の秘密鍵は proxy にだけ渡す。Dev Containers が認証なしで build/up し、ホストの注入コマンドが環境変数の認証値を Docker exec の標準入力で proxy に渡して終了する。その後は通常の Dev Containers CLI や VS Code terminal で作業する。proxy の再起動や認証値の更新時に再注入する。認証値を image、作成設定、引数、ホストファイルに保存しない。proxy 専用 tmpfs の固定パスに、proxy の UID が所有する0400ファイルとして保存する。agent と dind にはそのファイルも volume も共有しない。値のない起動後、削除後、proxy 再起動後の要求は拒否する。差替えは再ビルドなしで次の要求から反映する。agent に共有する CA は公開証明書だけにし、system trust、Node.js、Git、curl が検証に使えるようにする。
 
 addon は proxy image に COPY する。agent が編集できる作業ツリーを、稼働中 proxy のコードや設定として bind mount しない。ルール変更の反映にはホストからの image 再ビルドが必要になる。
 
 ## DinD と Bash sandbox
 
-`nix-agent-sandbox` の dind-bridge 0.1.0 を再利用する。ビルド元の commit と配布物の hash を記録し、再取得時に検証する。独自の Docker API 中継は作らない。
+dind-bridge をこのリポジトリのコードとして取り込み、以後の変更もここで管理する。元リポジトリのバージョン・commit 追跡と個別ライセンスの同梱は不要とする。配置するコードの checksum は記録し、準備時と image build 時に検証する。
 
 rootless DinD は privileged sidecar とし、dockerd は UNIX socket のみで待ち受ける。socket volume を agent に read-only mount し、Docker API の利用権限があること自体は read-only mount では制限できない旨を明記する。host filesystem を DinD に mount しない。
 
@@ -87,18 +95,20 @@ DinD に外向き proxy は付けない。イメージはホストで取得し�
 - `.devcontainer/devcontainer.json`、`compose.yaml`、`Dockerfile`: agent と sidecar の起動構成。
 - `.devcontainer/entrypoint.sh`、`init-firewall.sh`、`managed-settings.json`: firewall、CA、bridge、Bash sandbox の初期化。
 - `proxy/Dockerfile`、`proxy/addon.py`、`proxy/entrypoint.sh`: 通信制御と CA の公開証明書の配布。
-- `scripts/prepare.sh`: bridge の取得・検証とホスト側の起動準備。秘密の値は表示しない。
+- `scripts/prepare.sh`: 同梱 bridge の検証とホスト側の起動準備。秘密の値は表示しない。
 - `tests/`: addon の単体テスト、実 mitmproxy の通信試験、Docker が必要な構成試験。
-- `README.md`: 起動、認証ファイルの配置、image 投入、利用上の制限、検証の実行方法。
+- `scripts/inject-credentials.py`: workspace/config label、Compose project/service label、workspace mount を照合し、起動済み環境の完了を待ち、認証をproxyへ注入して終了する。
+- `README.md`: 認証なしの起動、環境変数での認証入力、Claudeの利用、終了。詳細な検証は `docs/testing.md` に置く。
 
 ## 検証と完了条件
 
 1. addon の単体試験で、正常な REST / GraphQL / Git / Messages、攻撃者の認証値の上書き、重複 header、URL の曖昧性、未許可 endpoint、Anthropic の server tool を検証する。
 2. 実 mitmproxy と模擬 HTTPS upstream で、upstream が正規の認証値しか受け取らないこと、拒否要求では接続・DNS が発生しないこと、TLS 検証が働くことを検証する。
 3. agent から proxy 無視、生 TLS、別ポート、SOCKS、DNS、IPv6、ホスト宛て接続で迂回できないことを検証する。proxy 停止時にも直通しないことを確認する。
+   Claude Code の Bash sandbox 外からも同じ拒否を検証する。VS Code で人間が起動したビルドを想定し、ビルド設定から起動する模擬プロセスの Messages API 経由の第三者送信が upstream への転送前に拒否されることを確認する。
 4. rootless DinD で Docker API、image load、コンテナ実行、公開 TCP ポートを検証する。別 network namespace と実 Claude Code の Bash sandbox の双方から確認する。DinD 内部からの外向き通信拒否も検証する。
 5. 実 GitHub に対する送信先制限は、専用の正規・非正規 repo と限定 PAT を用意できる場合に検証する。REST と GraphQL の非正規 repo への書込みが拒否されることを確認する。模擬 API の試験だけで GitHub 側の認可を実測済みと扱わない。
-6. README に実行できた試験と未検証の条件を記載する。必要な実機試験が未実施なら「A1b ◎ を実証した」とは記載しない。
+6. `docs/testing.md` に実行できた試験と未検証の条件を記載し、README からリンクする。必要な実機試験が未実施なら「A1b ◎ を実証した」とは記載しない。
 
 ホスト設定・hook を含む B2a 全体の ◎ 化、本番や CI の B1 対策、全ファイルの secret masking は今回の範囲に含めない。作業ツリーは編集可能なので、成果物をホストで実行する前にはレビューが必要になる。
 
@@ -115,7 +125,7 @@ proxy を agent と別のサービスに置けば、agent が環境変数や持�
 
 ## 参照
 
-- `../nix-agent-sandbox` commit `adb34bdd4b58d7f018781bc2be26aeb49068b755` の threat model、構成例、`contrib/dind-bridge/README.md`、`src/docker/mitmproxy/nas_addon.py`。
+- `../nix-agent-sandbox` の threat model、構成例、`src/docker/mitmproxy/nas_addon.py`。
 - [GitHub: GraphQL の認証と fine-grained PAT](https://docs.github.com/en/graphql/guides/forming-calls-with-graphql)
 - [mitmproxy: options](https://docs.mitmproxy.org/stable/concepts/options/)
 - [Claude Code: sandboxing](https://code.claude.com/docs/en/sandboxing)

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.superpowers/
+.env
+.env.*
+/images.tar
+/images/*.tar
