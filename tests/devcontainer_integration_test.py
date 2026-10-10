@@ -17,6 +17,8 @@ from proxy_integration_test import ROOT, PROXY_IMAGE, docker, fixtures
 
 CORE = ROOT / '.devcontainer/claude'
 AGENT_IMAGE = os.environ.get('AGENT_TEST_IMAGE', 'claude-devcontainer-agent:task2')
+SUMI_IMAGE = os.environ.get('SUMI_TEST_IMAGE', 'claude-devcontainer-sumi:task2')
+SECRET = 'Tr0ub4dor-fixture'
 # The same settings as .devcontainer/.env; AGENT_IMAGE must be built with this UID/GID.
 AGENT_UID = os.environ.get('CLAUDE_DEVCONTAINER_UID', '1000')
 AGENT_GID = os.environ.get('CLAUDE_DEVCONTAINER_GID', '1000')
@@ -28,7 +30,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         docker('info')
-        docker('image', 'inspect', AGENT_IMAGE, PROXY_IMAGE, 'busybox:1.37', 'testcontainers/ryuk:0.14.0')
+        docker('image', 'inspect', AGENT_IMAGE, PROXY_IMAGE, SUMI_IMAGE, 'busybox:1.37', 'testcontainers/ryuk:0.14.0')
         cls.project = 'cdc-integration-' + uuid.uuid4().hex[:12]
         cls.directory = Path(tempfile.mkdtemp(prefix='cdc-integration-'))
         cls.addClassCleanup(shutil.rmtree, cls.directory)
@@ -40,6 +42,14 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
         # Every test here but the credentials ones relies on Docker.
         cls.env.update(CLAUDE_DEVCONTAINER_DIND='1')
+        # The sumi service reads a secrets file outside the workspace, under a
+        # name other than the default. Not in cls.directory, which the agent mounts.
+        sumi = Path(tempfile.mkdtemp(prefix='cdc-sumi-'))
+        cls.addClassCleanup(shutil.rmtree, sumi)
+        (sumi / 'list.txt').write_text(SECRET + '\n')
+        (sumi / 'list.txt').chmod(0o600)
+        cls.env.update(CLAUDE_DEVCONTAINER_SUMI='1', CLAUDE_DEVCONTAINER_SUMI_DIR=str(sumi),
+                       CLAUDE_DEVCONTAINER_SUMI_FILE='list.txt')
         # initializeCommand copies the Claude Code configuration; never the developer's own.
         claude = cls.directory / 'claude'
         (claude / 'skills/fixture').mkdir(parents=True)
@@ -103,6 +113,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         override.write_text(json.dumps({'services': {
             'agent': {'image': AGENT_IMAGE, 'volumes': [str(cls.directory) + ':/startup-fixture:ro'],
                       'entrypoint': ['/startup-fixture/entrypoint.sh']},
+            'sumi': {'image': SUMI_IMAGE},
             'proxy': {'image': PROXY_IMAGE, 'entrypoint': ['python', '/fixtures/proxy_server.py'],
                       'volumes': [str(cls.directory) + ':/fixtures:ro']}}}))
         config = cls.workspace / '.devcontainer/devcontainer.json'
@@ -296,6 +307,23 @@ echo nested-network-blocked
     def test_actual_claude_bash_uses_docker(self):
         result = self.exec('python3', '/workspace/tests/fixtures/claude_probe.py', environment={'FIXTURE_PORT': self.port})
         self.assertIn('actual-claude-docker-ok', result.stdout)
+
+    def test_actual_claude_sees_secrets_masked(self):
+        self.exec('sh', '-c', f'echo db.password={SECRET} > /tmp/app.properties')
+        # --bare and no setting sources: the managed hooks and shell still mask.
+        result = self.exec('python3', '/workspace/tests/fixtures/claude_probe.py', environment={
+            'PROBE_COMMAND': 'cat /tmp/app.properties', 'PROBE_EXPECT': 'db.password=' + '*' * len(SECRET),
+            'PROBE_FORBID': SECRET, 'PROBE_DONE': 'actual-claude-sumi-ok'})
+        self.assertIn('actual-claude-sumi-ok', result.stdout)
+
+    def test_agent_can_neither_read_the_secrets_nor_replace_the_broker(self):
+        probe = ('set -u; test -S /run/sumi/mask.sock || { echo no-socket; exit 1; }; '
+                 'for op in "rm -f /run/sumi/mask.sock" "touch /run/sumi/x" "rm -f /etc/claude-code/managed-settings.d/90-sumi.json"; do '
+                 'if sh -c "$op" 2>/dev/null; then echo "writable: $op"; exit 1; fi; done; '
+                 f'found=$(grep -rlsI -D skip {SECRET} / --exclude-dir=proc --exclude-dir=sys --exclude-dir=tmp --exclude-dir=workspace); '
+                 'if [ -n "$found" ]; then echo "found in: $found"; exit 1; fi; echo isolated-ok')
+        result = self.exec('sh', '-c', probe, check=False)
+        self.assertIn('isolated-ok', result.stdout, result.stdout + result.stderr)
 
     def test_actual_testcontainers_and_ryuk_cleanup(self):
         source = os.environ.get('TESTCONTAINERS_NODE_MODULES')

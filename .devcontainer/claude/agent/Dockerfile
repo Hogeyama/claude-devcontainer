@@ -1,3 +1,16 @@
+# sumi masks secrets in what Claude's tools return (CLAUDE_DEVCONTAINER_SUMI in
+# compose.yaml). Its broker and the agent must run the same version.
+FROM scratch AS sumi-amd64
+ADD --chmod=755 --checksum=sha256:43d89c297e8381adac12d2fcc6280bccd99f8386fddce35d13bb4e6aa687f5ed \
+    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-x86_64-linux /sumi
+FROM scratch AS sumi-arm64
+ADD --chmod=755 --checksum=sha256:65f462ffa1831bb3e8b5f13198d5ef82d50d82bc0e6177dd824404d5bc3180f8 \
+    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-aarch64-linux /sumi
+FROM sumi-${TARGETARCH} AS sumi
+# The sumi service: the broker, which alone reads the secrets file.
+FROM scratch AS sumi-serve
+COPY --from=sumi /sumi /sumi
+ENTRYPOINT ["/sumi", "serve"]
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
 # Only agent-setup.sh from the workspace's .devcontainer/, if there is one. A
 # mount of the whole directory would rerun the setup whenever any file in it
@@ -37,6 +50,11 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
 RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
+# The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
+COPY --from=sumi /sumi /usr/local/bin/sumi
+RUN sumi init --agent claude --server /run/sumi/mask.sock --shell /bin/bash --settings /tmp/sumi/settings.json \
+    && install -D -m 644 /tmp/sumi/settings.json /usr/local/share/claude-devcontainer/sumi-settings.json \
+    && rm -rf /tmp/sumi
 # With an OAuth token, an unfinished onboarding makes the CLI check
 # platform.claude.com, which the proxy does not allow, and refuse to start.
 # /workspace is trusted up front: the container and the proxy are the

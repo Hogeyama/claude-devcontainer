@@ -35,13 +35,15 @@ GitHubの書込み制限を実サービスで検証するには、専用の許�
 
 テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。subnetが重ならないよう、通常利用中の本環境は先に停止するか、`CLAUDE_DEVCONTAINER_PROXY_NET`と`CLAUDE_DEVCONTAINER_DIND_NET`を環境変数で別の値にしてください。`CLAUDE_DEVCONTAINER_UID`と`CLAUDE_DEVCONTAINER_GID`も同様に指定でき、その場合は下のagent imageも同じ値の`--build-arg AGENT_UID=… --build-arg AGENT_GID=…`でビルドしてください。
 
-`AGENT_TEST_IMAGE`と`PROXY_TEST_IMAGE`でテスト用imageのタグを変更できます。全体試験には実際の`devcontainer`コマンドが必要です。別のCLI起動方法を使う場合は、`DEVCONTAINER_TEST_CLI`にコマンドを指定してください。テストは作業ツリーを一時領域へコピーし、CLIのuser-data-folderも専用領域に置きます。Dockerを使う試験を明示的に選んだのにdaemonが使えない場合はエラーになります。
+`AGENT_TEST_IMAGE`、`PROXY_TEST_IMAGE`、`SUMI_TEST_IMAGE`でテスト用imageのタグを変更できます。全体試験には実際の`devcontainer`コマンドが必要です。別のCLI起動方法を使う場合は、`DEVCONTAINER_TEST_CLI`にコマンドを指定してください。テストは作業ツリーを一時領域へコピーし、CLIのuser-data-folderも専用領域に置きます。Dockerを使う試験を明示的に選んだのにdaemonが使えない場合はエラーになります。
 
 ### 準備
 
 ```sh
 docker build -t claude-devcontainer-proxy:task1 .devcontainer/claude/proxy
 docker build -t claude-devcontainer-agent:task2 --build-context workspace-config=.devcontainer \
+  -f .devcontainer/claude/agent/Dockerfile .devcontainer/claude
+docker build -t claude-devcontainer-sumi:task2 --target sumi-serve --build-context workspace-config=.devcontainer \
   -f .devcontainer/claude/agent/Dockerfile .devcontainer/claude
 # 実 Testcontainers 12.1.0 の依存を準備
 sdk_dir=$(mktemp -d /tmp/cdc-sdk.XXXXXX)
@@ -78,7 +80,7 @@ RUN_DOCKER_TESTS=1 TESTCONTAINERS_NODE_MODULES="$sdk_dir/node_modules" \
 
 ### DinDとnixのフラグを検証する
 
-Dev Containersの全体試験は、試験スクリプトがDinDを有効にして実行します。実行時は`CLAUDE_DEVCONTAINER_NIX=0`にしてください。Bashの起動試験は、nix有効・無効の両方で、非対話・対話・login shellと、VS Codeと同じくユーザーの`.bashrc`だけを読む経路を確認します。
+Dev Containersの全体試験は、試験スクリプトがDinDとsumiを有効にして実行します。実行時は`CLAUDE_DEVCONTAINER_NIX=0`にしてください。Bashの起動試験は、nix有効・無効の両方で、非対話・対話・login shellと、VS Codeと同じくユーザーの`.bashrc`だけを読む経路を確認します。
 
 実際のnixのdev shellとフラグの切替えは、以下の手順で手動確認してください。ホストにnixが必要です。
 

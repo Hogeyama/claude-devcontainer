@@ -6,6 +6,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('copy_host_config', ROOT / '.devcontainer/claude/scripts/copy-host-config.py')
@@ -62,6 +63,46 @@ class ArchiveTest(unittest.TestCase):
         members = self.members()
         self.assertEqual({name for name in members if not name.startswith('.claude/skills')},
                          {'.claude/settings.json', '.claude/hook.sh'})
+
+    def test_drops_the_hosts_sumi_hooks_and_shell(self):
+        sumi = {'type': 'command', 'command': '/home/me/.local/bin/sumi',
+                'args': ['hook', '--agent', 'claude', 'post-tool', '--secrets-file', '/home/me/.claude/sumi/secrets.txt']}
+        other = {'type': 'command', 'command': 'notify-send done'}
+        self.settings({
+            'hooks': {'PostToolUse': [{'hooks': [sumi]}],
+                      'UserPromptSubmit': [{'hooks': [dict(sumi, args=['hook', '--agent', 'claude', 'prompt'])]}],
+                      'Stop': [{'hooks': [sumi, other]}]},
+            'env': {'KEEP': '1', 'CLAUDE_CODE_SHELL': '/nix/store/x-bash/bin/bash',
+                    'CLAUDE_CODE_SHELL_PREFIX': "/bin/bash -c 'exec \"$@\"' 'sumi-prefix' '/home/me/.local/bin/sumi' 'run'"}})
+        (self.source / 'sumi').mkdir()
+        (self.source / 'sumi/secrets.txt').write_text('Tr0ub4dor')
+        members = self.members()
+        self.assertEqual(json.loads(members['.claude/settings.json']),
+                         {'hooks': {'Stop': [{'hooks': [other]}]}, 'env': {'KEEP': '1'}})
+        self.assertFalse([name for name in members if 'sumi' in name])
+
+    def test_never_copies_sumi_secrets_even_when_named(self):
+        (self.source / 'sumi').mkdir()
+        (self.source / 'sumi/secrets.txt').write_text('Tr0ub4dor')
+        self.settings({'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': 'cat ~/.claude/sumi/secrets.txt'}]}]}})
+        self.extra.mkdir()
+        (self.extra / '.claude').symlink_to(self.source)
+        self.assertFalse([name for name in self.members() if 'sumi' in name])
+
+    def test_never_copies_the_secrets_files_sumi_uses_wherever_they_are(self):
+        (self.source / 'keys').mkdir()
+        for name in ('host.txt', 'container.txt', 'prefix.txt', 'other.txt'):
+            (self.source / 'keys' / name).write_text(name)
+        self.settings({
+            'hooks': {'PostToolUse': [{'hooks': [{'type': 'command', 'command': '/opt/sumi',
+                                                  'args': ['hook', '--secrets-file', str(self.source / 'keys/host.txt')]}]}]},
+            'env': {'CLAUDE_CODE_SHELL_PREFIX': f"bash -c 'exec \"$@\"' p /opt/sumi run --secrets-file {self.source}/keys/prefix.txt"}})
+        self.extra.mkdir()
+        (self.extra / '.claude').symlink_to(self.source)
+        with mock.patch.dict('os.environ', CLAUDE_DEVCONTAINER_SUMI_DIR=str(self.source / 'keys'),
+                             CLAUDE_DEVCONTAINER_SUMI_FILE='container.txt'):
+            members = self.members()
+        self.assertEqual({name for name in members if name.startswith('.claude/keys/')}, {'.claude/keys/other.txt'})
 
     def test_extra_overlays_the_home_directory(self):
         self.settings({'model': 'opus'})

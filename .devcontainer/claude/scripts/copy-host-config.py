@@ -23,6 +23,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -36,14 +37,18 @@ LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / '
 # Configuration, not state. An allowlist, because ~/.claude also holds
 # credentials and history, and new kinds of state appear with new versions.
 ENTRIES = ('settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
-# Never copied, even when a command names it or EXTRA links to all of ~/.claude.
-SECRETS = ('.claude/.credentials.json',)
+# Never copied, nor anything under them, even when a command names it or EXTRA
+# links to all of ~/.claude. sumi/ is where sumi's README keeps secrets.txt; the
+# secrets files actually in use are found by secrets_files().
+SECRETS = ('.claude/.credentials.json', '.claude/sumi')
 TARGET = '/home/node'
 MANAGED = '/etc/claude-code/managed-settings.d/50-host.json'
 # The agent's postStartCommand waits for this.
 MARKER = '/run/claude-devcontainer/host-config-copied'
 WAIT_SECONDS = 60
 REFERENCE = re.compile(r'(?:~|\$HOME|\$\{HOME\})/\.claude/([^\s\'"`;|&<>()]+)')
+# A command that runs sumi, as `sumi init` writes it on the host.
+SUMI = re.compile(r'(?:^|[/\s\'"])sumi(?:$|[\s\'"])')
 
 
 def referenced(settings):
@@ -69,35 +74,115 @@ def referenced(settings):
     return sorted(paths)
 
 
+def setting(name, default):
+    """Return a setting from the environment, else from .devcontainer/.env, as compose reads it."""
+    value = os.environ.get(name, '')
+    if not value:
+        try:
+            for line in (ROOT / '.devcontainer/.env').read_text().splitlines():
+                key, _, rest = line.partition('=')
+                if key.strip() == name:
+                    value = rest.strip().strip('"\'')
+        except OSError:
+            pass
+    return value or default
+
+
+def secrets_files(settings):
+    """Return the secrets files sumi reads, on the host and for the container, resolved."""
+    commands = []
+    for groups in (settings.get('hooks') or {}).values():
+        for group in groups if isinstance(groups, list) else ():
+            for hook in group.get('hooks', ()) if isinstance(group, dict) else ():
+                if isinstance(hook, dict) and SUMI.search(str(hook.get('command', ''))):
+                    args = hook.get('args')
+                    commands.append([str(arg) for arg in args] if isinstance(args, list) else str(hook['command']))
+    commands.append(str((settings.get('env') or {}).get('CLAUDE_CODE_SHELL_PREFIX', '')))
+    files = [Path(setting('CLAUDE_DEVCONTAINER_SUMI_DIR', str(Path.home() / '.claude/sumi')))
+             / setting('CLAUDE_DEVCONTAINER_SUMI_FILE', 'secrets.txt')]
+    for command in commands:
+        try:
+            words = command if isinstance(command, list) else shlex.split(command)
+        except ValueError:
+            continue
+        for word, following in zip(words, words[1:] + ['']):
+            if word == '--secrets-file' and following:
+                files.append(Path(following))
+            elif word.startswith('--secrets-file='):
+                files.append(Path(word.partition('=')[2]))
+    return frozenset(path.expanduser().resolve() for path in files)
+
+
+def without_sumi(settings):
+    """Remove the host's sumi hooks and shell, whose paths only exist on the host.
+
+    CLAUDE_DEVCONTAINER_SUMI=1 brings the container's own; a broken copy of the
+    host's would refuse every tool result.
+    """
+    hooks = settings.get('hooks')
+    if isinstance(hooks, dict):
+        for event, groups in list(hooks.items()):
+            if not isinstance(groups, list):
+                continue
+            kept = []
+            for group in groups:
+                if isinstance(group, dict) and isinstance(group.get('hooks'), list):
+                    group['hooks'] = [hook for hook in group['hooks'] if not (
+                        isinstance(hook, dict) and SUMI.search(str(hook.get('command', ''))))]
+                    if not group['hooks']:
+                        continue
+                kept.append(group)
+            if kept:
+                hooks[event] = kept
+            else:
+                del hooks[event]
+    env = settings.get('env')
+    if isinstance(env, dict) and SUMI.search(str(env.get('CLAUDE_CODE_SHELL_PREFIX', ''))):
+        del env['CLAUDE_CODE_SHELL_PREFIX']
+        env.pop('CLAUDE_CODE_SHELL', None)
+    return settings
+
+
 def archive(source=SOURCE, extra=EXTRA):
     """Return a tar of the configuration to extract into the agent's home."""
-    names = [Path(name) for name in ENTRIES]
+    names = [Path(name) for name in ENTRIES if name != 'settings.json']
+    excluded = secrets_files({})
     try:
-        names += referenced(json.loads((source / 'settings.json').read_text()))
-    except (OSError, ValueError, AttributeError):
-        pass  # No settings, or not a JSON object: nothing more to copy.
+        settings = json.loads((source / 'settings.json').read_text())
+        names += referenced(settings)
+        excluded = secrets_files(settings)
+        settings = json.dumps(without_sumi(settings), indent=2).encode()
+    except OSError:
+        settings = None
+    except (ValueError, AttributeError):
+        # Not a JSON object: copy it as it is, for Claude Code to report.
+        settings = (source / 'settings.json').read_bytes()
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w', dereference=True) as tar:
+        if settings is not None:
+            info = tarfile.TarInfo('.claude/settings.json')
+            info.size, info.mode = len(settings), 0o600
+            tar.addfile(info, io.BytesIO(settings))
         for name in names:
-            add(tar, source / name, '.claude/' + str(name))
+            add(tar, source / name, '.claude/' + str(name), excluded=excluded)
         # Later members overwrite earlier ones on extraction.
         if extra.is_dir():
             for path in sorted(extra.iterdir()):
-                add(tar, path, path.name)
+                add(tar, path, path.name, excluded=excluded)
     return buffer.getvalue()
 
 
-def add(tar, path, name, parents=()):
+def add(tar, path, name, parents=(), excluded=frozenset()):
     """Add path, following links, and skip what cannot be read instead of failing."""
-    if name in SECRETS:
+    if name in SECRETS or name.startswith(tuple(secret + '/' for secret in SECRETS)):
         return
     try:
         info = tar.gettarinfo(path, name)
         real = path.resolve()
     except OSError:
         return  # Missing, or a dangling link.
-    if info is None or real in parents:
-        return  # A socket or the like, or a link back to a directory being added.
+    if info is None or real in parents or real in excluded:
+        return  # A socket or the like, a link back to a directory being added, or secrets.
     # The agent extracts as node; keep the host's names out of the archive.
     info.uid = info.gid = 0
     info.uname = info.gname = ''
@@ -110,7 +195,7 @@ def add(tar, path, name, parents=()):
         except OSError:
             return
         for child in children:
-            add(tar, child, name + '/' + child.name, (*parents, real))
+            add(tar, child, name + '/' + child.name, (*parents, real), excluded)
     elif info.isfile():
         try:
             with path.open('rb') as content:

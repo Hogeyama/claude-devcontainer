@@ -8,7 +8,10 @@ import tempfile
 import threading
 
 requests = []
-command = 'bash /workspace/tests/fixtures/bridge_probe.sh'
+# The Bash command for Claude to run, and what its result must and must not contain.
+command = os.environ.get('PROBE_COMMAND', 'bash /workspace/tests/fixtures/bridge_probe.sh')
+expected = os.environ.get('PROBE_EXPECT', 'bridge-probe-ok')
+forbidden = os.environ.get('PROBE_FORBID')
 
 def sse(tool):
     base = {'id': 'msg_fixture', 'type': 'message', 'role': 'assistant', 'model': 'claude-sonnet-4-5',
@@ -52,8 +55,9 @@ with tempfile.TemporaryDirectory(prefix='claude-synthetic-') as temporary:
         results = [block for body in requests for message in body.get('messages', [])
                    for block in (message['content'] if isinstance(message['content'], list) else []) if block.get('type') == 'tool_result']
         assert results, (result.stdout, result.stderr)
-        successful = [block for block in results if not block.get('is_error', False) and 'bridge-probe-ok' in json.dumps(block)]
+        successful = [block for block in results if not block.get('is_error', False) and expected in json.dumps(block)]
         assert successful, results
-        print('actual-claude-docker-ok')
+        assert not forbidden or forbidden not in json.dumps(requests), results
+        print(os.environ.get('PROBE_DONE', 'actual-claude-docker-ok'))
     finally:
         server.shutdown()

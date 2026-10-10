@@ -31,6 +31,7 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
   - `git remote add`, repository-level `git config`, new hooks, and adding or updating submodules are impossible.
 - Committing, creating branches, and pushing work.
 - The working directory `/workspace` is the repository root. `git worktree` is not supported.
+- If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte. This is deliberate. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
 
 ## Docker (DinD)
 

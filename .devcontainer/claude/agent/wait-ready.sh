@@ -6,6 +6,12 @@ dind=${CLAUDE_DEVCONTAINER_DIND:-0}
 if [ "$dind" = 1 ]; then
     timeout 60 sh -c 'until docker info >/dev/null 2>&1; do sleep 0.2; done'
 fi
+# Until the broker listens, the sumi hooks refuse every tool result.
+if [ "${CLAUDE_DEVCONTAINER_SUMI:-0}" = 1 ] &&
+    ! timeout 30 sh -c 'until [ -S /run/sumi/mask.sock ]; do sleep 0.2; done'; then
+    echo "warning: the sumi service is not running; tools fail until it does." \
+        "Check: docker compose logs sumi" >&2
+fi
 # initializeCommand copies the host's configuration in once this container
 # starts (scripts/copy-host-config.py).
 markers=/run/claude-devcontainer

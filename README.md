@@ -196,6 +196,39 @@ CLAUDE_DEVCONTAINER_NIX_SHELL=devShells.x86_64-linux.foo
 
 起動スクリプトは、書き出したdev shellを`.devcontainer/.nix-env/`に保存し、Gitの管理対象から自動で除外します。
 
+### シークレットをマスクする
+
+[sumi](https://github.com/Hogeyama/nix-agent-sandbox/tree/main/contrib/sumi)を使うと、`Read`や`Bash`などのツールが返す内容から、指定した値を`*`に置き換えてからClaudeに渡せます。
+`.env`や`application.properties`のように、作業ツリーにシークレットが書かれている場合に使います。
+
+ホストにシークレットファイルを作り、1行に1つ値を書いてください。書き方の詳細はsumiのREADMEを参照してください。
+
+```sh
+mkdir -p ~/.claude/sumi
+[ -e ~/.claude/sumi/secrets.txt ] || install -m 600 /dev/null ~/.claude/sumi/secrets.txt
+${EDITOR:-vi} ~/.claude/sumi/secrets.txt
+```
+
+`.devcontainer/.env`に以下の設定を書いて有効にしてください。
+
+```sh
+CLAUDE_DEVCONTAINER_SUMI=1
+# シークレットファイルのあるディレクトリと、その中のファイル名。既定は~/.claude/sumiとsecrets.txt
+CLAUDE_DEVCONTAINER_SUMI_DIR=/home/me/secrets
+CLAUDE_DEVCONTAINER_SUMI_FILE=sumi.txt
+```
+
+シークレットファイルを読むのは、`sumi`サービスのコンテナだけです。Composeの設定により、このコンテナにはディレクトリが読み取り専用でmountされ、ネットワークは無効になります。
+agentにはmountされないので、エージェントはファイル自体を読めません。agentのhookとBashは、読み取り専用で共有したUnixソケット越しにマスクを依頼します。
+agentの起動処理がhookをmanaged settingsに配置するので、エージェントが外すことはできません。
+
+- ファイルを編集すると、次のツール実行から新しい内容が使われます。再起動は不要です。
+- 利用者がホスト側で、シークレットファイルの権限を0600にし、所有者のUIDを`CLAUDE_DEVCONTAINER_UID`（既定は1000）に合わせてください。ツールは権限や所有者を自動変更しません。
+- 設定のコピースクリプトは、ホストで`sumi init`を実行していても、そのhookをコンテナにコピーしません。ホストのパスを指していて、コンテナでは動かないからです。このスクリプトは、シークレットファイルも置き場所によらずコピー対象から除外します。
+
+> [!WARNING]
+> sumiはツールの出力を書き換えるだけで、隔離の仕組みではありません。`CLAUDE.md`のようにhookを通らずに読まれる内容や、エンコードされた値は伏せられません。エージェントがマスクの結果から値を推測することも防げません。詳しくはsumiのREADMEの「リミテーション」を参照してください。
+
 ### UIDとネットワークを変える
 
 `.devcontainer/.env`に以下の設定を書いてください。書かなかった項目は既定値になります。

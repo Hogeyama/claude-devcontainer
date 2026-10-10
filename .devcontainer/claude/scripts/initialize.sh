@@ -21,6 +21,15 @@ setting() {
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND 0)
 
+# compose.yaml mounts the directory into the sumi service, which reads the file.
+if [ "$(setting CLAUDE_DEVCONTAINER_SUMI 0)" = 1 ]; then
+    secrets="$(setting CLAUDE_DEVCONTAINER_SUMI_DIR "$HOME/.claude/sumi")/$(setting CLAUDE_DEVCONTAINER_SUMI_FILE secrets.txt)"
+    if [ ! -f "$secrets" ]; then
+        echo "error: CLAUDE_DEVCONTAINER_SUMI=1 needs $secrets, one secret per line, with mode 0600." >&2
+        exit 1
+    fi
+fi
+
 # Export the flake's dev shell for the agent's bash to load from the read-only
 # .devcontainer/. Evaluate a commit rather than the working tree, which the
 # agent writes: evaluating fetches inputs and builds on the host, outside the
