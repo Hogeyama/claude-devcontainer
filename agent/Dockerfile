@@ -1,11 +1,17 @@
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates openssl git gh curl ripgrep python3 bubblewrap socat iptables \
+    ca-certificates openssl git gh curl jq ripgrep python3 bubblewrap socat iptables \
     util-linux procps \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code@2.1.295 \
     && npm cache clean --force
+# The workspace's owner on the host (CLAUDE_DEVCONTAINER_UID/GID in compose.yaml).
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+RUN if [ "$AGENT_UID" -le 0 ]; then echo "error: CLAUDE_DEVCONTAINER_UID must be positive." >&2; exit 1; fi \
+    && groupmod -o -g "$AGENT_GID" node \
+    && usermod -o -u "$AGENT_UID" -g "$AGENT_GID" node
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 COPY dind-bridge/src/ /opt/dind-bridge/
@@ -18,14 +24,21 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
          > /etc/dind-bridge/env.sh \
     && install -d -m 700 -o node -g node /run/dind-bridge \
     && install -d -o node -g node /workspace \
+    # The claude-projects volume copies this owner when it is first created.
+    && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
     # .git/config is read-only (see compose.yaml); do not try to record upstreams.
-    && git config --system branch.autoSetupMerge false
+    && git config --system branch.autoSetupMerge false \
+    # The dev shell initializeCommand exports when CLAUDE_DEVCONTAINER_NIX=1.
+    && printf '%s\n' \
+         'if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /workspace/.devcontainer/.nix-env/env.rc ]; then' \
+         '    . /workspace/.devcontainer/.nix-env/env.rc' \
+         'fi' >>/etc/bash.bashrc
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
-COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh /usr/local/bin/
+COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh /usr/local/bin/
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
     CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \

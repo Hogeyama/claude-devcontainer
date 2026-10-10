@@ -1,0 +1,5 @@
+# Images to load into DinD, one per line as name:tag. The host pulls the ones it
+# lacks on `devcontainer up` and copies them in; DinD cannot reach a registry.
+# Testcontainers also needs the Ryuk image of the version your library uses.
+# testcontainers/ryuk:0.14.0
+# postgres:16
