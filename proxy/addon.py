@@ -13,7 +13,7 @@ HOSTS = {'api.github.com', 'github.com', 'api.anthropic.com'}
 MAX_BODY = 8 * 1024 * 1024
 # Claude Code's startup connectivity check.
 HELLO = ('api.anthropic.com', '/api/hello')
-NO_CREDENTIALS = 'no credentials; run ./scripts/inject-credentials.py on the host'
+NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
 # Everything else, including any client-supplied credential, is dropped.
 SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-length',
                 'transfer-encoding', 'user-agent', 'git-protocol', 'if-match', 'if-none-match',
