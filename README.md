@@ -150,9 +150,4 @@ devcontainer up --remove-existing-container
 
 `.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れていますが、このリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`の雛形から始めてください。検証手順は[確認した範囲と検証手順](docs/testing.md)にあります。
 
-コアを変更したら、`dist`ブランチを更新して公開します。
-
-```sh
-git subtree split --prefix=.devcontainer/claude -b dist
-git push origin dist
-```
+`main`へpushすると、GitHub Actions（[`.github/workflows/dist.yml`](.github/workflows/dist.yml)）が[`scripts/build-dist.sh`](scripts/build-dist.sh)で`dist`ブランチを作り直してpushします。`dist`には、`.devcontainer/claude`を変更した`main`のコミットごとに1つずつコミットがあり、その中身は`.devcontainer/claude`と、元の`main`のコミットのURLを書いた`UPSTREAM`ファイルです。`dist`は手で変更しないでください。作り直すと同じコミットが再現されるので、`dist`は常にfast-forwardで進みます。
