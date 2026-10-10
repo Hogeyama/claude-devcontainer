@@ -30,9 +30,19 @@ agentの起動処理はfirewallとCAを設定してからUID 1000へ切り替え
 
 Claudeのmanaged settingsでは、Bash sandboxを有効にしています。sandboxを利用できない場合は失敗し、sandbox外でのコマンド実行は許可しません。設定値は`enabled`、`failIfUnavailable`、`allowUnsandboxedCommands=false`、`enableWeakerNestedSandbox=true`です。
 
+managed settingsではWebSearchも禁止しています。検索結果は`api.anthropic.com`の応答としてモデルに届くので、取得元を通信の検査では判定できず、未信頼のWebページの内容が入り込むためです。サーバー側のtoolはproxyでも拒否しているので、この禁止は重ねがけです。
+
 rootless DinDはprivilegedコンテナで動かします。同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentへ中継します。
 
 agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの操作権限を読取り専用にはしません。ホストのDocker socketは共有しません。
+
+## 起動設定の保護
+
+`.devcontainer/`はagentへread-onlyでmountします。ここにはホストが実行・ビルドするもの（compose設定、proxyの通信ルール、`initializeCommand`、認証情報の注入スクリプト、`agent-setup.sh`）があり、agentが書き換えると、次に起動したときに通信の制限を外したり、ホストで認証情報を盗んだりできるためです。
+
+read-onlyにしても、agentはGitの操作で`.devcontainer/`を変更したコミットを作れます。作業ツリーを書き換えずにコミットやブランチを作れるためです。agentが作ったコミットをホストでcheckoutやmergeする前に、`.devcontainer/`の差分がないことを確認してください。
+
+`.git/hooks`や`.git/config`など、ホストのGitが実行・参照する設定は保護していません。
 
 ## 保護の対象外
 
@@ -44,7 +54,7 @@ VS Codeから使う場合には、エディタを通じたホスト認証の転�
 
 ## 通信ルールを変更する
 
-ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。稼働中のproxyへ作業ツリーはmountしないため、ファイルを編集するだけでは反映されません。
+ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。proxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
 
 追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、ホストで取り込んだリポジトリのルートで次を実行します。
 

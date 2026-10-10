@@ -174,6 +174,14 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         result = self.exec('python3', '/workspace/tests/fixtures/network_probe.py', self.host_ip, str(self.host_server.server_port))
         self.assertIn('direct-network-blocked', result.stdout)
 
+    def test_devcontainer_directory_is_read_only(self):
+        probe = ('set -u; cd /workspace/.devcontainer; '
+                 'for op in "touch new" "echo x >> claude/proxy/addon.py" "rm devcontainer.json" "mv claude moved"; do '
+                 'if sh -c "$op" 2>/dev/null; then echo "writable: $op"; exit 1; fi; done; '
+                 'touch /workspace/.write-check && rm /workspace/.write-check && echo read-only-ok')
+        result = self.exec('sh', '-c', probe, check=False)
+        self.assertIn('read-only-ok', result.stdout, result.stdout + result.stderr)
+
     def test_dind_bridge_and_host_network_cannot_egress(self):
         control = self.exec('docker', 'run', '--rm', 'busybox:1.37', 'sh', '-c',
                             'nc -l -p 18080 >/dev/null & pid=$!; sleep .1; echo ok | nc -w 1 127.0.0.1 18080; wait "$pid"')
