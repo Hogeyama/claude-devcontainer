@@ -9,6 +9,11 @@ the home directory (e.g. EXTRA/.gitconfig becomes ~/.gitconfig). Symbolic links
 are followed on the host, so they may point anywhere the host can read (e.g.
 /nix/store).
 
+The agent must not be able to drop the host's hooks or change what they run, so
+settings.json becomes a managed settings file, and the rest of ~/.claude is
+copied as root into a sticky directory (see compose.yaml). Claude Code runs
+managed hooks even with disableAllHooks or --bare.
+
 Without arguments, copy now. With --background, as the Dev Containers
 initializeCommand runs it before the containers start, archive now and hand the
 archive to a detached process that copies it once the agent is up.
@@ -34,6 +39,7 @@ ENTRIES = ('settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands', 'output
 # Never copied, even when a command names it or EXTRA links to all of ~/.claude.
 SECRETS = ('.claude/.credentials.json',)
 TARGET = '/home/node'
+MANAGED = '/etc/claude-code/managed-settings.d/50-host.json'
 # The agent's postStartCommand waits for this.
 MARKER = '/run/claude-devcontainer/host-config-copied'
 WAIT_SECONDS = 60
@@ -124,12 +130,43 @@ def find_agent():
     return agents[0].decode() if len(agents) == 1 else None
 
 
+# Run as root in the agent, with the archive on stdin and ENTRIES as arguments.
+COPY_SCRIPT = f'''set -eu
+staging=$(mktemp -d)
+tar -x -C "$staging" --no-same-owner
+if [ -f "$staging/.claude/settings.json" ]; then
+    install -m 644 "$staging/.claude/settings.json" {MANAGED}
+    rm "$staging/.claude/settings.json"
+else
+    rm -f {MANAGED}
+fi
+cd {TARGET}/.claude
+# Replace ENTRIES, so that what was removed on the host disappears here too.
+rm -rf -- "$@"
+if [ -d "$staging/.claude" ]; then
+    chmod -R a+rX,go-w "$staging/.claude"
+    for path in "$staging/.claude"/* "$staging/.claude"/.[!.]*; do
+        [ -e "$path" ] || continue
+        rm -rf -- "${{path##*/}}"
+        mv -- "$path" .
+    done
+    rmdir "$staging/.claude"
+fi
+# The rest of EXTRA lies outside ~/.claude and stays the agent's. Copy it as
+# node: root here lacks CAP_FOWNER, so it cannot update the agent's files.
+chown -R node:node "$staging"
+for path in "$staging"/* "$staging"/.[!.]*; do
+    [ -e "$path" ] && setpriv --reuid=node --regid=node --init-groups cp -a -- "$path" {TARGET}/
+done
+rm -rf "$staging"
+touch {MARKER}
+chown node:node {MARKER}
+'''
+
+
 def copy(agent, data):
-    script = ('set -eu; cd "$1"; shift; chmod -R u+w -- "$@" 2>/dev/null || true; rm -rf -- "$@"; '
-              'tar -x --no-same-owner; touch ' + MARKER)
-    # Replace ENTRIES, so that what was removed on the host disappears here too.
-    entries = ['.claude/' + name for name in ENTRIES]
-    docker('exec', '-i', '--user', 'node', agent, 'sh', '-c', script, 'sh', TARGET, *entries, data=data)
+    entries = [name for name in ENTRIES if name != 'settings.json']
+    docker('exec', '-i', '--user', '0', agent, 'sh', '-c', COPY_SCRIPT, 'sh', *entries, data=data)
 
 
 def wait_and_copy(data):

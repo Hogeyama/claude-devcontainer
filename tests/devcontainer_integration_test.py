@@ -196,6 +196,18 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         self.assertIn('fixture skill', result.stdout)
         self.assertIn('fixture-status', result.stdout)
         self.assertNotIn('.credentials.json', result.stdout)
+        self.assertNotIn('settings.json', result.stdout)
+        managed = json.loads(self.exec('cat', '/etc/claude-code/managed-settings.d/50-host.json').stdout)
+        self.assertEqual(managed['statusLine']['command'], 'sh ~/.claude/statusline.sh')
+
+    def test_agent_cannot_change_what_host_commands_run(self):
+        probe = ('set -u; cd ~/.claude; '
+                 'for op in "echo x >> statusline.sh" "rm -f statusline.sh" "mv statusline.sh moved" "mv skills moved" '
+                 '"mv ~/.claude ~/.claude-moved" "echo {} > /etc/claude-code/managed-settings.d/50-host.json"; do '
+                 'if sh -c "$op" 2>/dev/null; then echo "writable: $op"; exit 1; fi; done; '
+                 'echo {} > own.json && mv own.json settings.json && rm settings.json && echo protected-ok')
+        result = self.exec('sh', '-c', probe, check=False)
+        self.assertIn('protected-ok', result.stdout, result.stdout + result.stderr)
 
     def test_whole_container_direct_egress_dns_ipv6_host_blocked(self):
         result = self.exec('python3', '/workspace/tests/fixtures/network_probe.py', self.host_ip, str(self.host_server.server_port))

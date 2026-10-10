@@ -145,8 +145,12 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 
 `.credentials.json`、セッション履歴、`plugins/`などはコピーしません。
 
+`settings.json`はagentの`~/.claude`ではなく、managed settings（`/etc/claude-code/managed-settings.d/50-host.json`）として置きます。
+ほかの`~/.claude`のファイルはroot所有でコピーします。
+エージェントはこれらを書き換えられないので、ホストで設定したhookを外したり、hookが実行するスクリプトを差し替えたりできません。
+
 ほかのファイルは、`~/.config/claude-devcontainer/extra/`にホームディレクトリと同じ構成で置くと、agentのホームディレクトリへコピーされます。
-上の自動コピーの後に重ねるので、`extra/.claude/settings.json`を置けばホストの`settings.json`の代わりにそちらが使われます。
+`extra/.claude/settings.json`を置けばホストの`settings.json`の代わりにそちらが使われます。
 symlinkでも構いません。例:
 
 ```
@@ -159,7 +163,8 @@ ln -s ~/.config/git/config .config/git/config
 Gitの設定は自動ではコピーしません。credential helper、署名、deltaのようなpagerなど、コンテナでは動かない設定が混ざりやすいからです。ホストの設定をそのまま渡すか、コンテナ用に書いたファイルを置くかを選んでください。`extra/.claude/.credentials.json`はsymlinkで`~/.claude`ごと渡してもコピーしません。
 
 > [!NOTE]
-> - コピーはホストからコンテナへの一方向です。コンテナ内で`/config`などから変えた設定は、次の`up`で上書きされます。
+> - コピーはホストからコンテナへの一方向です。ホストの`settings.json`はmanaged settingsになるので、コンテナ内で`/config`などから変えた設定やプロジェクトの設定より優先されます。コンテナ用の値にしたい場合は、`extra/.claude/settings.json`を使ってください。
+> - agentの`~/.claude`はコンテナの再起動で消えます（セッション履歴の`projects/`は残ります）。コピーしたファイルはroot所有なので、hookのスクリプトが自分の隣にファイルを書く場合は失敗します。
 > - `settings.json`の`env`もそのままagentに見えます。秘密を書いている場合は、`extra/.claude/settings.json`でコンテナ用の設定を用意してください。
 > - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れます。
 > - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映できます。

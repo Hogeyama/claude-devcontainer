@@ -77,6 +77,11 @@ services:
     # restart clears them, so a stale one cannot end the wait early.
     tmpfs:
       - /run/claude-devcontainer:uid=${CLAUDE_DEVCONTAINER_UID:-1000},gid=${CLAUDE_DEVCONTAINER_GID:-1000},mode=0700,size=1m
+      # Root's, and sticky like /tmp: Claude Code creates and replaces its own
+      # files here, but cannot change or move the root-owned copies of the
+      # host's configuration (scripts/copy-host-config.py). Being a mount
+      # point, it cannot be moved aside as a whole either.
+      - /home/node/.claude:mode=1777
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20

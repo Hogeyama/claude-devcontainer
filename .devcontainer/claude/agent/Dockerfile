@@ -22,7 +22,8 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec
 COPY dind-bridge/src/ /opt/dind-bridge/
 RUN chmod 755 /opt/dind-bridge/main.mjs \
     && ln -s /opt/dind-bridge/main.mjs /usr/local/bin/dind-bridge \
-    && mkdir -p /etc/claude-code \
+    # The host's settings.json goes in managed-settings.d (scripts/copy-host-config.py).
+    && mkdir -p /etc/claude-code/managed-settings.d \
     && install -d -m 700 -o node -g node /run/dind-bridge \
     && install -d -o node -g node /workspace \
     # The claude-projects volume copies this owner when it is first created.
