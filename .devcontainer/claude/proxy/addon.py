@@ -32,9 +32,6 @@ HOSTS = set(ROUTES)
 # Code starts before they are injected.
 HELLO = ('api.anthropic.com', '/api/hello')
 
-# Anthropic request bodies, which check_messages inspects. A declared bound
-# lets mitmproxy buffer the body for inspection.
-MAX_BODY = 8 * 1024 * 1024
 # Top-level fields that make Anthropic's servers contact other hosts.
 DENIED_FIELDS = {'mcp_servers', 'container'}
 # Tools that run in the client. Any other type (web fetch, code execution, ...)
@@ -107,9 +104,8 @@ def check_request(req):
             and not {'.', '..'} & set(decoded.split('/')))
     require(any(method in (None, req.method) and re.fullmatch(pattern, path)
                 for method, pattern in ROUTES[req.host]))
-    if req.host == 'api.anthropic.com' and (req.host, path) != HELLO:
-        length = req.headers.get('content-length', '')
-        require(length.isdecimal() and int(length) <= MAX_BODY and 'transfer-encoding' not in req.headers)
+    if req.host == 'api.anthropic.com':
+        # check_messages reads the body as sent.
         require(req.headers.get('content-encoding', 'identity') == 'identity')
     return path
 
@@ -138,7 +134,7 @@ class PolicyAddon:
             except Exception:
                 self.deny(flow, NO_CREDENTIALS)
         # mitmproxy reads the whole body before sending a response, so close
-        # instead; except for Anthropic bodies, which check_request bounded, so
+        # instead; except for Anthropic bodies, which are read whole anyway, so
         # that Claude can show the reason.
         bounded = path is not None and req.host == 'api.anthropic.com'
         body = req.headers.get('content-length', '0') != '0' or 'transfer-encoding' in req.headers

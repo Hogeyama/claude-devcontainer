@@ -25,10 +25,9 @@ are denied while the stored snapshot is missing or malformed. The image runs as 
 The private CA stays in `/home/mitmproxy/.mitmproxy`; only its certificate is
 exported to `/public-ca/mitmproxy-ca-cert.pem`.
 
-Messages/token-count requests need a Content-Length of at most 8 MiB and no
-Content-Encoding, so that the body can be buffered and inspected; chunked
-requests are closed before buffering. The inspection rejects only the ways a
-request can make Anthropic's servers contact other hosts: `mcp_servers`,
+Anthropic requests need no Content-Encoding, so that Messages/token-count
+bodies can be buffered and inspected as sent. The inspection rejects only the
+ways a request can make Anthropic's servers contact other hosts: `mcp_servers`,
 `container`, server tools (any tool whose type is not `custom`), and URL or
 file sources in messages, the system prompt, and tool results. Other fields
 and beta headers pass, so new Claude Code features need no policy update; a
@@ -38,8 +37,8 @@ GitHub GraphQL bodies are opaque, including invalid syntax. GitHub's scoped
 PAT must enforce repository permissions. REST is limited to `/repos/...`,
 `GET /user`, and `POST /graphql`; Git smart HTTP uses `.git` repository URLs.
 Archive, LFS, release download hosts, and other endpoints are not supported.
-GitHub request bodies are buffered without an application size limit;
-responses stream without an 8 MiB cap. Deploy a memory limit for the proxy to
+Anthropic and GitHub request bodies are buffered without an application size
+limit; responses stream without a cap. Deploy a memory limit for the proxy to
 contain request-buffer exhaustion. WebSockets, plaintext upstream HTTP, and
 non-443 upstream ports are rejected. Denials are logged with method, host and
 path, but never the query.

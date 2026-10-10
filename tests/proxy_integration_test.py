@@ -128,9 +128,10 @@ class ProxyIntegrationTest(unittest.TestCase):
                       {'tools': [{'type': 'web_fetch_20250910', 'name': 'web_fetch'}]},
                       {'messages': [{'role': 'user', 'content': [{'type': 'image', 'source': {'type': 'url', 'url': 'https://attacker.invalid'}}]}]}):
             self.assertEqual(self.messages(**extra)[0], 403)
-        for headers in ({'Transfer-Encoding': 'chunked'}, {'Content-Length': str(8 * 1024 * 1024 + 1)}):
+        # A denied body is not read: the connection closes before it is sent.
+        for headers in ({'Transfer-Encoding': 'chunked'}, {'Content-Length': str(64 * 1024 * 1024)}):
             connection = self.connection('api.anthropic.com')
-            connection.putrequest('POST', '/v1/messages')
+            connection.putrequest('POST', '/v1/files')
             for key, value in headers.items():
                 connection.putheader(key, value)
             connection.endheaders()

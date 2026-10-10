@@ -107,6 +107,6 @@ devcontainer up
 python3 .devcontainer/claude/scripts/inject-credentials.py
 ```
 
-Anthropicの要求本文にはContent-Lengthが必要です。本文は8 MiB以下に制限し、全体を受信して検査します。Gitの要求本文には同じ上限を設けていないため、大きな要求や同時接続でメモリを使い切る可能性が残ります。proxyのメモリ上限は512 MiBで、停止した場合は通信も停止します。
+Anthropicの要求本文は全体を受信してから検査・転送します。AnthropicとGitの要求本文には上限を設けていないため、大きな要求や同時接続でメモリを使い切る可能性が残ります。proxyのメモリ上限は512 MiBで、停止した場合は通信も停止します。
 
 [READMEに戻る](../README.md)

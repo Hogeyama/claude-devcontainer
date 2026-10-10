@@ -129,16 +129,19 @@ class PolicyTest(unittest.TestCase):
         self.denied(anthropic(path='/v1/files'))
         self.denied(flow('https://api.anthropic.com/api/event_logging/v2/batch', 'POST'))
 
-    def test_body_is_refused_before_buffering(self):
-        unbounded = anthropic()
-        del unbounded.request.headers['Content-Length']
-        unbounded.request.headers['Transfer-Encoding'] = 'chunked'
-        oversized = anthropic()
-        oversized.request.headers['Content-Length'] = str(8 * 1024 * 1024 + 1)
-        for f in (unbounded, oversized):
-            self.addon.requestheaders(f)
-            self.assertEqual(f.response.status_code, 403)
-            self.assertIsNotNone(f.error)
+    def test_anthropic_bodies_are_not_bounded(self):
+        chunked = anthropic()
+        del chunked.request.headers['Content-Length']
+        chunked.request.headers['Transfer-Encoding'] = 'chunked'
+        large = anthropic(messages(messages=[{'role': 'user', 'content': 'x' * (32 * 1024 * 1024)}]))
+        for f in (chunked, large):
+            self.allowed(f)
+
+    def test_denied_body_is_refused_before_buffering(self):
+        f = anthropic(path='/v1/files')
+        self.addon.requestheaders(f)
+        self.assertEqual(f.response.status_code, 403)
+        self.assertIsNotNone(f.error)
         self.credentials = None
         f = flow()
         self.addon.requestheaders(f)
@@ -149,7 +152,7 @@ class PolicyTest(unittest.TestCase):
         self.credentials = None
         f = anthropic()
         self.addon.requestheaders(f)
-        self.assertIsNone(f.error, 'a bounded body is read so that Claude sees the reason')
+        self.assertIsNone(f.error, 'an Anthropic body is read so that Claude sees the reason')
         self.assertEqual(f.response.status_code, 403)
         self.assertIn(b'inject-credentials.py', f.response.content)
         headers = self.allowed(flow('https://api.anthropic.com/api/hello', 'GET', b'', [('X-Api-Key', 'attacker')]))
