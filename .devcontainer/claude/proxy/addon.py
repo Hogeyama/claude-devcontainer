@@ -36,7 +36,10 @@ ROUTES = {
         # Artifacts: the Artifact tool publishes, reads and lists through
         # /api/frame/; the claude.ai MCP server list names the Artifacts MCP
         # server; the organization policy and the account's plan gate both.
-        (None, r'/api/frame/.+'),
+        # Except /api/frame/perm/, which changes who can open an artifact: the
+        # agent could otherwise make one public and hand its content to anyone.
+        # Sharing is left to the person, on claude.ai.
+        (None, r'/api/frame/(?!(?i:perm)(/|$)).+'),
         ('GET', r'/v1/mcp_servers'),
         ('GET', r'/api/claude_code/policy_limits'),
         ('GET', r'/api/oauth/profile'),
@@ -123,7 +126,9 @@ def check_request(req):
     # GitHub may normalize what this check sees as a /repos/... path.
     require(not re.search(r'[\x00-\x1f\x7f%\\]', decoded) and '//' not in decoded
             and not {'.', '..'} & set(decoded.split('/')))
-    require(any(method in (None, req.method) and re.fullmatch(pattern, path)
+    # Both spellings must match, or an encoded segment (%70erm for perm) could
+    # slip past a pattern that excludes it.
+    require(any(method in (None, req.method) and re.fullmatch(pattern, path) and re.fullmatch(pattern, decoded)
                 for method, pattern in ROUTES[req.host]))
     if req.host == 'api.anthropic.com':
         # check_messages reads the body as sent.

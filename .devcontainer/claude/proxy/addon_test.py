@@ -124,8 +124,16 @@ class PolicyTest(unittest.TestCase):
         self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp/upload/u1', 'PUT', b'page'))
         self.allowed(flow('https://api.anthropic.com/api/frame/deploy/direct?attempt_id=a', 'POST', b'{}'))
         self.allowed(flow('https://api.anthropic.com/api/frame/frames?limit=200', 'GET', b''))
+        self.allowed(flow('https://api.anthropic.com/api/frame/permalink', 'GET', b''))
         for url, method in [('https://api.anthropic.com/api/artifacts/mcp/other', 'POST'),
                             ('https://api.anthropic.com/api/frame/', 'GET'),
+                            ('https://api.anthropic.com/api/frame/perm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/perm/slug?org=o', 'GET'),
+                            ('https://api.anthropic.com/api/frame/PERM/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/perm', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/./perm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame//perm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/%70erm/slug', 'PATCH'),
                             ('https://api.anthropic.com/v1/mcp_servers', 'POST'),
                             ('https://api.anthropic.com/api/oauth/account/settings', 'GET')]:
             with self.subTest(url=url):
