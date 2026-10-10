@@ -1,26 +1,8 @@
 {
   "apiKeyHelper": "echo managed-by-proxy",
-  "env": {
-    "CLAUDE_ENV_FILE": "/etc/dind-bridge/env.sh"
-  },
   "permissions": {
     "deny": [
       "WebSearch"
     ]
-  },
-  "sandbox": {
-    "enabled": true,
-    "failIfUnavailable": true,
-    "allowUnsandboxedCommands": false,
-    "enableWeakerNestedSandbox": true,
-    "network": {
-      "allowAllUnixSockets": true,
-      "allowManagedDomainsOnly": true,
-      "allowedDomains": ["github.com", "api.github.com"],
-      "deniedDomains": ["api.anthropic.com"]
-    },
-    "filesystem": {
-      "allowWrite": ["/tmp"]
-    }
   }
 }

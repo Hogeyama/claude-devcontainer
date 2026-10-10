@@ -1,20 +1,16 @@
-import { spawn } from "node:child_process";
-import { readdir, readlink } from "node:fs/promises";
 import { createServer as createHttpServer, request } from "node:http";
 import { createServer } from "node:net";
 import {
   closeServer,
-  gatewayRequest,
   listen,
+  openSocket,
   pipeSockets,
   splitUpgradeBody,
   trackServer,
-  writeFrame,
 } from "./protocol.mjs";
 
 const BIND_HOST = "127.0.0.1";
 const POLL_MS = 1000;
-const IDLE_CHECK_MS = 30_000;
 const START =
   /^\/(?:v[0-9.]+\/)?containers\/([^/?]+)\/(?:start|restart)(?:\?|$)/;
 
@@ -67,26 +63,27 @@ function dockerJson(socketPath, path) {
 }
 
 /**
- * Inside a network namespace, serve the gateway's Docker API on the loopback
- * address `api`, and mirror every port dockerd published on `publishHost` on
- * 127.0.0.1. Each mirrored connection goes through the gateway, which can
- * only reach its own publish host: `publishHost` here is only the address
- * dockerd reports for a port.
+ * Serve the Docker API at `dockerSocket` on the loopback address `api`, and
+ * mirror on 127.0.0.1 every port dockerd published on `publishIp`. A mirrored
+ * port connects only to the same port of `publishHost`, the DinD container's
+ * address, which must listen on nothing but published ports. Fixing the
+ * address is the whole authorization: no request can steer a connection to
+ * another service.
  *
  * The first API request waits for `beforeFirstRequest` and an initial port
- * snapshot, so the relay can listen at once without delaying every Bash
- * command. A start or restart response is held until the ports it created
- * are mirrored, so a client never sees a mapped port it cannot connect to
- * yet. Everything else streams straight through.
+ * snapshot, so the relay can listen before dockerd is up. A start or restart
+ * response is held until the ports it created are mirrored, so a client never
+ * sees a mapped port it cannot connect to yet. Everything else streams
+ * straight through.
  */
 export async function startRelay({
-  socketPath,
+  dockerSocket,
   api,
   publishHost,
+  publishIp,
   beforeFirstRequest,
   onWarning = () => {},
 }) {
-  const dockerApi = `${socketPath}.api`;
   const sockets = new Set();
   const listeners = new Map();
   const conflicts = new Set();
@@ -98,7 +95,7 @@ export async function startRelay({
   const sync = () => {
     if (syncing) return syncing;
     syncing = (async () => {
-      const containers = await dockerJson(dockerApi, "/containers/json");
+      const containers = await dockerJson(dockerSocket, "/containers/json");
       lastSyncError = undefined;
       const desired = new Set();
       published = [];
@@ -106,7 +103,7 @@ export async function startRelay({
         const ports = (container.Ports ?? [])
           .filter(
             (port) =>
-              port.IP === publishHost &&
+              port.IP === publishIp &&
               port.Type === "tcp" &&
               Number.isInteger(port.PublicPort),
           )
@@ -133,8 +130,8 @@ export async function startRelay({
         const clients = new Set();
         const server = createServer({ allowHalfOpen: true }, (client) => {
           client.pause();
-          void gatewayRequest(socketPath, { kind: "connect", port }).then(
-            ({ socket: upstream }) => {
+          void openSocket({ host: publishHost, port }).then(
+            (upstream) => {
               clients.add(upstream);
               upstream.once("close", () => clients.delete(upstream));
               if (client.destroyed || closed) upstream.destroy();
@@ -187,7 +184,7 @@ export async function startRelay({
     const taken = container?.ports.filter((port) => conflicts.has(port));
     if (taken?.length)
       throw new Error(
-        `the container started, but its published TCP port ${taken.join(", ")} is already in use in this network namespace and is not forwarded`,
+        `the container started, but its published TCP port ${taken.join(", ")} is already in use in the agent and is not forwarded`,
       );
   };
 
@@ -205,11 +202,11 @@ export async function startRelay({
   };
   const proxy = async (req, response, head) => {
     let upstream;
-    let dockerSocket;
+    let upstreamSocket;
     const raw = head !== undefined;
     const report = (error) => {
       upstream?.destroy();
-      dockerSocket?.destroy();
+      upstreamSocket?.destroy();
       if (raw) response.destroy();
       else if (!response.headersSent && !response.destroyed) {
         response.writeHead(502, {
@@ -229,14 +226,14 @@ export async function startRelay({
       const started =
         req.method === "POST" ? START.exec(req.url)?.[1] : undefined;
       upstream = request({
-        socketPath: dockerApi,
+        socketPath: dockerSocket,
         method: req.method,
         path: req.url,
         headers: requestHeaders(req),
         agent: false,
       });
       upstream.on("socket", (socket) => {
-        dockerSocket = socket;
+        upstreamSocket = socket;
         sockets.add(socket);
         socket.once("close", () => sockets.delete(socket));
       });
@@ -257,8 +254,8 @@ export async function startRelay({
             response.write(rawHeaders(res));
             // Docker's legacy attach responds 200 and then hijacks the socket.
             res.pipe(response);
-            response.pipe(dockerSocket);
-            if (rest.length) dockerSocket.write(rest);
+            response.pipe(upstreamSocket);
+            if (rest.length) upstreamSocket.write(rest);
           } else {
             response.writeHead(res.statusCode, res.rawHeaders);
             // Docker flushes headers before a long-poll body (container
@@ -318,183 +315,5 @@ export async function startRelay({
     await close();
     throw error;
   }
-  return {
-    close,
-    /** No open API or mirrored connection. */
-    idle() {
-      let open = sockets.size;
-      for (const entry of listeners.values()) open += entry.clients.size;
-      return open === 0;
-    },
-  };
-}
-
-/**
- * The abstract socket names of one namespace's relay. They belong to the
- * network namespace and vanish with their owner, so `name` both names the
- * live relay and, with `lock`, keeps a second one from starting. The env file
- * derives the same name without starting a process.
- */
-export function relayNames(instance, namespace, prefix) {
-  const id = /^net:\[([0-9]+)\]$/.exec(namespace)?.[1];
-  if (
-    !id ||
-    !/^[A-Za-z0-9_-]{1,32}$/.test(instance) ||
-    !/^[A-Za-z0-9_-]{1,32}$/.test(prefix)
-  )
-    throw new Error("invalid DinD relay identity");
-  const base = `${prefix}-${process.getuid()}-${instance}-${id}`;
-  return { name: `\0${base}`, lock: `\0${base}-lock` };
-}
-
-/**
- * Whether no other process shares this network namespace. A sandbox in its
- * own PID namespace may show another namespace's /proc; there the answer is
- * unknowable, and the sandbox's PID namespace takes the relay with it anyway.
- */
-async function namespaceAlone(namespace) {
-  try {
-    if ((await readlink("/proc/self")) !== String(process.pid)) return false;
-    for (const entry of await readdir("/proc")) {
-      if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
-      try {
-        if ((await readlink(`/proc/${entry}/ns/net`)) === namespace)
-          return false;
-      } catch {}
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Run this namespace's relay until no other process is left in the namespace.
- *
- * The lock name keeps a second relay from starting; the public name, which
- * the env file looks for, appears only once the API is listening, so no Bash
- * is pointed at a relay that cannot answer yet. The relay touches no file:
- * a sandbox may allow no writes. Its warnings are dropped; a port it cannot
- * mirror still reaches the client as the start response's error.
- */
-export async function runRelay({
-  socketPath,
-  instance,
-  namePrefix,
-  api,
-  publishHost,
-  beforeFirstRequest,
-}) {
-  const namespace = await readlink("/proc/self/ns/net");
-  const { name, lock } = relayNames(instance, namespace, namePrefix);
-  const lockServer = createServer((client) => client.destroy());
-  try {
-    await listen(lockServer, lock);
-  } catch (error) {
-    if (error.code === "EADDRINUSE") return { stopped: Promise.resolve() };
-    throw error;
-  }
-  const control = createServer((client) => {
-    client.on("error", () => {});
-    writeFrame(client, {
-      ok: true,
-      api: `tcp://${api.host}:${api.port}`,
-      pid: process.pid,
-    });
-    client.end();
-  });
-  const controlSockets = new Set();
-  trackServer(control, controlSockets);
-  let relay;
-  try {
-    relay = await startRelay({
-      socketPath,
-      api,
-      publishHost,
-      beforeFirstRequest,
-    });
-    await listen(control, name);
-  } catch (error) {
-    await relay?.close();
-    await closeServer(lockServer);
-    throw error;
-  }
-  let timer;
-  let finish;
-  const stopped = new Promise((resolve) => {
-    finish = resolve;
-  });
-  let stopping;
-  const stop = () => {
-    stopping ??= (async () => {
-      clearInterval(timer);
-      // Withdraw the public name first so no new Bash is pointed here.
-      for (const socket of controlSockets) socket.destroy();
-      await closeServer(control);
-      await relay.close();
-      await closeServer(lockServer);
-      finish();
-    })();
-    return stopping;
-  };
-  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"])
-    process.once(signal, () => void stop());
-  timer = setInterval(() => {
-    void (async () => {
-      if (relay.idle() && (await namespaceAlone(namespace))) await stop();
-    })();
-  }, IDLE_CHECK_MS);
-  return { stopped };
-}
-
-/**
- * Return the API address of this namespace's relay, starting it if needed:
- * `relayArgs` follow `script` to run one.
- */
-export async function ensureRelay({ instance, namePrefix, script, relayArgs }) {
-  const namespace = await readlink("/proc/self/ns/net");
-  const { name } = relayNames(instance, namespace, namePrefix);
-  const probe = async () => {
-    try {
-      const { socket, response } = await gatewayRequest(name, {
-        kind: "status",
-      });
-      socket.destroy();
-      return response.api;
-    } catch {
-      return undefined;
-    }
-  };
-  let api = await probe();
-  if (api) return api;
-  // Detached from the caller's session and output, so the relay neither holds
-  // the command's pipes open nor dies with its process group.
-  const relay = spawn(process.execPath, [script, ...relayArgs], {
-    detached: true,
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let failed;
-  let stderr = "";
-  relay.stderr.on("data", (chunk) => {
-    if (stderr.length < 4096) stderr += chunk;
-  });
-  // A relay that lost the race for the name exits 0; keep waiting for the
-  // winner. Any other exit means this namespace cannot get one now.
-  relay.once("exit", (code) => {
-    if (code !== 0) failed = stderr.trim() || `exit ${code}`;
-  });
-  try {
-    for (let attempt = 0; attempt < 100 && !api && !failed; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      api = await probe();
-    }
-  } finally {
-    relay.stderr.destroy();
-    relay.unref();
-  }
-  if (!api)
-    throw new Error(
-      `namespace relay did not start${failed ? `: ${failed}` : ""}`,
-    );
-  return api;
+  return { close };
 }
