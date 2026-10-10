@@ -1,18 +1,18 @@
 # 追加の利用手順
 
-基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、このリポジトリのルートで実行します。認証情報を渡すホストのターミナルには、READMEの認証用環境変数を設定してください。
+基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、取り込んだリポジトリのルートで実行します。認証情報を渡すホストのターミナルには、READMEの認証用環境変数を設定してください。
 
 ## 認証情報を更新する
 
-ホストの`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`を更新し、`python3 scripts/inject-credentials.py`を再実行します。proxyやagentの再起動・再ビルドは不要です。
+ホストの`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`を更新し、`python3 .devcontainer/claude/scripts/inject-credentials.py`を再実行します。proxyやagentの再起動・再ビルドは不要です。
 
 ```sh
-python3 scripts/inject-credentials.py
+python3 .devcontainer/claude/scripts/inject-credentials.py
 ```
 
 proxyは1環境につき1組の認証値を持ち、次の要求から新しい値を使います。認証値はproxy専用tmpfsに保存され、置き換えるかproxyを停止するまで有効です。ファイルはproxyのUID 1000が所有する0400で、agentやDinDからは読めません。proxyを再起動した場合は、再び同じコマンドで渡してください。
 
-期限切れ時の自動更新は行いません。OAuthトークンは、READMEの手順に従ってホストの`claude setup-token`で再発行し、`CLAUDE_CODE_OAUTH_TOKEN`へ貼り付けてから`python3 scripts/inject-credentials.py`を再実行します。API keyを使う場合はConsoleで更新します。
+期限切れ時の自動更新は行いません。OAuthトークンは、READMEの手順に従ってホストの`claude setup-token`で再発行し、`CLAUDE_CODE_OAUTH_TOKEN`へ貼り付けてから`python3 .devcontainer/claude/scripts/inject-credentials.py`を再実行します。API keyを使う場合はConsoleで更新します。
 
 注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。ホストの環境変数から読む認証値だけを受け付け、既存のホスト認証ファイルは読みません。
 
@@ -34,7 +34,7 @@ devcontainer exec docker load -i /workspace/images/offline.tar
 
 投入後は、agentのシェルから`docker run`や`docker build --network=none`を実行できます。buildには投入済みのbase imageとローカルにある依存ファイルを使います。Gradleは`--offline`で実行し、その他のツールも事前に用意したキャッシュや依存ファイルを使ってください。ビルド中のオンラインpackage installには対応していません。
 
-agentにツールを追加する場合は、[Dockerfile](../.devcontainer/Dockerfile)を編集し、ホストでagentのimageをビルドする際に導入します。
+agentにツールを追加する場合は、[`.devcontainer/agent-setup.sh`](../.devcontainer/agent-setup.sh)に導入手順を書きます。ホストでagentのimageをビルドする際にrootで実行されます。
 
 コンテナのTCPポートは、`docker run -p 8080`または`-p 18080:8080`のように、既定の`0.0.0.0`で公開します。agentやClaudeのBashからは、`127.0.0.1:公開ポート`に接続できます。loopbackだけで公開したポートは中継されません。Docker API用の2375番ポートも公開先としては使えません。
 
@@ -50,7 +50,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock
 
 VS CodeのGUI接続と、ホスト認証が転送されないことは未検証です。Dev Containersには[ホストのGit認証を共有する機能](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials)があります。使う場合は認証情報のない専用ホストアカウントと専用editor profileを用意してください。SSH／GPG agentや、ホストのGitHub／Docker認証を用意・転送しないことが利用条件です。
 
-認証用環境変数を渡さずに、専用profileのVS Codeを起動してこのリポジトリを開きます。Dev Containersの「Reopen in Container」を実行すると、作業ディレクトリは`/workspace`になります。ホストのホームや認証用socketを追加mountしないでください。起動後、認証用環境変数を設定したホストの別ターミナルから`python3 scripts/inject-credentials.py`を1回実行し、認証値をproxyへ渡します。その後はVS Codeのコンテナ内ターミナルで通常どおり`claude`を実行できます。
+認証用環境変数を渡さずに、専用profileのVS Codeを起動してこのリポジトリを開きます。Dev Containersの「Reopen in Container」を実行すると、作業ディレクトリは`/workspace`になります。ホストのホームや認証用socketを追加mountしないでください。起動後、認証用環境変数を設定したホストの別ターミナルから`python3 .devcontainer/claude/scripts/inject-credentials.py`を1回実行し、認証値をproxyへ渡します。その後はVS Codeのコンテナ内ターミナルで通常どおり`claude`を実行できます。
 
 ビルド、テスト、デバッグやコードを実行する拡張機能はコンテナ内で動かします。改変されたGradle設定を人間が実行する場合も、コンテナ内であれば通信制限の対象です。ホストで実行するスクリプト、Dockerfile、起動設定は先にレビューしてください。
 

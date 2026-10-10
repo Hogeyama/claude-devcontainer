@@ -40,8 +40,9 @@ GitHubの書込み制限を実サービスで検証するには、専用の許�
 ### 準備
 
 ```sh
-docker build -t claude-devcontainer-proxy:task1 proxy
-docker build -t claude-devcontainer-agent:task2 -f .devcontainer/Dockerfile .
+docker build -t claude-devcontainer-proxy:task1 .devcontainer/claude/proxy
+docker build -t claude-devcontainer-agent:task2 --build-context workspace-config=.devcontainer \
+  -f .devcontainer/claude/agent/Dockerfile .devcontainer/claude
 # 実 Testcontainers 12.1.0 の依存を準備
 sdk_dir=$(mktemp -d /tmp/cdc-sdk.XXXXXX)
 cp tests/fixtures/package.json tests/fixtures/package-lock.json "$sdk_dir/"
@@ -54,7 +55,7 @@ docker pull testcontainers/ryuk:0.14.0
 
 ```sh
 # proxy 単体試験: 実 mitmproxy の flow を使用、外部接続なし
-docker run --rm --network none -v "$PWD/proxy:/tests:ro" -w /tests \
+docker run --rm --network none -v "$PWD/.devcontainer/claude/proxy:/tests:ro" -w /tests \
   --entrypoint python claude-devcontainer-proxy:task1 \
   -m unittest discover -s . -p '*_test.py' -v
 # 上の単体試験を除く全カテゴリ

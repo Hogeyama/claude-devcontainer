@@ -30,7 +30,7 @@ agentの起動処理はfirewallとCAを設定してからUID 1000へ切り替え
 
 Claudeのmanaged settingsでは、Bash sandboxを有効にしています。sandboxを利用できない場合は失敗し、sandbox外でのコマンド実行は許可しません。設定値は`enabled`、`failIfUnavailable`、`allowUnsandboxedCommands=false`、`enableWeakerNestedSandbox=true`です。
 
-rootless DinDはprivilegedコンテナで動かします。同梱の[`dind-bridge`](../dind-bridge/README.md)がDocker APIと公開TCPポートをagentへ中継します。
+rootless DinDはprivilegedコンテナで動かします。同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentへ中継します。
 
 agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの操作権限を読取り専用にはしません。ホストのDocker socketは共有しません。
 
@@ -44,14 +44,14 @@ VS Codeから使う場合には、エディタを通じたホスト認証の転�
 
 ## 通信ルールを変更する
 
-ルールは[`proxy/addon.py`](../proxy/addon.py)に固定しています。稼働中のproxyへ作業ツリーはmountしないため、ファイルを編集するだけでは反映されません。
+ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。稼働中のproxyへ作業ツリーはmountしないため、ファイルを編集するだけでは反映されません。
 
 追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、ホストのこのリポジトリのルートで次を実行します。
 
 ```sh
 devcontainer build
 devcontainer up
-python3 scripts/inject-credentials.py
+python3 .devcontainer/claude/scripts/inject-credentials.py
 ```
 
 Anthropicの要求本文にはContent-Lengthが必要です。本文は8 MiB以下に制限し、全体を受信して検査します。Gitの要求本文には同じ上限を設けていないため、大きな要求や同時接続でメモリを使い切る可能性が残ります。proxyのメモリ上限は512 MiBで、停止した場合は通信も停止します。

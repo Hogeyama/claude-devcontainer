@@ -2,7 +2,7 @@ FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b0
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates openssl git gh curl ripgrep python3 bubblewrap socat iptables \
-    util-linux procps openjdk-17-jdk-headless gradle \
+    util-linux procps \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code@2.1.295 \
     && npm cache clean --force
@@ -18,8 +18,12 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
          > /etc/dind-bridge/env.sh \
     && install -d -m 700 -o node -g node /run/dind-bridge \
     && install -d -o node -g node /workspace
-COPY .devcontainer/managed-settings.json /etc/claude-code/managed-settings.json
-COPY --chmod=755 .devcontainer/entrypoint.sh .devcontainer/init-firewall.sh /usr/local/bin/
+# The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
+# the host's network before the proxy applies. Core files are copied after it.
+RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \
+    if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
+COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
+COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh /usr/local/bin/
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
     CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \

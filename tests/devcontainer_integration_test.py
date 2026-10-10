@@ -15,6 +15,7 @@ import unittest
 import uuid
 from proxy_integration_test import ROOT, PROXY_IMAGE, docker, fixtures
 
+CORE = ROOT / '.devcontainer/claude'
 AGENT_IMAGE = os.environ.get('AGENT_TEST_IMAGE', 'claude-devcontainer-agent:task2')
 
 
@@ -69,9 +70,11 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         # without editing the user's config or installing editor/profile state.
         cls.workspace = cls.directory / 'workspace'
         cls.workspace.mkdir()
-        for name in ('.devcontainer', 'scripts', 'tests', 'dind-bridge', 'proxy'):
-            shutil.copytree(ROOT / name, cls.workspace / name, ignore=shutil.ignore_patterns('__pycache__'))
-        shutil.copy(ROOT / '.dockerignore', cls.workspace / '.dockerignore')
+        # Lay it out as a consumer would: the distributed core plus its template.
+        shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', ignore=shutil.ignore_patterns('__pycache__'))
+        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh'):
+            shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
+        shutil.copytree(ROOT / 'tests', cls.workspace / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
         # Delay the production entrypoint so that `up` must wait for postStartCommand.
         startup = cls.directory / 'entrypoint.sh'
         startup.write_text('#!/bin/sh\nsleep 3\nexec /usr/local/bin/entrypoint.sh "$@"\n')
@@ -118,7 +121,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
     def inject_credentials(cls, mode):
         environment = {**cls.env, 'GITHUB_TOKEN': 'synthetic-managed-token'}
         environment['CLAUDE_CODE_OAUTH_TOKEN' if mode == 'oauth' else 'ANTHROPIC_API_KEY'] = 'synthetic-managed-token'
-        result = subprocess.run([sys.executable, str(cls.workspace / 'scripts/inject-credentials.py')],
+        result = subprocess.run([sys.executable, str(cls.workspace / '.devcontainer/claude/scripts/inject-credentials.py')],
                                 env=environment, capture_output=True, text=True, timeout=90)
         if result.returncode: raise AssertionError(result.stdout + result.stderr)
         assert 'synthetic-managed-token' not in result.stdout + result.stderr
@@ -201,7 +204,7 @@ echo nested-network-blocked
             if iteration:
                 self.compose_run('restart', 'agent')
                 # What `devcontainer up` would run after the restart.
-                self.exec('sh', '-c', json.loads((ROOT / '.devcontainer/devcontainer.json').read_text())['postStartCommand'])
+                self.exec('sh', '-c', json.loads((CORE / 'template/devcontainer.json').read_text())['postStartCommand'])
             for args in (['bash', '/workspace/tests/fixtures/bridge_probe.sh'],
                          ['unshare', '--user', '--map-root-user', '--net', 'python3', '/workspace/tests/fixtures/netns_exec.py', 'bash', '/workspace/tests/fixtures/bridge_probe.sh', 'sandbox']):
                 result = self.exec(*args, environment={'FIXTURE_PORT': self.port})
@@ -214,7 +217,7 @@ echo nested-network-blocked
         (config / 'credentials').write_text('GITHUB_TOKEN=$(echo synthetic-config-token)\n'
                                             'ANTHROPIC_API_KEY=synthetic-config-token\n')
         self.compose_run('exec', '-T', 'proxy', 'rm', '-f', '/run/proxy-credentials/credentials.json')
-        result = subprocess.run([sys.executable, str(self.workspace / 'scripts/inject-credentials.py'), '--background'],
+        result = subprocess.run([sys.executable, str(self.workspace / '.devcontainer/claude/scripts/inject-credentials.py'), '--background'],
                                 env=self.env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for _ in range(30):

@@ -12,14 +12,15 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
+# The workspace root: this script is .devcontainer/claude/scripts/ in it.
+ROOT = Path(__file__).resolve().parents[3]
 # Shell assignments such as GITHUB_TOKEN=$(pass github/token). The host runs it,
 # so it must stay outside the workspace, which the agent can write.
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/credentials'
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/inject.log'
 KEYS = ('GITHUB_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY')
 WAIT_SECONDS = 60
-RETRY = 'Run ./scripts/inject-credentials.py on the host once the container is up.'
+RETRY = 'Run .devcontainer/claude/scripts/inject-credentials.py on the host once the container is up.'
 
 
 class Unavailable(Exception):

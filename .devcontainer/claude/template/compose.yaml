@@ -1,0 +1,5 @@
+# Owned by this workspace. The core in claude/ is updated with git subtree;
+# extend it here instead of editing it. Relative paths below are from
+# .devcontainer/.
+include:
+  - claude/compose.yaml
