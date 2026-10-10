@@ -15,6 +15,9 @@
     "enableWeakerNestedSandbox": true,
     "network": {
       "allowAllUnixSockets": true
+    },
+    "filesystem": {
+      "allowWrite": ["/tmp"]
     }
   }
 }
