@@ -103,7 +103,9 @@ def secrets_files(settings):
                     args = hook.get('args')
                     commands.append([str(arg) for arg in args] if isinstance(args, list) else str(hook['command']))
     commands.append(str((settings.get('env') or {}).get('CLAUDE_CODE_SHELL_PREFIX', '')))
-    files = [Path(setting('CLAUDE_DEVCONTAINER_SUMI_DIR', str(Path.home() / '.claude/sumi')))
+    # Match the included compose.yaml's base for relative bind sources.
+    files = [ROOT / '.devcontainer/claude'
+             / Path(setting('CLAUDE_DEVCONTAINER_SUMI_DIR', str(Path.home() / '.claude/sumi')))
              / setting('CLAUDE_DEVCONTAINER_SUMI_FILE', 'secrets.txt')]
     for command in commands:
         try:

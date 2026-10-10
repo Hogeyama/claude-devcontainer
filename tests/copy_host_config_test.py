@@ -112,6 +112,19 @@ class ArchiveTest(unittest.TestCase):
             got = [copy_host_config.setting(name, 'default') for name in 'ABCD']
         self.assertEqual(got, ['workspace', 'host', 'environment', 'default'])
 
+    def test_relative_sumi_directory_is_excluded_from_copied_config(self):
+        (self.root / '.devcontainer/claude').mkdir(parents=True)
+        (self.source / 'keys').mkdir()
+        (self.source / 'keys/secrets.txt').write_text('test-only-secret')
+        (self.source / 'keys/other.txt').write_text('ordinary config')
+        self.extra.mkdir()
+        (self.extra / '.claude').symlink_to(self.source)
+        with mock.patch.object(copy_host_config, 'ROOT', self.root), mock.patch.dict(
+                'os.environ', {'CLAUDE_DEVCONTAINER_SUMI_DIR': '../../claude/keys'}, clear=True):
+            members = self.members()
+        self.assertNotIn('.claude/keys/secrets.txt', members)
+        self.assertIn('.claude/keys/other.txt', members)
+
     def test_empty_override_uses_default_instead_of_a_lower_priority_file(self):
         (self.root / '.devcontainer').mkdir()
         (self.root / '.devcontainer/claude.env').write_text('A=workspace\nB=workspace\n')

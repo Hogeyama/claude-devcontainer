@@ -1,0 +1,3 @@
+# Images needed by this repository's offline Docker probes.
+busybox:1.37
+testcontainers/ryuk:0.14.0

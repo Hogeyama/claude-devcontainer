@@ -32,7 +32,10 @@ CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND 0)
 
 # compose.yaml mounts the directory into the sumi service, which reads the file.
 if [ "$(setting CLAUDE_DEVCONTAINER_SUMI 0)" = 1 ]; then
-    secrets="$(setting CLAUDE_DEVCONTAINER_SUMI_DIR "$HOME/.claude/sumi")/$(setting CLAUDE_DEVCONTAINER_SUMI_FILE secrets.txt)"
+    dir=$(setting CLAUDE_DEVCONTAINER_SUMI_DIR "$HOME/.claude/sumi")
+    # Relative bind sources in the included compose.yaml use its directory.
+    case "$dir" in /*) ;; *) dir=".devcontainer/claude/$dir" ;; esac
+    secrets="$dir/$(setting CLAUDE_DEVCONTAINER_SUMI_FILE secrets.txt)"
     if [ ! -f "$secrets" ]; then
         echo "error: CLAUDE_DEVCONTAINER_SUMI=1 needs $secrets, one secret per line, with mode 0600." >&2
         exit 1

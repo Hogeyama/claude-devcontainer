@@ -15,7 +15,8 @@
 #     Claude's tools return. Default 0.
 #   CLAUDE_DEVCONTAINER_SUMI_DIR, CLAUDE_DEVCONTAINER_SUMI_FILE  the host
 #     directory holding the secrets file, and its name in it. Default
-#     ~/.claude/sumi and secrets.txt.
+#     ~/.claude/sumi and secrets.txt. Relative directories are based here,
+#     at .devcontainer/claude/.
 # Features are 0 or 1: compose can neither add a service nor a mount
 # conditionally, so the values select a scale and a path instead.
 services:

@@ -248,7 +248,7 @@ CLAUDE_DEVCONTAINER_SUMI=1
 
 | 設定項目 | 指定するもの | 既定値 |
 |---|---|---|
-| `CLAUDE_DEVCONTAINER_SUMI_DIR` | 一覧ファイルを置いたホスト上のディレクトリの絶対パス | ホストの`~/.claude/sumi` |
+| `CLAUDE_DEVCONTAINER_SUMI_DIR` | 一覧ファイルを置いたホスト上のディレクトリ。相対パスは`.devcontainer/claude/`基準 | ホストの`~/.claude/sumi` |
 | `CLAUDE_DEVCONTAINER_SUMI_FILE` | そのディレクトリ内のファイル名 | `secrets.txt` |
 
 たとえば、ホストの`/home/me/secrets/sumi.txt`を読ませる場合は、次のように指定します。
@@ -299,7 +299,9 @@ devcontainer up --remove-existing-container
 
 ## このリポジトリを開発する
 
-このリポジトリ自身も同じ構成で、`.devcontainer/claude`がコア、その外が自分のファイルです。`devcontainer up`でそのまま開発環境として使えます。
+このリポジトリ自身も同じ構成で、`.devcontainer/claude`がコア、その外が自分のファイルです。`claude.env`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、Git、Docker CLI、OpenSSL、ShellCheckが入り、ホストでは`nix develop`、agentではBashから使えます。
+
+sumiでマスクする値は`.secrets/sumi/secrets.txt`に置きます。場所は`claude.env`に相対パスで設定済みです。`.secrets/`はGit管理から除外され、agent側では空の読み取り専用領域で隠されます。実際の一覧はsumiコンテナだけに共有されます。
 
 `.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れていますが、このリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`の雛形から始めてください。検証手順は[確認した範囲と検証手順](docs/testing.md)にあります。
 

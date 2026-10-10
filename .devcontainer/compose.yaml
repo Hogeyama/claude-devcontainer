@@ -5,3 +5,15 @@ include:
   - path: claude/compose.yaml
     # The workspace's settings. .env, if present, overrides them for this host.
     env_file: [claude.env]
+
+services:
+  agent:
+    # The host keeps sumi's list inside this repository. Hide it from the
+    # workspace mount; only the sumi service receives the real directory.
+    volumes:
+      - type: tmpfs
+        target: /workspace/.secrets
+        read_only: true
+        tmpfs:
+          size: 65536
+          mode: 0700
