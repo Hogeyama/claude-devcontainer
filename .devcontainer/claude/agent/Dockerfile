@@ -24,6 +24,8 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
          > /etc/dind-bridge/env.sh \
     && install -d -m 700 -o node -g node /run/dind-bridge \
     && install -d -o node -g node /workspace \
+    # The claude-projects volume copies this owner when it is first created.
+    && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
     # .git/config is read-only (see compose.yaml); do not try to record upstreams.
     && git config --system branch.autoSetupMerge false
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on

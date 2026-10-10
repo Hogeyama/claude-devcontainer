@@ -59,6 +59,8 @@ services:
       - {type: bind, source: ../../.git/modules, target: /workspace/.git/modules, read_only: true, bind: {create_host_path: false}}
       - public-ca:/public-ca:ro
       - dind-run:/var/run/dind:ro
+      # Session history, kept across container rebuilds for `claude --resume`.
+      - claude-projects:/home/node/.claude/projects
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
@@ -146,6 +148,7 @@ networks:
     enable_ipv6: false
 
 volumes:
+  claude-projects:
   public-ca:
   proxy-private-ca:
   dind-data:

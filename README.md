@@ -118,7 +118,7 @@ project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.p
 docker compose -p "$project" -f .devcontainer/compose.yaml down
 ```
 
-作業ファイル、DinDのデータ、プロキシのCAは残ります。これらも消す場合は`down --volumes`を使います。
+作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。これらも消す場合は`down --volumes`を使います。
 
 ## カスタマイズする
 
@@ -150,7 +150,7 @@ CLAUDE_DEVCONTAINER_DIND_NET=10.99.1     # agentとDinDの間のネットワー�
 
 ホストごとに値が変わるので、`.env`はコミットせず`.gitignore`に入れておくとよいです。agentは`.devcontainer/`を書き換えられないので、`.env`も変更できません。
 
-値を変えたら`devcontainer up --remove-existing-container`で作り直します。UIDを変えた場合は、DinDのデータが古いUIDの所有のまま残って起動できなくなるので、先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください。
+値を変えたら`devcontainer up --remove-existing-container`で作り直します。UIDを変えた場合は、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
 
 ## 更新する
 
