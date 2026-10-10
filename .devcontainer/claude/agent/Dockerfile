@@ -31,6 +31,9 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
 RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
+# With an OAuth token, an unfinished onboarding makes the CLI check
+# platform.claude.com, which the proxy does not allow, and refuse to start.
+COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # Managed skills: only Claude in the container loads them (unlike .claude/skills
 # in the workspace), the agent cannot change them, and copying the host's
 # ~/.claude/skills does not replace them.
