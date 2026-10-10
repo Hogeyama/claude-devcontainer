@@ -1,5 +1,4 @@
 {
-  "apiKeyHelper": "echo managed-by-proxy",
   "permissions": {
     "deny": [
       "WebSearch"

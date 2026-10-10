@@ -25,6 +25,12 @@ ROUTES = {
         ('GET', r'/api/hello'),  # HELLO below
         ('POST', r'/v1/messages'),
         ('POST', r'/v1/messages/count_tokens'),
+        # Artifacts: the claude.ai MCP server list names the Artifacts MCP
+        # server, which checks the organization policy and the account's plan.
+        ('GET', r'/v1/mcp_servers'),
+        ('GET', r'/api/claude_code/policy_limits'),
+        ('GET', r'/api/oauth/profile'),
+        (None, r'/api/artifacts/mcp(/upload/.+)?'),
     ],
 }
 HOSTS = set(ROUTES)
@@ -46,7 +52,9 @@ INLINE_SOURCES = {'base64', 'text'}
 SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-length',
                 'transfer-encoding', 'user-agent', 'git-protocol', 'if-match', 'if-none-match',
                 'if-modified-since', 'if-unmodified-since', 'range', 'anthropic-beta',
-                'x-github-api-version'}
+                'x-github-api-version', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id',
+                'x-mcp-server-id', 'x-mcp-client-session-id', 'mcp-method', 'mcp-name', 'x-upload-token',
+                'anthropic-mcp-client-capabilities', 'anthropic-mcp-discover-protocol-version'}
 ANTHROPIC_VERSION = '2023-06-01'
 OAUTH_BETA = 'oauth-2025-04-20'
 

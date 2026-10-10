@@ -8,7 +8,7 @@
 |---|---|
 | `api.github.com` | リポジトリ向けREST API、GraphQL、`GET /user` |
 | `github.com` | Git smart HTTPによるclone、fetch、push |
-| `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`） |
+| `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`）、Artifacts（MCPサーバー`/api/artifacts/mcp`と、その利用に必要なclaude.ai MCPサーバー一覧、組織のポリシー、アカウント情報の取得） |
 
 GitHubの認証は、proxyに渡したfine-grained PATで上書きします。GraphQLの本文は解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。
 
@@ -20,7 +20,7 @@ Anthropicでは、Anthropicのサーバーから別の接続先へ通信させ�
 
 ## 認証とCA
 
-本物のPATとAnthropic認証値、HTTPSの検査に使うCA秘密鍵はproxyだけが持ちます。認証値は起動後にホストの環境変数から注入コマンドの標準入力を通じて渡し、proxy専用tmpfsの0400ファイルに保存します。Dockerの作成設定やimageには含めません。認証値がない場合やファイルが不正な場合は要求を拒否し、以前の値には戻りません。agentにはダミーのAPI keyを環境変数で設定しています。proxyが外部へ接続する際に、本物の値へ置き換えます。
+本物のPATとAnthropic認証値、HTTPSの検査に使うCA秘密鍵はproxyだけが持ちます。認証値は起動後にホストの環境変数から注入コマンドの標準入力を通じて渡し、proxy専用tmpfsの0400ファイルに保存します。Dockerの作成設定やimageには含めません。認証値がない場合やファイルが不正な場合は要求を拒否し、以前の値には戻りません。agentにはダミーのOAuthトークンを環境変数で設定しています。proxyが外部へ接続する際に、本物の値へ置き換えます。API keyではなくOAuthトークンにしているのは、Claude CodeがAPI keyで動いているとclaude.aiにログインしていないと判断し、Artifactsを使わせないためです。proxyにAPI keyを注入した場合も推論は使えますが、Artifactsは使えません。
 
 CA秘密鍵は専用volumeに保存し、agentには公開CAだけを渡します。公開CAはsystem trustに追加済みで、Node.js、Git、curl用の環境変数も設定しています。独自のtruststoreを使うツールでは、公開CAを別途追加してください。TLS検証を無効化しないでください。
 

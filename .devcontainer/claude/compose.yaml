@@ -45,9 +45,11 @@ services:
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock
       CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
       CLAUDE_DEVCONTAINER_NIX: ${CLAUDE_DEVCONTAINER_NIX:-0}
-      # A dummy that the proxy replaces with the real credential. Claude gets
-      # its own dummy from apiKeyHelper in managed-settings.json.
+      # Dummies that the proxy replaces with the real credentials. Claude takes
+      # an OAuth token, not an API key, so that it counts as a claude.ai login
+      # and offers Artifacts.
       GH_TOKEN: managed-by-proxy
+      CLAUDE_CODE_OAUTH_TOKEN: managed-by-proxy
     volumes:
       - ../..:/workspace
       # The host builds and runs what is here (compose files, the proxy's

@@ -110,6 +110,23 @@ class PolicyTest(unittest.TestCase):
         self.assertNotIn('X-Api-Key', headers)
         self.assertIn('oauth-2025-04-20', headers['anthropic-beta'])
 
+    def test_anthropic_artifacts(self):
+        self.credentials = ('managed-pat', 'managed-oauth', 'oauth')
+        for path in ['/v1/mcp_servers?limit=1000', '/api/claude_code/policy_limits', '/api/oauth/profile', '/api/artifacts/mcp']:
+            with self.subTest(path=path):
+                f = flow('https://api.anthropic.com' + path, 'GET', b'', [('Authorization', 'Bearer attacker')])
+                del f.request.headers['Content-Length']
+                self.assertEqual(self.allowed(f).get_all('Authorization'), ['Bearer managed-oauth'])
+        mcp = [('Mcp-Session-Id', 's'), ('MCP-Protocol-Version', 'v'), ('X-Upload-Token', 't')]
+        headers = self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp', 'POST', b'{}', mcp))
+        self.assertEqual([headers[name] for name, _ in mcp], ['s', 'v', 't'])
+        self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp/upload/u1', 'PUT', b'page'))
+        for url, method in [('https://api.anthropic.com/api/artifacts/mcp/other', 'POST'),
+                            ('https://api.anthropic.com/v1/mcp_servers', 'POST'),
+                            ('https://api.anthropic.com/api/oauth/account/settings', 'GET')]:
+            with self.subTest(url=url):
+                self.denied(flow(url, method))
+
     def test_anthropic_rejects_ways_to_reach_other_hosts(self):
         variants = [messages(mcp_servers=[]), messages(container='c'),
                     messages(tools=[{'type': 'web_fetch_20250910', 'name': 'web_fetch'}])]
