@@ -301,7 +301,7 @@ devcontainer up --remove-existing-container
 
 このリポジトリ自身も同じ構成で、`.devcontainer/claude`がコア、その外が自分のファイルです。`claude.env`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、Git、Docker CLI、OpenSSL、ShellCheckが入り、ホストでは`nix develop`、agentではBashから使えます。
 
-sumiでマスクする値は`.secrets/sumi/secrets.txt`に置きます。場所は`claude.env`に相対パスで設定済みです。`.secrets/`はGit管理から除外され、agent側では空の読み取り専用領域で隠されます。実際の一覧はsumiコンテナだけに共有されます。
+sumiのデモ用の値を`.secrets/sumi/secrets.txt`にコミットしています。場所は`claude.env`に相対パスで設定済みで、起動時に権限を0600にします。`.secrets/`はagent側では空の読み取り専用領域で隠され、一覧はsumiコンテナだけに共有されます。
 
 `.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れていますが、このリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`の雛形から始めてください。検証手順は[確認した範囲と検証手順](docs/testing.md)にあります。
 

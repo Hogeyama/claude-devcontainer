@@ -7,7 +7,7 @@
   "updateRemoteUserUID": false,
   "overrideCommand": false,
   "shutdownAction": "stopCompose",
-  "initializeCommand": ".devcontainer/claude/scripts/initialize.sh",
+  "initializeCommand": "chmod 600 .secrets/sumi/secrets.txt && .devcontainer/claude/scripts/initialize.sh",
   "postStartCommand": "wait-ready.sh",
   "waitFor": "postStartCommand",
   "userEnvProbe": "none",

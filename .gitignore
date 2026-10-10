@@ -6,4 +6,3 @@ __pycache__/
 .env.*
 /images.tar
 /images/*.tar
-/.secrets/
