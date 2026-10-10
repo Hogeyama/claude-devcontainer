@@ -2,7 +2,7 @@
 
 ## 目的と確定した要件
 
-このリポジトリに Claude Code 用 Dev Container を作る。`../nix-agent-sandbox/docs/architecture/threat-model.md` の系統3を基に、A1b（許可サービス内の未許可相手への送信）の ◎ を目標にする。Docker API とコンテナの公開 TCP ポートは、同リポジトリの `contrib/dind-bridge` で Claude Code の Bash sandbox 内から利用する。
+このリポジトリに Claude Code 用 Dev Container を作る。`nix-agent-sandbox/docs/architecture/threat-model.md` の系統3を基に、A1b（許可サービス内の未許可相手への送信）の ◎ を目標にする。Docker API とコンテナの公開 TCP ポートは、同リポジトリの `contrib/dind-bridge` で Claude Code の Bash sandbox 内から利用する。
 
 ユーザー指定により、P1（未信頼情報源の取込み制限）は対象外とする。GraphQL パーサー、汎用ポリシー設定、承認 broker は作らない。通信ルールは `proxy/addon.py` に直接実装する。
 
