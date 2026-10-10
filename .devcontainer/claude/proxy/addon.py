@@ -8,17 +8,56 @@ from urllib.parse import unquote, urlsplit
 from mitmproxy import http
 from credentials import read_snapshot
 
-LOG = logging.getLogger('policy')
-HOSTS = {'api.github.com', 'github.com', 'api.anthropic.com'}
-MAX_BODY = 8 * 1024 * 1024
-# Claude Code's startup connectivity check.
+# --- Policy -------------------------------------------------------------------
+
+# The only requests let through, by host: (method, path regex). None allows
+# any method. Every host is reached on port 443 over HTTPS only.
+ROUTES = {
+    'api.github.com': [
+        ('POST', r'/graphql'),
+        ('GET', r'/user'),
+        (None, r'/repos/[^/]+/[^/]+(/.*)?'),
+    ],
+    'github.com': [
+        (None, r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)'),
+    ],
+    'api.anthropic.com': [
+        ('GET', r'/api/hello'),  # HELLO below
+        ('POST', r'/v1/messages'),
+        ('POST', r'/v1/messages/count_tokens'),
+    ],
+}
+HOSTS = set(ROUTES)
+# Claude Code's startup connectivity check. It needs no credentials, so Claude
+# Code starts before they are injected.
 HELLO = ('api.anthropic.com', '/api/hello')
-NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
-# Everything else, including any client-supplied credential, is dropped.
+
+# Anthropic request bodies, which check_messages inspects. A declared bound
+# lets mitmproxy buffer the body for inspection.
+MAX_BODY = 8 * 1024 * 1024
+# Top-level fields that make Anthropic's servers contact other hosts.
+DENIED_FIELDS = {'mcp_servers', 'container'}
+# Tools that run in the client. Any other type (web fetch, code execution, ...)
+# runs on Anthropic's servers. A tool without a type is a custom tool.
+CLIENT_TOOL_TYPES = {'custom'}
+# Content sources carried in the request. A URL or file source makes
+# Anthropic's servers fetch it.
+INLINE_SOURCES = {'base64', 'text'}
+
+# Request headers passed upstream. Everything else, including any
+# client-supplied credential, is dropped.
 SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-length',
                 'transfer-encoding', 'user-agent', 'git-protocol', 'if-match', 'if-none-match',
                 'if-modified-since', 'if-unmodified-since', 'range', 'anthropic-beta',
                 'x-github-api-version'}
+ANTHROPIC_VERSION = '2023-06-01'
+OAUTH_BETA = 'oauth-2025-04-20'
+
+NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
+
+# ------------------------------------------------------------------------------
+
+LOG = logging.getLogger('policy')
 
 
 class Denied(Exception):
@@ -40,9 +79,8 @@ def check_blocks(content):
     if isinstance(content, str):
         return
     for block in content:
-        # A URL or file source makes Anthropic's servers fetch it.
         source = block.get('source')
-        require(not isinstance(source, dict) or source.get('type') in ('base64', 'text'))
+        require(not isinstance(source, dict) or source.get('type') in INLINE_SOURCES)
         if block.get('type') == 'tool_result':
             check_blocks(block.get('content', ''))
 
@@ -50,9 +88,9 @@ def check_blocks(content):
 def check_messages(raw):
     """Reject the ways a request can make Anthropic's servers contact other hosts."""
     body = json.loads(raw, object_pairs_hook=unique_keys)
-    require(not {'mcp_servers', 'container'} & set(body))
+    require(not DENIED_FIELDS & set(body))
     for tool in body.get('tools', []):
-        require(tool.get('type', 'custom') == 'custom')  # Server tools: web fetch, code execution, ...
+        require(tool.get('type', 'custom') in CLIENT_TOOL_TYPES)
     for message in body['messages']:
         check_blocks(message['content'])
     check_blocks(body.get('system', ''))
@@ -67,16 +105,9 @@ def check_request(req):
     # GitHub may normalize what this check sees as a /repos/... path.
     require(not re.search(r'[\x00-\x1f\x7f%\\]', decoded) and '//' not in decoded
             and not {'.', '..'} & set(decoded.split('/')))
-    if req.host == 'api.github.com':
-        require((req.method, path) in {('POST', '/graphql'), ('GET', '/user')}
-                or re.fullmatch(r'/repos/[^/]+/[^/]+(/.*)?', path))
-    elif req.host == 'github.com':
-        require(re.fullmatch(r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)', path))
-    elif (req.method, path) == ('GET', '/api/hello'):
-        pass  # Claude Code's startup connectivity check.
-    else:
-        require(req.method == 'POST' and path in ('/v1/messages', '/v1/messages/count_tokens'))
-        # A declared bound lets mitmproxy buffer the body for inspection.
+    require(any(method in (None, req.method) and re.fullmatch(pattern, path)
+                for method, pattern in ROUTES[req.host]))
+    if req.host == 'api.anthropic.com' and (req.host, path) != HELLO:
         length = req.headers.get('content-length', '')
         require(length.isdecimal() and int(length) <= MAX_BODY and 'transfer-encoding' not in req.headers)
         require(req.headers.get('content-encoding', 'identity') == 'identity')
@@ -128,20 +159,20 @@ class PolicyAddon:
                                     if name.decode('ascii').lower() in SAFE_HEADERS])
         req.headers['Host'] = req.host
         if (req.host, path) == HELLO:
-            return  # Needs no credentials, so Claude Code starts before they are injected.
+            return
         try:
             github_token, anthropic_token, auth_mode = read_snapshot()
         except Exception:
             return self.deny(flow, NO_CREDENTIALS)
         try:
             if req.host == 'api.anthropic.com':
-                req.headers['anthropic-version'] = '2023-06-01'
+                req.headers['anthropic-version'] = ANTHROPIC_VERSION
                 if auth_mode == 'api-key':
                     req.headers['x-api-key'] = anthropic_token
                 else:
                     req.headers['Authorization'] = 'Bearer ' + anthropic_token
                     betas = [beta.strip() for beta in req.headers.get('anthropic-beta', '').split(',') if beta.strip()]
-                    req.headers['anthropic-beta'] = ','.join(dict.fromkeys(betas + ['oauth-2025-04-20']))
+                    req.headers['anthropic-beta'] = ','.join(dict.fromkeys(betas + [OAUTH_BETA]))
             elif req.host == 'api.github.com':
                 req.headers['Authorization'] = 'Bearer ' + github_token
             else:
