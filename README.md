@@ -2,7 +2,7 @@
 
 Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinDなどの機能をエージェントに提供します。
 
-自分のリポジトリにgit subtreeで取り込んで使います。取り込んだ部分（コア）は編集せず、ツールの追加などのカスタマイズはコアの外に置いた自分のファイルで行います。上流の修正は`git subtree pull`で取り込めます。
+自分のリポジトリにgit subtreeで取り込んで使ってください。取り込んだ部分（コア）は編集せず、ツールの追加などのカスタマイズはコアの外に置いた自分のファイルで行ってください。上流の修正は`git subtree pull`で取り込めます。
 
 ## ホストに必要なもの
 
@@ -21,14 +21,14 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 * package registry、GitHubのrelease assetやLFS、Anthropicのweb searchやMCP connectorなどは使えません。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * agentはリポジトリのファイルを1つのUID（既定は1000）で読み書きします。リポジトリの所有者と異なる場合は[UIDとネットワークを変える](#uidとネットワークを変える)で合わせてください。
-* Gitリポジトリのルートで使います。`git worktree`の作業ツリーには対応していません。
+* Gitリポジトリのルートで使ってください。`git worktree`の作業ツリーには対応していません。
 * agentは`.devcontainer/`と`.git`の設定（config、hooks）を書き換えられません。ただし、agentが作ったコミットに含まれる`.devcontainer/`の変更は、ホストで反映する前に確認してください。詳しくは[ホストが実行する設定の保護](docs/network-policy.md#ホストが実行する設定の保護)を参照してください。
 
 ## クイックスタート
 
 ### 1. リポジトリに取り込む
 
-使いたいリポジトリのルートで、コアを`.devcontainer/claude`に取り込み、雛形を`.devcontainer/`へコピーします。取り込み先は`.devcontainer/claude`に固定です。
+使いたいリポジトリのルートで、コアを`.devcontainer/claude`に取り込み、雛形を`.devcontainer/`へコピーしてください。取り込み先は`.devcontainer/claude`に固定です。
 
 ```sh
 git subtree add --prefix=.devcontainer/claude https://github.com/Hogeyama/claude-devcontainer dist --squash
@@ -51,21 +51,21 @@ git add .devcontainer && git commit -m "Add Claude Code dev container"
 
 #### GitHub
 
-GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)します。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けます。
+GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
 
 #### Claude
 
-Claudeのサブスクリプションを使う場合は、ホストのClaude Codeで[`setup-token`](https://code.claude.com/docs/en/cli-reference)を実行し、対話手順に従って長期トークンを発行します。
+Claudeのサブスクリプションを使う場合は、ホストのClaude Codeで[`setup-token`](https://code.claude.com/docs/en/cli-reference)を実行し、対話手順に従って長期トークンを発行してください。
 
 ```sh
 claude setup-token
 ```
 
-API keyを使う場合は、代わりに[Claude ConsoleのAPI keys](https://platform.claude.com/settings/keys)で発行したkeyを使います。
+API keyを使う場合は、代わりに[Claude ConsoleのAPI keys](https://platform.claude.com/settings/keys)で発行したkeyを使ってください。
 
 ### 3. 認証情報の取り出し方を設定する
 
-ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書きます。`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`のどちらか一方を設定します。取り出し方は手元の環境に合わせて選んでください。
+ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`のどちらか一方を設定してください。取り出し方は手元の環境に合わせて選んでください。
 
 ```sh
 GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使う場合
@@ -74,7 +74,7 @@ CLAUDE_CODE_OAUTH_TOKEN=$(secret-tool lookup service claude-code) # libsecretを
 # GITHUB_TOKEN=github_pat_...                                     # 値を直接書く場合。ファイルはchmod 600にしてください
 ```
 
-このファイルはホストで実行されます。agentが書き換えられる作業ツリーの中には置かないでください。
+認証情報の注入スクリプトは、このファイルをホストのシェルで実行します。agentが書き換えられる作業ツリーの中には置かないでください。
 
 ### 4. 起動する
 
@@ -83,7 +83,7 @@ devcontainer up
 ```
 
 Dev Containersがimageのビルドとコンテナ（本体とプロキシ。DinDを有効にした場合はDinDも）の起動を行います。
-プロキシには3.で設定した認証情報が設定されます。
+起動処理は、3.で設定した認証情報をプロキシへ自動で渡します。
 
 ### 5. 実行する
 
@@ -95,8 +95,8 @@ devcontainer exec claude
 
 VS Codeで実行する場合:
 
-1. ホストのVS CodeにDev Containers拡張をインストールします。
-2. 取り込んだリポジトリで`code .`を実行し、通知またはコマンドパレットから「Dev Containers: Reopen in Container」を実行します。上の手順で起動したコンテナにそのまま接続します。
+1. ホストのVS CodeにDev Containers拡張をインストールしてください。
+2. 取り込んだリポジトリで`code .`を実行し、通知またはコマンドパレットから「Dev Containers: Reopen in Container」を実行してください。VS Codeが上の手順で起動したコンテナにそのまま接続します。
 
 VS Codeはホストの認証情報をコンテナへ転送する機能を持っています。使う前に[VS Codeで開く](docs/usage.md#vs-codeで開く)の利用条件を確認してください。
 
@@ -109,9 +109,9 @@ VS Codeはホストの認証情報をコンテナへ転送する機能を持っ�
 
 ### 6. 終了する
 
-ClaudeはCtrl-Cか`/exit`で終了します。VS Codeで開いていた場合は、ウィンドウを閉じるとComposeも停止します。
+Claudeを終了するには、Ctrl-Cを押すか`/exit`を入力してください。VS Codeで開いていた場合は、ウィンドウを閉じるとComposeも停止します。
 
-CLIで使っていた場合は、ホストで取り込んだリポジトリのルートで次を実行してComposeを停止します。
+CLIで使っていた場合は、ホストで取り込んだリポジトリのルートで次を実行してComposeを停止してください。
 
 ```sh
 project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' \
@@ -119,11 +119,11 @@ project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.p
 docker compose -p "$project" -f .devcontainer/compose.yaml down
 ```
 
-作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。これらも消す場合は`down --volumes`を使います。
+作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。これらも消す場合は`down --volumes`を使ってください。
 
 ## カスタマイズする
 
-コアの外にある自分のファイルを編集します。
+コアの外にある自分のファイルを編集してください。
 
 | 変えたいもの | 編集するファイル |
 |---|---|
@@ -138,15 +138,14 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 
 ### ホストの設定を引き継ぐ
 
-`devcontainer up`のたびに、ホストの`~/.claude`から次のものがagentの`~/.claude`へコピーされます。
+`devcontainer up`のたびに、設定のコピースクリプトがホストの`~/.claude`から次のものをagentへコピーします。
 
 - `settings.json`、`CLAUDE.md`、`skills/`、`agents/`、`commands/`、`output-styles/`
 - `settings.json`の`statusLine`と`hooks`のコマンドが`~/.claude/…`（`$HOME/.claude/…`でも可）として参照しているファイル
 
-`.credentials.json`、セッション履歴、`plugins/`などはコピーしません。
+このスクリプトは、`.credentials.json`、セッション履歴、`plugins/`などをコピーしません。
 
-`settings.json`はagentの`~/.claude`ではなく、managed settings（`/etc/claude-code/managed-settings.d/50-host.json`）として置きます。
-ほかの`~/.claude`のファイルはroot所有でコピーします。
+このスクリプトは、`settings.json`をmanaged settings（`/etc/claude-code/managed-settings.d/50-host.json`）として配置し、ほかの`~/.claude`のファイルをroot所有でコピーします。
 エージェントはこれらを書き換えられないので、ホストで設定したhookを外したり、hookが実行するスクリプトを差し替えたりできません。
 
 ほかのファイルは、`~/.config/claude-devcontainer/extra/`にホームディレクトリと同じ構成で置くと、agentのホームディレクトリへコピーされます。
@@ -160,18 +159,18 @@ ln -s ~/.claude/statusline.sh .claude/statusline.sh
 ln -s ~/.config/git/config .config/git/config
 ```
 
-Gitの設定は自動ではコピーしません。credential helper、署名、deltaのようなpagerなど、コンテナでは動かない設定が混ざりやすいからです。ホストの設定をそのまま渡すか、コンテナ用に書いたファイルを置くかを選んでください。`extra/.claude/.credentials.json`はsymlinkで`~/.claude`ごと渡してもコピーしません。
+設定のコピースクリプトは、Gitの設定を自動ではコピーしません。credential helper、署名、deltaのようなpagerなど、コンテナでは動かない設定が混ざりやすいからです。ホストの設定をそのまま渡すか、コンテナ用に書いたファイルを置くかを選んでください。このスクリプトは、symlinkで`~/.claude`ごと渡されても`extra/.claude/.credentials.json`をコピー対象から除外します。
 
 > [!NOTE]
 > - コピーはホストからコンテナへの一方向です。ホストの`settings.json`はmanaged settingsになるので、コンテナ内で`/config`などから変えた設定やプロジェクトの設定より優先されます。コンテナ用の値にしたい場合は、`extra/.claude/settings.json`を使ってください。
 > - agentの`~/.claude`はコンテナの再起動で消えます（セッション履歴の`projects/`は残ります）。コピーしたファイルはroot所有なので、hookのスクリプトが自分の隣にファイルを書く場合は失敗します。
 > - `settings.json`の`env`もそのままagentに見えます。秘密を書いている場合は、`extra/.claude/settings.json`でコンテナ用の設定を用意してください。
-> - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れます。
+> - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`にインストール手順を書いてください。
 > - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映できます。
 
 ### DinDとnixを使う
 
-DinDとnixは、どちらも既定では無効です。必要な機能を`.devcontainer/.env`で`1`にすると有効になります。
+DinDとnixは、どちらも既定では無効です。使いたい機能の設定値を`.devcontainer/.env`で`1`にしてください。
 
 ```sh
 # agentからDockerを使えるようにする
@@ -182,7 +181,7 @@ CLAUDE_DEVCONTAINER_NIX=1
 
 DinDを有効にすると、agentから`docker`やTestcontainersを使えます。使い方は[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。
 
-nixを有効にすると、`devcontainer up`のたびにホストでリポジトリのflakeのdev shellを`nix print-dev-env`で書き出します。agentのbashはそれを読み込み、ホストの`/nix/store`を読み取り専用で使います。
+nixを有効にすると、起動スクリプトが`devcontainer up`のたびにホストで`nix print-dev-env`を実行し、リポジトリのflakeのdev shellを書き出します。agentのbashはそれを読み込み、ホストの`/nix/store`を読み取り専用で使います。
 
 ```sh
 # 評価するコミット。既定はHEAD
@@ -192,14 +191,14 @@ CLAUDE_DEVCONTAINER_NIX_SHELL=devShells.x86_64-linux.foo
 ```
 
 > [!WARNING]
-> - flakeの評価では、ホストでinputを取得し、ビルドも実行します。proxyを通らないので、agentがflakeを書き換えると、ホストに任意のURLへ接続させたり、ネットワークに接続できる状態でビルドさせたりできてしまいます。このため作業ツリーではなく、指定したコミットを評価します。ただし`.git`はagentが書き込めるので、agentがコミットしたりrefを動かしたりすると、それが評価されます。flakeに関わる変更は、`.devcontainer/`の変更と同じく、`up`の前に確認してください。不安な場合は、`CLAUDE_DEVCONTAINER_NIX_REF`に確認済みのコミットのハッシュを書きます。
+> - nixはflakeの評価時に、ホストでinputを取得し、ビルドも実行します。proxyを通らないので、agentがflakeを書き換えると、ホストに任意のURLへ接続させたり、ネットワークに接続できる状態でビルドさせたりできてしまいます。このため起動スクリプトは、作業ツリーではなく、指定したコミットをnixの評価対象にします。ただし`.git`はagentが書き込めるので、agentがコミットしたりrefを動かしたりすると、それが評価されます。flakeに関わる変更は、`.devcontainer/`の変更と同じく、`up`の前に確認してください。不安な場合は、`CLAUDE_DEVCONTAINER_NIX_REF`に確認済みのコミットのハッシュを書いてください。
 > - ホストの`/nix/store`全体がagentから読めます。設定ファイルなどに秘密を入れてstoreに置いている場合は、それも見えます。
 
-書き出したdev shellは`.devcontainer/.nix-env/`に置きます（Gitの管理対象からは自動で外れます）。
+起動スクリプトは、書き出したdev shellを`.devcontainer/.nix-env/`に保存し、Gitの管理対象から自動で除外します。
 
 ### UIDとネットワークを変える
 
-`.devcontainer/.env`に書きます。書かなかった項目は既定値になります。
+`.devcontainer/.env`に以下の設定を書いてください。書かなかった項目は既定値になります。
 
 ```sh
 CLAUDE_DEVCONTAINER_UID=1001             # agentのUID。既定は1000
@@ -208,12 +207,12 @@ CLAUDE_DEVCONTAINER_PROXY_NET=10.99.0    # agentとproxyの間のネットワー
 CLAUDE_DEVCONTAINER_DIND_NET=10.99.1     # agentとDinDの間のネットワーク。既定は10.231.71
 ```
 
-- UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせます（`id -u`と`id -g`で確認できます）。DinDのdockerdも同じUIDで動きます。UIDは0と、DinDが内部で使う100000〜165535は指定できません。
-- ネットワークは`/24`の先頭3オクテットを書きます。proxyは`.10`、DinDは`.10`、agentは`.20`を使います。同じホストで複数のリポジトリを同時に起動するときは、リポジトリごとに別の値にしてください。
+- UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせてください。DinDのdockerdも同じUIDで動きます。UIDは0と、DinDが内部で使う100000〜165535は指定できません。
+- ネットワークは`/24`の先頭3オクテットを書いてください。proxyは`.10`、DinDは`.10`、agentは`.20`を使います。同じホストで複数のリポジトリを同時に起動するときは、リポジトリごとに別の値にしてください。
 
 ホストごとに値が変わるので、`.env`はコミットせず`.gitignore`に入れておくとよいです。agentは`.devcontainer/`を書き換えられないので、`.env`も変更できません。
 
-値を変えたら`devcontainer up --remove-existing-container`で作り直します。UIDを変えた場合は、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
+値を変えたら`devcontainer up --remove-existing-container`で作り直してください。UIDを変えた場合は、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
 
 ## 更新する
 
