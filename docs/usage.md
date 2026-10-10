@@ -20,7 +20,7 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 ## DockerとTestcontainers
 
-DinDは`.devcontainer/.env`に`CLAUDE_DEVCONTAINER_DIND=1`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは`.devcontainer/images.txt`に1行に1つ`名前:tag`の形で書いてください。`#`以降はコメントです。
+DinDは`.devcontainer/claude.env`に`CLAUDE_DEVCONTAINER_DIND=1`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは`.devcontainer/images.txt`に1行に1つ`名前:tag`の形で書いてください。`#`以降はコメントです。
 
 ```
 testcontainers/ryuk:0.14.0

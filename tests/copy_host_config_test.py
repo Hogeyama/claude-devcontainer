@@ -104,6 +104,22 @@ class ArchiveTest(unittest.TestCase):
             members = self.members()
         self.assertEqual({name for name in members if name.startswith('.claude/keys/')}, {'.claude/keys/other.txt'})
 
+    def test_settings_come_from_the_environment_then_env_then_claude_env(self):
+        (self.root / '.devcontainer').mkdir()
+        (self.root / '.devcontainer/claude.env').write_text('A=workspace\nB=workspace\nC=workspace\n')
+        (self.root / '.devcontainer/.env').write_text('B=host\nC="host"\n')
+        with mock.patch.object(copy_host_config, 'ROOT', self.root), mock.patch.dict('os.environ', {'C': 'environment'}, clear=True):
+            got = [copy_host_config.setting(name, 'default') for name in 'ABCD']
+        self.assertEqual(got, ['workspace', 'host', 'environment', 'default'])
+
+    def test_empty_override_uses_default_instead_of_a_lower_priority_file(self):
+        (self.root / '.devcontainer').mkdir()
+        (self.root / '.devcontainer/claude.env').write_text('A=workspace\nB=workspace\n')
+        (self.root / '.devcontainer/.env').write_text('A=\nB=host\n')
+        with mock.patch.object(copy_host_config, 'ROOT', self.root), mock.patch.dict('os.environ', {'B': ''}, clear=True):
+            self.assertEqual([copy_host_config.setting(name, 'default') for name in 'AB'],
+                             ['default', 'default'])
+
     def test_extra_overlays_the_home_directory(self):
         self.settings({'model': 'opus'})
         (self.extra / '.claude/skills/added').mkdir(parents=True)

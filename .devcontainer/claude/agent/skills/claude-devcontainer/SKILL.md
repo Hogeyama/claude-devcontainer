@@ -35,7 +35,7 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Docker (DinD)
 
-Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docker` cannot work, and the human has to set `CLAUDE_DEVCONTAINER_DIND=1` in `.devcontainer/.env`.
+Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docker` cannot work, and the human has to set `CLAUDE_DEVCONTAINER_DIND=1` in `.devcontainer/claude.env`.
 
 - DinD reaches no registry and no external DNS. `docker pull` fails, and so does any network access during a build (`apt-get install`, `npm install`, ...).
 - The only images are those the human listed in `.devcontainer/images.txt`; `docker images` shows them. If one is missing, give the human its exact `name:tag`.
@@ -51,7 +51,7 @@ Nothing can be installed from a package registry while you run. The host provide
 |---|---|
 | A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built |
 | An image for DinD | `.devcontainer/images.txt` |
-| The nix dev shell of the repository's flake | `CLAUDE_DEVCONTAINER_NIX=1` in `.devcontainer/.env` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
+| The nix dev shell of the repository's flake | `CLAUDE_DEVCONTAINER_NIX=1` in `.devcontainer/claude.env` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
 | Environment variables or volumes | `.devcontainer/compose.yaml` |
 
 Project dependencies that are already in the working tree, such as `node_modules`, can be used. If they are missing, ask the human to fetch them on the host.

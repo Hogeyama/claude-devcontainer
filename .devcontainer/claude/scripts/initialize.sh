@@ -10,13 +10,22 @@ if [ ! -d .git ]; then
 fi
 mkdir -p .git/hooks .git/modules
 
-# A setting from the environment, else from .devcontainer/.env, as compose reads it.
+# A setting from the environment, else from .devcontainer/.env, else from
+# .devcontainer/claude.env, as compose reads them.
 setting() {
     eval "value=\${$1-}"
-    if [ -z "$value" ] && [ -f .devcontainer/.env ]; then
-        value=$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .devcontainer/.env | tail -n 1)
-        value=${value%\"}; value=${value#\"}; value=${value%\'}; value=${value#\'}
-    fi
+    eval "present=\${$1+x}"
+    for file in .devcontainer/.env .devcontainer/claude.env; do
+        [ "$present" = x ] && break
+        if [ -f "$file" ]; then
+            # Keep a marker so an empty assignment still overrides the next file.
+            value=$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*/x/p" "$file" | tail -n 1)
+            [ -n "$value" ] || continue
+            present=x
+            value=${value#x}
+            value=${value%\"}; value=${value#\"}; value=${value%\'}; value=${value#\'}
+        fi
+    done
     printf '%s' "${value:-$2}"
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND 0)

@@ -75,11 +75,16 @@ def referenced(settings):
 
 
 def setting(name, default):
-    """Return a setting from the environment, else from .devcontainer/.env, as compose reads it."""
-    value = os.environ.get(name, '')
-    if not value:
+    """Return a setting from the environment, else from .devcontainer/.env, else from
+    .devcontainer/claude.env, as compose reads them."""
+    value = os.environ.get(name)
+    for file in ('.env', 'claude.env'):
+        # An explicit empty value overrides lower-priority files too; Compose's
+        # ${NAME:-default} then selects the default.
+        if value is not None:
+            break
         try:
-            for line in (ROOT / '.devcontainer/.env').read_text().splitlines():
+            for line in (ROOT / '.devcontainer' / file).read_text().splitlines():
                 key, _, rest = line.partition('=')
                 if key.strip() == name:
                     value = rest.strip().strip('"\'')

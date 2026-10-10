@@ -2,4 +2,6 @@
 # extend it here instead of editing it. Relative paths below are from
 # .devcontainer/.
 include:
-  - claude/compose.yaml
+  - path: claude/compose.yaml
+    # The workspace's settings. .env, if present, overrides them for this host.
+    env_file: [claude.env]

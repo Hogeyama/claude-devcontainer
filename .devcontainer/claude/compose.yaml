@@ -1,7 +1,9 @@
 # Distributed core. Include it from .devcontainer/compose.yaml and extend there;
 # paths here assume this directory is .devcontainer/claude in the workspace.
 #
-# Settings, read from .devcontainer/.env (or the environment of `devcontainer up`):
+# Settings, read from the environment of `devcontainer up`, else from
+# .devcontainer/.env (this host's), else from .devcontainer/claude.env (the
+# workspace's; see template/compose.yaml):
 #   CLAUDE_DEVCONTAINER_UID, CLAUDE_DEVCONTAINER_GID  the agent's user; it must be
 #     able to write the workspace on the host. Default 1000.
 #   CLAUDE_DEVCONTAINER_PROXY_NET, CLAUDE_DEVCONTAINER_DIND_NET  the first three

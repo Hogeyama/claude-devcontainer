@@ -71,6 +71,8 @@ git diff --check
 特定の試験だけを実行する場合は、全カテゴリのコマンドに代えて、必要なものを選んで実行してください。
 
 ```sh
+# 設定ファイルの優先順位: Compose CLIのみ使用、daemon不要
+python3 -m unittest discover -s tests -p settings_integration_test.py -v
 # 実 mitmproxy／模擬 TLS upstream
 RUN_DOCKER_TESTS=1 python3 -m unittest discover -s tests -p proxy_integration_test.py -v
 # 実 Dev Containers CLI up/exec・再起動・実 Claude Bash・SDK/Ryuk
@@ -86,7 +88,7 @@ Dev Containersの全体試験は、試験スクリプトがDinDとsumiを有効�
 
 検証用のリポジトリを用意してください。コアをコピーするときは`cp -a`などでsymlinkを保持してください。`features/nix-1`のリンク先をコピーすると、ホストの`/nix/store`全体がコピーされてしまいます。
 
-検証用リポジトリには、`hello`を含むdefault dev shellと、別のツールを含む名前付きdev shellを用意し、`flake.nix`と`flake.lock`をコミットしてください。設定値は`.devcontainer/.env`に書いてください。同名の環境変数があるとそちらが優先されるので、先に解除してください。
+検証用リポジトリには、`hello`を含むdefault dev shellと、別のツールを含む名前付きdev shellを用意し、`flake.nix`と`flake.lock`をコミットしてください。設定値は`.devcontainer/claude.env`に書いてください。同名の環境変数や`.devcontainer/.env`の値があるとそちらが優先されるので、先に解除してください。
 
 CLIとComposeで同じ検証用環境を操作するため、開始時に`export COMPOSE_PROJECT_NAME="cdc-flags-$(date +%s)"`も実行してください。ネットワークの範囲は、他の環境と重ならない値に設定してください。
 

@@ -19,7 +19,7 @@ CORE = ROOT / '.devcontainer/claude'
 AGENT_IMAGE = os.environ.get('AGENT_TEST_IMAGE', 'claude-devcontainer-agent:task2')
 SUMI_IMAGE = os.environ.get('SUMI_TEST_IMAGE', 'claude-devcontainer-sumi:task2')
 SECRET = 'Tr0ub4dor-fixture'
-# The same settings as .devcontainer/.env; AGENT_IMAGE must be built with this UID/GID.
+# The same settings as .devcontainer/.env or claude.env; AGENT_IMAGE must be built with this UID/GID.
 AGENT_UID = os.environ.get('CLAUDE_DEVCONTAINER_UID', '1000')
 AGENT_GID = os.environ.get('CLAUDE_DEVCONTAINER_GID', '1000')
 DIND_NET = os.environ.get('CLAUDE_DEVCONTAINER_DIND_NET', '10.231.71')
@@ -37,19 +37,20 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         fixtures(cls.directory)
         auth_variables = ('GITHUB_TOKEN', 'GH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY',
                           'ANTHROPIC_AUTH_TOKEN')
-        cls.env = {k: v for k, v in os.environ.items() if k not in auth_variables}
+        # The sumi settings come from the workspace's files (start_environment).
+        cls.env = {k: v for k, v in os.environ.items()
+                   if k not in auth_variables and not k.startswith('CLAUDE_DEVCONTAINER_SUMI')}
         # initializeCommand reads the credentials config; never the developer's own.
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
         # Every test here but the credentials ones relies on Docker.
         cls.env.update(CLAUDE_DEVCONTAINER_DIND='1')
         # The sumi service reads a secrets file outside the workspace, under a
         # name other than the default. Not in cls.directory, which the agent mounts.
-        sumi = Path(tempfile.mkdtemp(prefix='cdc-sumi-'))
-        cls.addClassCleanup(shutil.rmtree, sumi)
-        (sumi / 'list.txt').write_text(SECRET + '\n')
-        (sumi / 'list.txt').chmod(0o600)
-        cls.env.update(CLAUDE_DEVCONTAINER_SUMI='1', CLAUDE_DEVCONTAINER_SUMI_DIR=str(sumi),
-                       CLAUDE_DEVCONTAINER_SUMI_FILE='list.txt')
+        # start_environment() sets it up through claude.env and .env.
+        cls.sumi = Path(tempfile.mkdtemp(prefix='cdc-sumi-'))
+        cls.addClassCleanup(shutil.rmtree, cls.sumi)
+        (cls.sumi / 'list.txt').write_text(SECRET + '\n')
+        (cls.sumi / 'list.txt').chmod(0o600)
         # initializeCommand copies the Claude Code configuration; never the developer's own.
         claude = cls.directory / 'claude'
         (claude / 'skills/fixture').mkdir(parents=True)
@@ -97,8 +98,14 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         # Lay it out as a consumer would: the distributed core plus its template.
         shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', symlinks=True,
                         ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt'):
+        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt', 'claude.env'):
             shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
+        # The workspace's settings, and this host's overriding them: with the
+        # wrong precedence, initializeCommand finds no secrets file and up fails.
+        with (cls.workspace / '.devcontainer/claude.env').open('a') as settings:
+            settings.write('CLAUDE_DEVCONTAINER_SUMI=1\nCLAUDE_DEVCONTAINER_SUMI_FILE=missing.txt\n')
+        (cls.workspace / '.devcontainer/.env').write_text(
+            f'CLAUDE_DEVCONTAINER_SUMI_DIR={cls.sumi}\nCLAUDE_DEVCONTAINER_SUMI_FILE=list.txt\n')
         with (cls.workspace / '.devcontainer/images.txt').open('a') as images:
             images.write('busybox:1.37\ntestcontainers/ryuk:0.14.0\n')
         shutil.copytree(ROOT / 'tests', cls.workspace / 'tests', ignore=shutil.ignore_patterns('__pycache__'))

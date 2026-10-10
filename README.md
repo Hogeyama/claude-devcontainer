@@ -32,7 +32,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 
 ```sh
 git subtree add --prefix=.devcontainer/claude https://github.com/Hogeyama/claude-devcontainer dist --squash
-cp .devcontainer/claude/template/{devcontainer.json,compose.yaml,agent-setup.sh,images.txt} .devcontainer/
+cp .devcontainer/claude/template/* .devcontainer/
 git add .devcontainer && git commit -m "Add Claude Code dev container"
 ```
 
@@ -42,9 +42,10 @@ git add .devcontainer && git commit -m "Add Claude Code dev container"
 .devcontainer/
 ├── devcontainer.json   自分のファイル
 ├── compose.yaml        自分のファイル。claude/compose.yamlをincludeする
+├── claude.env          自分のファイル。DinDなど、このリポジトリで使う機能の設定
 ├── agent-setup.sh      自分のファイル。agentにツールを追加する
 ├── images.txt          自分のファイル。DinDに読み込むイメージ
-└── claude/             コア。編集しない
+└── claude/             取り込んだもの。編集しない
 ```
 
 ### 2. 認証情報を用意する
@@ -168,66 +169,105 @@ ln -s ~/.config/git/config .config/git/config
 > - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`にインストール手順を書いてください。
 > - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映できます。
 
-### DinDとnixを使う
+### 設定ファイル
 
-DinDとnixは、どちらも既定では無効です。使いたい機能の設定値を`.devcontainer/.env`で`1`にしてください。
+設定は`.devcontainer/claude.env`と`.devcontainer/.env`のどちらにも書けます。リポジトリで共有するか、そのホストだけで使うかに応じて書き分けてください。
+
+| ファイル | 設定する内容 | Gitでの扱い |
+|---|---|---|
+| `.devcontainer/claude.env` | DinD・nix・sumiの有効化など、リポジトリで共有する設定 | コミットする |
+| `.devcontainer/.env` | そのホストでの機能の有効・無効、UID・ネットワーク・ファイルの場所など | `.gitignore`に追加し、コミットしない |
+
+どちらも`KEY=value`形式で、ホスト側で編集します。agentからは書き換えられません。`.env`はホスト固有の設定が必要な場合だけ作成してください。
+
+同じ項目を複数の場所に指定した場合は、起動時の環境変数、`.env`、`claude.env`の順に優先されます。たとえば、共有の`claude.env`でDinDを有効にしていても、手元の`.env`に`CLAUDE_DEVCONTAINER_DIND=0`と書けば、そのホストでは無効になります。空の値を指定した項目は既定値に戻り、優先順位の低いファイルの値は使われません。
+
+DinD・nix・sumiは、いずれも既定では無効です。それぞれの設定値を`1`にすると有効、`0`にすると無効になります。設定を変更したら、ホストでリポジトリのルートからコンテナを作り直してください。
 
 ```sh
-# agentからDockerを使えるようにする
+devcontainer up --remove-existing-container
+```
+
+### Dockerを使う（DinD）
+
+[設定ファイル](#設定ファイル)に次の設定を書くことで、DinD (Docker in Docker)を有効にできます。
+
+```dotenv
 CLAUDE_DEVCONTAINER_DIND=1
-# ホストの/nix/storeをmountし、flakeのdev shellを読み込む
+```
+
+DinDから外部のregistryには接続できないため、使うイメージを`.devcontainer/images.txt`に列挙する必要があります。
+列挙されたイメージは、起動時にホストからDinDへ読み込まれます。
+イメージの指定方法やポートへの接続方法は、[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。
+
+### nixのdev shellを使う
+
+ホストにnixがあり、リポジトリのflakeでdev shellを定義している場合は、そのツールをagentのBashでも使えます。flakeをコミットしてから、[設定ファイル](#設定ファイル)に次の設定を書いてください。
+
+```dotenv
 CLAUDE_DEVCONTAINER_NIX=1
 ```
 
-DinDを有効にすると、agentから`docker`やTestcontainersを使えます。使い方は[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。
+既定では`HEAD`にあるflakeのdefault dev shellを使います。評価するコミットやdev shellを変える場合は、同じファイルに次の設定を追加してください。
 
-nixを有効にすると、起動スクリプトが`devcontainer up`のたびにホストで`nix print-dev-env`を実行し、リポジトリのflakeのdev shellを書き出します。agentのbashはそれを読み込み、ホストの`/nix/store`を読み取り専用で使います。
-
-```sh
-# 評価するコミット。既定はHEAD
+```dotenv
+# 評価するコミットやref。既定はHEAD
 CLAUDE_DEVCONTAINER_NIX_REF=HEAD
-# dev shellのattribute。既定はdefault
+# 名前付きdev shellを使う例。省略するとdefault
 CLAUDE_DEVCONTAINER_NIX_SHELL=devShells.x86_64-linux.foo
 ```
 
-> [!WARNING]
-> - nixはflakeの評価時に、ホストでinputを取得し、ビルドも実行します。proxyを通らないので、agentがflakeを書き換えると、ホストに任意のURLへ接続させたり、ネットワークに接続できる状態でビルドさせたりできてしまいます。このため起動スクリプトは、作業ツリーではなく、指定したコミットをnixの評価対象にします。ただし`.git`はagentが書き込めるので、agentがコミットしたりrefを動かしたりすると、それが評価されます。flakeに関わる変更は、`.devcontainer/`の変更と同じく、`up`の前に確認してください。不安な場合は、`CLAUDE_DEVCONTAINER_NIX_REF`に確認済みのコミットのハッシュを書いてください。
-> - ホストの`/nix/store`全体がagentから読めます。設定ファイルなどに秘密を入れてstoreに置いている場合は、それも見えます。
+`devcontainer up`のたびに、起動スクリプトがホストで`nix print-dev-env`を実行します。書き出した環境をagentのBashで読み込み、ホストの`/nix/store`を読み取り専用で使います。
 
-起動スクリプトは、書き出したdev shellを`.devcontainer/.nix-env/`に保存し、Gitの管理対象から自動で除外します。
+> [!WARNING]
+> * flakeの評価・inputの取得・ビルドはホストで実行され、proxyの通信制限を受けません。評価対象はコミット済みのflakeですが、agentもコミットやrefの変更ができます。`up`の前にflakeの変更を確認してください。
+> * agentからはホストの`/nix/store`全体を読めます。store内の設定ファイルなどに秘密が含まれていれば、その値も見えます。
 
 ### シークレットをマスクする
 
-[sumi](https://github.com/Hogeyama/nix-agent-sandbox/tree/main/contrib/sumi)を使うと、`Read`や`Bash`などのツールが返す内容から、指定した値を`*`に置き換えてからClaudeに渡せます。
-`.env`や`application.properties`のように、作業ツリーにシークレットが書かれている場合に使います。
+作業ツリーの`.env`や`application.properties`にあるパスワードなどを、Claudeに見せたくない場合は[sumi](https://github.com/Hogeyama/nix-agent-sandbox/tree/main/contrib/sumi)を有効にしてください。`Read`や`Bash`などのツールの出力に含まれる指定した値を、`*`に置き換えてからClaudeへ渡します。既定では無効です。
 
-ホストにシークレットファイルを作り、1行に1つ値を書いてください。書き方の詳細はsumiのREADMEを参照してください。
+まず、ホストの作業ツリーの外に、マスクしたい値の一覧を作成してください。既定の場所は`~/.claude/sumi/secrets.txt`です。
 
 ```sh
 mkdir -p ~/.claude/sumi
 [ -e ~/.claude/sumi/secrets.txt ] || install -m 600 /dev/null ~/.claude/sumi/secrets.txt
 ${EDITOR:-vi} ~/.claude/sumi/secrets.txt
+chmod 600 ~/.claude/sumi/secrets.txt
 ```
 
-`.devcontainer/.env`に以下の設定を書いて有効にしてください。
+ファイルの権限は0600にし、所有者のUIDをagentのUID（`CLAUDE_DEVCONTAINER_UID`、既定は1000）に合わせてください。ホストのユーザーと異なる場合は、[UIDの設定](#uidとネットワークを変える)も確認してください。
 
-```sh
+次に、[設定ファイル](#設定ファイル)に次の設定を書いてsumiを有効にします。
+
+```dotenv
 CLAUDE_DEVCONTAINER_SUMI=1
-# シークレットファイルのあるディレクトリと、その中のファイル名。既定は~/.claude/sumiとsecrets.txt
+```
+
+値の一覧を`~/.claude/sumi/secrets.txt`以外に置く場合は、ホストでの保存場所を`.devcontainer/.env`に指定してください。ディレクトリとファイル名を次の2項目に分けて書きます。
+
+| 設定項目 | 指定するもの | 既定値 |
+|---|---|---|
+| `CLAUDE_DEVCONTAINER_SUMI_DIR` | 一覧ファイルを置いたホスト上のディレクトリの絶対パス | ホストの`~/.claude/sumi` |
+| `CLAUDE_DEVCONTAINER_SUMI_FILE` | そのディレクトリ内のファイル名 | `secrets.txt` |
+
+たとえば、ホストの`/home/me/secrets/sumi.txt`を読ませる場合は、次のように指定します。
+
+```dotenv
 CLAUDE_DEVCONTAINER_SUMI_DIR=/home/me/secrets
 CLAUDE_DEVCONTAINER_SUMI_FILE=sumi.txt
 ```
 
-シークレットファイルを読むのは、`sumi`サービスのコンテナだけです。Composeの設定により、このコンテナにはディレクトリが読み取り専用でmountされ、ネットワークは無効になります。
-agentにはmountされないので、エージェントはファイル自体を読めません。agentのhookとBashは、読み取り専用で共有したUnixソケット越しにマスクを依頼します。
-agentの起動処理がhookをmanaged settingsに配置するので、エージェントが外すことはできません。
+（2変数に分けているのは単に実装の都合で、本質的な意味はありません）
 
-- ファイルを編集すると、次のツール実行から新しい内容が使われます。再起動は不要です。
-- 利用者がホスト側で、シークレットファイルの権限を0600にし、所有者のUIDを`CLAUDE_DEVCONTAINER_UID`（既定は1000）に合わせてください。ツールは権限や所有者を自動変更しません。
-- 設定のコピースクリプトは、ホストで`sumi init`を実行していても、そのhookをコンテナにコピーしません。ホストのパスを指していて、コンテナでは動かないからです。このスクリプトは、シークレットファイルも置き場所によらずコピー対象から除外します。
+sumiの起動とClaude Codeへのhookの設定は自動で行われます。ホストで`sumi init`を実行する必要はありません。
+
+値の一覧は、ネットワークを持たない専用の`sumi`コンテナだけに読み取り専用で共有されます。agentには共有されず、ホストの設定をコピーする際にも除外されます。
+
+一覧の内容を編集した場合は再起動不要で、次のツール実行から反映されます。実行中のコマンドには反映されません。空のファイルや不正な形式などで読み直せない場合は、それまでの一覧を使い続け、sumiのログに警告が出ます。
 
 > [!WARNING]
-> sumiはツールの出力を書き換えるだけで、隔離の仕組みではありません。`CLAUDE.md`のようにhookを通らずに読まれる内容や、エンコードされた値は伏せられません。エージェントがマスクの結果から値を推測することも防げません。詳しくはsumiのREADMEの「リミテーション」を参照してください。
+> sumiはツールの出力をマスクする機能です。作業ツリーにある元のファイルをagentから隠すものではありません。`CLAUDE.md`のようにhookを通らずに読まれる内容や、二重のbase64など対応していない形式に変換された値は伏せられません。マスクの結果から値を推測されることも防げません。詳しくは[sumiのリミテーション](https://github.com/Hogeyama/nix-agent-sandbox/tree/main/contrib/sumi#リミテーション)を確認してください。
 
 ### UIDとネットワークを変える
 
@@ -243,9 +283,7 @@ CLAUDE_DEVCONTAINER_DIND_NET=10.99.1     # agentとDinDの間のネットワー�
 - UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせてください。DinDのdockerdも同じUIDで動きます。UIDは0と、DinDが内部で使う100000〜165535は指定できません。
 - ネットワークは`/24`の先頭3オクテットを書いてください。proxyは`.10`、DinDは`.10`、agentは`.20`を使います。同じホストで複数のリポジトリを同時に起動するときは、リポジトリごとに別の値にしてください。
 
-ホストごとに値が変わるので、`.env`はコミットせず`.gitignore`に入れておくとよいです。agentは`.devcontainer/`を書き換えられないので、`.env`も変更できません。
-
-値を変えたら`devcontainer up --remove-existing-container`で作り直してください。UIDを変えた場合は、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
+UIDを変えた場合は、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
 
 ## 更新する
 
@@ -255,6 +293,7 @@ devcontainer up --remove-existing-container
 ```
 
 `.devcontainer/claude/template/`が変わった場合は、自分の`devcontainer.json`などへ必要に応じて反映してください。
+`claude.env`を使うには、雛形から同ファイルをコピーし、`compose.yaml`の`include`も雛形と同じ形にしてください。この2つは一緒に変更してください。
 
 コアを直接編集した場合も、`git subtree pull`が上流の変更と3-way mergeするので、衝突しなければ手元の変更は残ります。ただし隔離にかかわる設定が上流の修正と混ざるため、できるだけ避けてください。
 
