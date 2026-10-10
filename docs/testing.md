@@ -76,6 +76,35 @@ RUN_DOCKER_TESTS=1 TESTCONTAINERS_NODE_MODULES="$sdk_dir/node_modules" \
   python3 -m unittest discover -s tests -p devcontainer_integration_test.py -v
 ```
 
+### DinDとnixのフラグを検証する
+
+上の自動テストはDinDを有効にして実行します。実行時は`CLAUDE_DEVCONTAINER_NIX=0`にしてください。nixのdev shellとフラグの切替えは、以下の手順で手動確認します。ホストにnixが必要です。
+
+検証用のリポジトリを用意します。コアをコピーするときは`cp -a`などでsymlinkを保持します。`features/nix-1`のリンク先をコピーすると、ホストの`/nix/store`全体がコピーされてしまいます。
+
+検証用リポジトリには、`hello`を含むdefault dev shellと、別のツールを含む名前付きdev shellを用意し、`flake.nix`と`flake.lock`をコミットします。設定値は`.devcontainer/.env`に書きます。同名の環境変数があるとそちらが優先されるので、先に解除してください。
+
+CLIとComposeで同じ検証用環境を操作するため、開始時に`export COMPOSE_PROJECT_NAME="cdc-flags-$(date +%s)"`も実行します。ネットワークの範囲は、他の環境と重ならない値に設定してください。
+
+1. `CLAUDE_DEVCONTAINER_DIND=0`、`CLAUDE_DEVCONTAINER_NIX=1`で`devcontainer up`を実行します。`images.txt`には存在しないイメージ名を入れ、DinDが無効な場合に読み込みを待たず起動できることも確認します。
+2. 次のコマンドで、dev shellのツールが使え、Dockerには接続できず、Bashの前に実行するスニペットが空であることを確認します。
+
+   ```sh
+   devcontainer exec --workspace-folder . bash -ic 'hello --version'
+   devcontainer exec --workspace-folder . sh -c '! docker info >/dev/null 2>&1 && test ! -s /etc/dind-bridge/env.sh && test ! -S /run/dind-bridge/bridge.sock'
+   docker compose -f .devcontainer/compose.yaml ps --services --status running
+   ```
+
+   起動中のサービスは`agent`と`proxy`だけになります。
+
+3. `flake.nix`のツールを変更し、コミットせずにもう一度`up`します。コミット済みのdev shellが使われ、未コミットの変更が反映されないことを確認します。
+4. `CLAUDE_DEVCONTAINER_NIX_SHELL`に名前付きdev shellのattribute（例: `devShells.x86_64-linux.foo`）を指定して`up`し、そのshellのツールが使えることを確認します。
+5. `CLAUDE_DEVCONTAINER_NIX_REF`に存在しないrefを指定して`up`します。警告が出て、`.devcontainer/.nix-env/env.rc`が更新されないことを確認します。
+6. `CLAUDE_DEVCONTAINER_NIX_REF`を有効なrefに戻します。`flake.lock`がないコミットでも`up`し、作業ツリーへ`flake.lock`が作られていないことを確認します。
+7. `CLAUDE_DEVCONTAINER_NIX=0`で再起動し、dev shellのツールが読み込まれないことを確認します。
+
+設定を変えるときは、先に`docker compose -f .devcontainer/compose.yaml down`で検証用環境を停止します。DinDを有効に戻す前には、検証用の存在しないイメージ名を`images.txt`から削除してください。
+
 ### 後片付け
 
 検証が終わったら、準備に使ったホストのターミナルで一時ディレクトリを削除します。

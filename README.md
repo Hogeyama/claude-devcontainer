@@ -11,9 +11,9 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 - Dev Containers CLI（`devcontainer`コマンド）
 - git subtree（多くのディストリビューションのgitに同梱されています）
 - Python 3
-- privilegedコンテナ、ユーザー・ネットワークnamespace、bubblewrapを利用できるカーネル
+- ユーザー・ネットワークnamespaceとbubblewrapを利用できるカーネル。DinDを使う場合はprivilegedコンテナも必要です
 - ホストのfirewallがコンテナ間通信を許可する環境
-- 内部ネットワーク用に、ホスト・VPN・他コンテナと重ならない`/24`のアドレス範囲2つ（既定は`10.231.70.0/24`と`10.231.71.0/24`。[UIDとネットワークを変える](#uidとネットワークを変える)で変更できます）
+- nix（使う場合、Optional）
 
 ## 利用上の制限
 
@@ -82,7 +82,7 @@ CLAUDE_CODE_OAUTH_TOKEN=$(secret-tool lookup service claude-code) # libsecretを
 devcontainer up
 ```
 
-Dev Containersがimageのビルドと3つのコンテナ（本体、DinD、プロキシ）の起動を行います。
+Dev Containersがimageのビルドとコンテナ（本体とプロキシ。DinDを有効にした場合はDinDも）の起動を行います。
 プロキシには3.で設定した認証情報が設定されます。
 
 ### 5. 実行する
@@ -163,6 +163,34 @@ Gitの設定は自動ではコピーしません。credential helper、署名、
 > - `settings.json`の`env`もそのままagentに見えます。秘密を書いている場合は、`extra/.claude/settings.json`でコンテナ用の設定を用意してください。
 > - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れます。
 > - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映できます。
+
+### DinDとnixを使う
+
+DinDとnixは、どちらも既定では無効です。必要な機能を`.devcontainer/.env`で`1`にすると有効になります。
+
+```sh
+# agentからDockerを使えるようにする
+CLAUDE_DEVCONTAINER_DIND=1
+# ホストの/nix/storeをmountし、flakeのdev shellを読み込む
+CLAUDE_DEVCONTAINER_NIX=1
+```
+
+DinDを有効にすると、agentから`docker`やTestcontainersを使えます。使い方は[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。
+
+nixを有効にすると、`devcontainer up`のたびにホストでリポジトリのflakeのdev shellを`nix print-dev-env`で書き出します。agentのbashはそれを読み込み、ホストの`/nix/store`を読み取り専用で使います。
+
+```sh
+# 評価するコミット。既定はHEAD
+CLAUDE_DEVCONTAINER_NIX_REF=HEAD
+# dev shellのattribute。既定はdefault
+CLAUDE_DEVCONTAINER_NIX_SHELL=devShells.x86_64-linux.foo
+```
+
+> [!WARNING]
+> - flakeの評価では、ホストでinputを取得し、ビルドも実行します。proxyを通らないので、agentがflakeを書き換えると、ホストに任意のURLへ接続させたり、ネットワークに接続できる状態でビルドさせたりできてしまいます。このため作業ツリーではなく、指定したコミットを評価します。ただし`.git`はagentが書き込めるので、agentがコミットしたりrefを動かしたりすると、それが評価されます。flakeに関わる変更は、`.devcontainer/`の変更と同じく、`up`の前に確認してください。不安な場合は、`CLAUDE_DEVCONTAINER_NIX_REF`に確認済みのコミットのハッシュを書きます。
+> - ホストの`/nix/store`全体がagentから読めます。設定ファイルなどに秘密を入れてstoreに置いている場合は、それも見えます。
+
+書き出したdev shellは`.devcontainer/.nix-env/`に置きます（Gitの管理対象からは自動で外れます）。
 
 ### UIDとネットワークを変える
 

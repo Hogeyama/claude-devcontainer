@@ -27,7 +27,12 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     # The claude-projects volume copies this owner when it is first created.
     && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
     # .git/config is read-only (see compose.yaml); do not try to record upstreams.
-    && git config --system branch.autoSetupMerge false
+    && git config --system branch.autoSetupMerge false \
+    # The dev shell initializeCommand exports when CLAUDE_DEVCONTAINER_NIX=1.
+    && printf '%s\n' \
+         'if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /workspace/.devcontainer/.nix-env/env.rc ]; then' \
+         '    . /workspace/.devcontainer/.nix-env/env.rc' \
+         'fi' >>/etc/bash.bashrc
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \

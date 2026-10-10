@@ -2,7 +2,10 @@
 # postStartCommand: return once the agent is ready for work, so that `devcontainer
 # up` does not hand it over half-started.
 set -eu
-timeout 60 sh -c 'until docker info >/dev/null 2>&1; do sleep 0.2; done'
+dind=${CLAUDE_DEVCONTAINER_DIND:-0}
+if [ "$dind" = 1 ]; then
+    timeout 60 sh -c 'until docker info >/dev/null 2>&1; do sleep 0.2; done'
+fi
 # initializeCommand copies the host's configuration in once this container
 # starts (scripts/copy-host-config.py).
 markers=/run/claude-devcontainer
@@ -13,7 +16,7 @@ fi
 # initializeCommand also loads the images in .devcontainer/images.txt into DinD
 # (scripts/load-images.py), and names its marker after the list's content.
 list=/workspace/.devcontainer/images.txt
-if [ -n "$(sed 's/#.*//' "$list" 2>/dev/null | tr -d ' \t\r\n')" ]; then
+if [ "$dind" = 1 ] && [ -n "$(sed 's/#.*//' "$list" 2>/dev/null | tr -d ' \t\r\n')" ]; then
     marker="$markers/images-$(sha256sum <"$list" | cut -c1-16)"
     # Large images take minutes, so wait long only once loading has started.
     if ! timeout 60 sh -c 'until [ -e "$1.started" ] || [ -e "$1" ]; do sleep 0.5; done' sh "$marker" ||

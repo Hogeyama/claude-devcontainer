@@ -6,6 +6,11 @@
 #     able to write the workspace on the host. Default 1000.
 #   CLAUDE_DEVCONTAINER_PROXY_NET, CLAUDE_DEVCONTAINER_DIND_NET  the first three
 #     octets of the two internal /24 networks. Default 10.231.70 and 10.231.71.
+#   CLAUDE_DEVCONTAINER_DIND=1  run Docker in DinD for the agent. Default 0.
+#   CLAUDE_DEVCONTAINER_NIX=1  mount the host's /nix/store and load the dev shell
+#     that initializeCommand exports (see scripts/initialize.sh). Default 0.
+# Features are 0 or 1: compose can neither add a service nor a mount
+# conditionally, so the values select a scale and a path instead.
 services:
   agent:
     build:
@@ -41,6 +46,8 @@ services:
       TESTCONTAINERS_HOST_OVERRIDE: 127.0.0.1
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock
       CLAUDE_ENV_FILE: /etc/dind-bridge/env.sh
+      CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
+      CLAUDE_DEVCONTAINER_NIX: ${CLAUDE_DEVCONTAINER_NIX:-0}
       # A dummy that the proxy replaces with the real credential. Claude gets
       # its own dummy from apiKeyHelper in managed-settings.json.
       GH_TOKEN: managed-by-proxy
@@ -61,6 +68,12 @@ services:
       - dind-run:/var/run/dind:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
+      # features/nix-1 links to /nix/store; features/nix-0 is empty.
+      - type: bind
+        source: ./features/nix-${CLAUDE_DEVCONTAINER_NIX:-0}
+        target: /nix/store
+        read_only: true
+        bind: {create_host_path: false}
     # Markers of the host's startup work, which wait-ready.sh waits for. A
     # restart clears them, so a stale one cannot end the wait early.
     tmpfs:
@@ -75,6 +88,8 @@ services:
         condition: service_healthy
       dind:
         condition: service_started
+        # Absent unless CLAUDE_DEVCONTAINER_DIND=1.
+        required: false
   proxy:
     build:
       context: proxy
@@ -99,6 +114,7 @@ services:
       timeout: 3s
       retries: 30
   dind:
+    scale: ${CLAUDE_DEVCONTAINER_DIND:-0}
     build:
       context: dind
       args:

@@ -38,6 +38,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.env = {k: v for k, v in os.environ.items() if k not in auth_variables}
         # initializeCommand reads the credentials config; never the developer's own.
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
+        # Every test here but the credentials ones relies on Docker.
+        cls.env.update(CLAUDE_DEVCONTAINER_DIND='1')
         # initializeCommand copies the Claude Code configuration; never the developer's own.
         claude = cls.directory / 'claude'
         (claude / 'skills/fixture').mkdir(parents=True)
@@ -83,7 +85,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.workspace = cls.directory / 'workspace'
         cls.workspace.mkdir()
         # Lay it out as a consumer would: the distributed core plus its template.
-        shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', symlinks=True,
+                        ignore=shutil.ignore_patterns('__pycache__'))
         for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt'):
             shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
         with (cls.workspace / '.devcontainer/images.txt').open('a') as images:
