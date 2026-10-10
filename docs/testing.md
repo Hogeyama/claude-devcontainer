@@ -78,7 +78,9 @@ RUN_DOCKER_TESTS=1 TESTCONTAINERS_NODE_MODULES="$sdk_dir/node_modules" \
 
 ### DinDとnixのフラグを検証する
 
-上の自動テストはDinDを有効にして実行します。実行時は`CLAUDE_DEVCONTAINER_NIX=0`にしてください。nixのdev shellとフラグの切替えは、以下の手順で手動確認します。ホストにnixが必要です。
+Dev Containersの全体試験はDinDを有効にして実行します。実行時は`CLAUDE_DEVCONTAINER_NIX=0`にしてください。Bashの起動試験は、nix有効・無効の両方で、非対話・対話・login shellと、VS Codeと同じくユーザーの`.bashrc`だけを読む経路を確認します。
+
+実際のnixのdev shellとフラグの切替えは、以下の手順で手動確認します。ホストにnixが必要です。
 
 検証用のリポジトリを用意します。コアをコピーするときは`cp -a`などでsymlinkを保持します。`features/nix-1`のリンク先をコピーすると、ホストの`/nix/store`全体がコピーされてしまいます。
 

@@ -28,22 +28,21 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
     # .git/config is read-only (see compose.yaml); do not try to record upstreams.
     && git config --system branch.autoSetupMerge false \
-    # The dev shell initializeCommand exports when CLAUDE_DEVCONTAINER_NIX=1.
-    && printf '%s\n' \
-         'if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /workspace/.devcontainer/.nix-env/env.rc ]; then' \
-         '    . /workspace/.devcontainer/.nix-env/env.rc' \
-         'fi' >>/etc/bash.bashrc
+    # Interactive shells, including Nix's Bash launched by VS Code.
+    && printf '%s\n' '. /etc/bash-env.sh' >>/home/node/.bashrc
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
+COPY agent/bash-env.sh /etc/bash-env.sh
 COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh /usr/local/bin/
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
     CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     HOME=/home/node \
+    BASH_ENV=/etc/bash-env.sh \
     SHELL=/bin/bash \
     CLAUDE_CODE_SHELL=/bin/bash
 WORKDIR /workspace
