@@ -6,6 +6,13 @@ if [ "${1:-}" != --as-node ]; then
     cp /public-ca/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/managed-proxy.crt
     update-ca-certificates >/dev/null
     /usr/local/bin/init-firewall.sh
+    # Managed hooks, so that the agent cannot turn the masking off.
+    sumi=/etc/claude-code/managed-settings.d/90-sumi.json
+    if [ "${CLAUDE_DEVCONTAINER_SUMI:-0}" = 1 ]; then
+        install -m 644 /usr/local/share/claude-devcontainer/sumi-settings.json "$sumi"
+    else
+        rm -f "$sumi"
+    fi
     exec setpriv --reuid=node --regid=node --init-groups \
         --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
         "$0" --as-node "$@"

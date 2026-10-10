@@ -15,7 +15,11 @@
     "vscode": {
       "extensions": ["anthropic.claude-code"],
       "settings": {
-        "remote.downloadExtensionsLocally": true
+        "remote.downloadExtensionsLocally": true,
+        "terminal.integrated.profiles.linux": {
+          "bash": { "path": "/bin/bash" }
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
       }
     }
   }

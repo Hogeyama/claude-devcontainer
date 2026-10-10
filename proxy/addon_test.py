@@ -110,6 +110,35 @@ class PolicyTest(unittest.TestCase):
         self.assertNotIn('X-Api-Key', headers)
         self.assertIn('oauth-2025-04-20', headers['anthropic-beta'])
 
+    def test_anthropic_artifacts(self):
+        self.credentials = ('managed-pat', 'managed-oauth', 'oauth')
+        for path in ['/v1/mcp_servers?limit=1000', '/api/claude_code/policy_limits', '/api/oauth/profile', '/api/artifacts/mcp',
+                     '/api/claude_code/settings']:
+            with self.subTest(path=path):
+                f = flow('https://api.anthropic.com' + path, 'GET', b'', [('Authorization', 'Bearer attacker')])
+                del f.request.headers['Content-Length']
+                self.assertEqual(self.allowed(f).get_all('Authorization'), ['Bearer managed-oauth'])
+        mcp = [('Mcp-Session-Id', 's'), ('MCP-Protocol-Version', 'v'), ('X-Upload-Token', 't'), ('X-Frame-CP', 'go')]
+        headers = self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp', 'POST', b'{}', mcp))
+        self.assertEqual([headers[name] for name, _ in mcp], ['s', 'v', 't', 'go'])
+        self.allowed(flow('https://api.anthropic.com/api/artifacts/mcp/upload/u1', 'PUT', b'page'))
+        self.allowed(flow('https://api.anthropic.com/api/frame/deploy/direct?attempt_id=a', 'POST', b'{}'))
+        self.allowed(flow('https://api.anthropic.com/api/frame/frames?limit=200', 'GET', b''))
+        self.allowed(flow('https://api.anthropic.com/api/frame/permalink', 'GET', b''))
+        for url, method in [('https://api.anthropic.com/api/artifacts/mcp/other', 'POST'),
+                            ('https://api.anthropic.com/api/frame/', 'GET'),
+                            ('https://api.anthropic.com/api/frame/perm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/perm/slug?org=o', 'GET'),
+                            ('https://api.anthropic.com/api/frame/PERM/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/perm', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/./perm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame//perm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/api/frame/%70erm/slug', 'PATCH'),
+                            ('https://api.anthropic.com/v1/mcp_servers', 'POST'),
+                            ('https://api.anthropic.com/api/oauth/account/settings', 'GET')]:
+            with self.subTest(url=url):
+                self.denied(flow(url, method))
+
     def test_anthropic_rejects_ways_to_reach_other_hosts(self):
         variants = [messages(mcp_servers=[]), messages(container='c'),
                     messages(tools=[{'type': 'web_fetch_20250910', 'name': 'web_fetch'}])]
@@ -129,16 +158,29 @@ class PolicyTest(unittest.TestCase):
         self.denied(anthropic(path='/v1/files'))
         self.denied(flow('https://api.anthropic.com/api/event_logging/v2/batch', 'POST'))
 
-    def test_body_is_refused_before_buffering(self):
-        unbounded = anthropic()
-        del unbounded.request.headers['Content-Length']
-        unbounded.request.headers['Transfer-Encoding'] = 'chunked'
-        oversized = anthropic()
-        oversized.request.headers['Content-Length'] = str(8 * 1024 * 1024 + 1)
-        for f in (unbounded, oversized):
-            self.addon.requestheaders(f)
-            self.assertEqual(f.response.status_code, 403)
-            self.assertIsNotNone(f.error)
+    def test_anthropic_feature_flags(self):
+        self.allowed(flow('https://api.anthropic.com/api/eval/sdk-abc', 'POST', b'{"attributes":{}}'))
+        for url, method in [('https://api.anthropic.com/api/eval/sdk-abc', 'GET'),
+                            ('https://api.anthropic.com/api/eval/', 'POST'),
+                            ('https://api.anthropic.com/api/eval/sdk-abc/more', 'POST'),
+                            ('https://api.anthropic.com/api/features/sdk-abc', 'GET'),
+                            ('https://api.anthropic.com/sub/sdk-abc', 'GET')]:
+            with self.subTest(url=url, method=method):
+                self.denied(flow(url, method))
+
+    def test_anthropic_bodies_are_not_bounded(self):
+        chunked = anthropic()
+        del chunked.request.headers['Content-Length']
+        chunked.request.headers['Transfer-Encoding'] = 'chunked'
+        large = anthropic(messages(messages=[{'role': 'user', 'content': 'x' * (32 * 1024 * 1024)}]))
+        for f in (chunked, large):
+            self.allowed(f)
+
+    def test_denied_body_is_refused_before_buffering(self):
+        f = anthropic(path='/v1/files')
+        self.addon.requestheaders(f)
+        self.assertEqual(f.response.status_code, 403)
+        self.assertIsNotNone(f.error)
         self.credentials = None
         f = flow()
         self.addon.requestheaders(f)
@@ -149,7 +191,7 @@ class PolicyTest(unittest.TestCase):
         self.credentials = None
         f = anthropic()
         self.addon.requestheaders(f)
-        self.assertIsNone(f.error, 'a bounded body is read so that Claude sees the reason')
+        self.assertIsNone(f.error, 'an Anthropic body is read so that Claude sees the reason')
         self.assertEqual(f.response.status_code, 403)
         self.assertIn(b'inject-credentials.py', f.response.content)
         headers = self.allowed(flow('https://api.anthropic.com/api/hello', 'GET', b'', [('X-Api-Key', 'attacker')]))

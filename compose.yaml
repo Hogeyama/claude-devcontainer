@@ -1,7 +1,9 @@
 # Distributed core. Include it from .devcontainer/compose.yaml and extend there;
 # paths here assume this directory is .devcontainer/claude in the workspace.
 #
-# Settings, read from .devcontainer/.env (or the environment of `devcontainer up`):
+# Settings, read from the environment of `devcontainer up`, else from
+# .devcontainer/.env (this host's), else from .devcontainer/claude.env (the
+# workspace's; see template/compose.yaml):
 #   CLAUDE_DEVCONTAINER_UID, CLAUDE_DEVCONTAINER_GID  the agent's user; it must be
 #     able to write the workspace on the host. Default 1000.
 #   CLAUDE_DEVCONTAINER_PROXY_NET, CLAUDE_DEVCONTAINER_DIND_NET  the first three
@@ -9,6 +11,12 @@
 #   CLAUDE_DEVCONTAINER_DIND=1  run Docker in DinD for the agent. Default 0.
 #   CLAUDE_DEVCONTAINER_NIX=1  mount the host's /nix/store and load the dev shell
 #     that initializeCommand exports (see scripts/initialize.sh). Default 0.
+#   CLAUDE_DEVCONTAINER_SUMI=1  mask the values in a secrets file in what
+#     Claude's tools return. Default 0.
+#   CLAUDE_DEVCONTAINER_SUMI_DIR, CLAUDE_DEVCONTAINER_SUMI_FILE  the host
+#     directory holding the secrets file, and its name in it. Default
+#     ~/.claude/sumi and secrets.txt. Relative directories are based here,
+#     at .devcontainer/claude/.
 # Features are 0 or 1: compose can neither add a service nor a mount
 # conditionally, so the values select a scale and a path instead.
 services:
@@ -45,9 +53,12 @@ services:
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock
       CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
       CLAUDE_DEVCONTAINER_NIX: ${CLAUDE_DEVCONTAINER_NIX:-0}
-      # A dummy that the proxy replaces with the real credential. Claude gets
-      # its own dummy from apiKeyHelper in managed-settings.json.
+      CLAUDE_DEVCONTAINER_SUMI: ${CLAUDE_DEVCONTAINER_SUMI:-0}
+      # Dummies that the proxy replaces with the real credentials. Claude takes
+      # an OAuth token, not an API key, so that it counts as a claude.ai login
+      # and offers Artifacts.
       GH_TOKEN: managed-by-proxy
+      CLAUDE_CODE_OAUTH_TOKEN: managed-by-proxy
     volumes:
       - ../..:/workspace
       # The host builds and runs what is here (compose files, the proxy's
@@ -63,6 +74,8 @@ services:
       - {type: bind, source: ../../.git/modules, target: /workspace/.git/modules, read_only: true, bind: {create_host_path: false}}
       - public-ca:/public-ca:ro
       - dind-run:/var/run/dind:ro
+      # Read-only, so that the agent cannot swap the broker's socket for its own.
+      - sumi-run:/run/sumi:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
       # features/nix-1 links to /nix/store; features/nix-0 is empty.
@@ -75,6 +88,11 @@ services:
     # restart clears them, so a stale one cannot end the wait early.
     tmpfs:
       - /run/claude-devcontainer:uid=${CLAUDE_DEVCONTAINER_UID:-1000},gid=${CLAUDE_DEVCONTAINER_GID:-1000},mode=0700,size=1m
+      # Root's, and sticky like /tmp: Claude Code creates and replaces its own
+      # files here, but cannot change or move the root-owned copies of the
+      # host's configuration (scripts/copy-host-config.py). Being a mount
+      # point, it cannot be moved aside as a whole either.
+      - /home/node/.claude:mode=1777
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
@@ -86,6 +104,10 @@ services:
       dind:
         condition: service_started
         # Absent unless CLAUDE_DEVCONTAINER_DIND=1.
+        required: false
+      sumi:
+        condition: service_started
+        # Absent unless CLAUDE_DEVCONTAINER_SUMI=1.
         required: false
   proxy:
     build:
@@ -146,6 +168,34 @@ services:
       dind-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_DIND_NET:-10.231.71}.10
 
+  # The mask broker. It alone reads the secrets; the agent's hooks and Bash ask
+  # it through the socket (agent/Dockerfile writes those hooks).
+  sumi:
+    scale: ${CLAUDE_DEVCONTAINER_SUMI:-0}
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+      target: sumi-serve
+      additional_contexts:
+        workspace-config: ..
+    # The owner of the secrets file, which must be 0600; and of the socket,
+    # which the agent connects to.
+    user: ${CLAUDE_DEVCONTAINER_UID:-1000}:${CLAUDE_DEVCONTAINER_GID:-1000}
+    command: [--secrets-file, "/secrets/${CLAUDE_DEVCONTAINER_SUMI_FILE:-secrets.txt}", --listen, /run/sumi/mask.sock]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges=true]
+    volumes:
+      # The directory, not the file: an editor that replaces the file on save
+      # would leave a file mount on the old content.
+      - type: bind
+        source: ${CLAUDE_DEVCONTAINER_SUMI_DIR:-${HOME}/.claude/sumi}
+        target: /secrets
+        read_only: true
+        bind: {create_host_path: false}
+      - sumi-run:/run/sumi
+
 networks:
   # Internal networks still give the host an address on each bridge. The agent
   # and DinD firewalls, not the network, keep containers off the host.
@@ -170,6 +220,11 @@ volumes:
   proxy-private-ca:
   dind-data:
   dind-run:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=${CLAUDE_DEVCONTAINER_UID:-1000},gid=${CLAUDE_DEVCONTAINER_GID:-1000},mode=0700
+  sumi-run:
     driver_opts:
       type: tmpfs
       device: tmpfs

@@ -8,17 +8,77 @@ from urllib.parse import unquote, urlsplit
 from mitmproxy import http
 from credentials import read_snapshot
 
-LOG = logging.getLogger('policy')
-HOSTS = {'api.github.com', 'github.com', 'api.anthropic.com'}
-MAX_BODY = 8 * 1024 * 1024
-# Claude Code's startup connectivity check.
+# --- Policy -------------------------------------------------------------------
+
+# The only requests let through, by host: (method, path regex). None allows
+# any method. Every host is reached on port 443 over HTTPS only.
+ROUTES = {
+    'api.github.com': [
+        ('POST', r'/graphql'),
+        ('GET', r'/user'),
+        (None, r'/repos/[^/]+/[^/]+(/.*)?'),
+    ],
+    'github.com': [
+        (None, r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)'),
+    ],
+    'api.anthropic.com': [
+        ('GET', r'/api/hello'),  # HELLO below
+        ('POST', r'/v1/messages'),
+        ('POST', r'/v1/messages/count_tokens'),
+        # Remote managed settings. With an OAuth token, Claude Code warns when
+        # it cannot read them.
+        ('GET', r'/api/claude_code/settings'),
+        # Feature flags (GrowthBook remote evaluation, POST /api/eval/<client
+        # key>). The body carries account and organization attributes. Without
+        # it every flag keeps its default, which turns off Artifact comments and
+        # live updates.
+        ('POST', r'/api/eval/[^/]+'),
+        # Artifacts: the Artifact tool publishes, reads and lists through
+        # /api/frame/; the claude.ai MCP server list names the Artifacts MCP
+        # server; the organization policy and the account's plan gate both.
+        # Except /api/frame/perm/, which changes who can open an artifact: the
+        # agent could otherwise make one public and hand its content to anyone.
+        # Sharing is left to the person, on claude.ai.
+        (None, r'/api/frame/(?!(?i:perm)(/|$)).+'),
+        ('GET', r'/v1/mcp_servers'),
+        ('GET', r'/api/claude_code/policy_limits'),
+        ('GET', r'/api/oauth/profile'),
+        (None, r'/api/artifacts/mcp(/upload/.+)?'),
+    ],
+}
+HOSTS = set(ROUTES)
+# Claude Code's startup connectivity check. It needs no credentials, so Claude
+# Code starts before they are injected.
 HELLO = ('api.anthropic.com', '/api/hello')
-NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
-# Everything else, including any client-supplied credential, is dropped.
+
+# Top-level fields that make Anthropic's servers contact other hosts.
+DENIED_FIELDS = {'mcp_servers', 'container'}
+# Tools that run in the client. Any other type (web fetch, code execution, ...)
+# runs on Anthropic's servers. A tool without a type is a custom tool.
+CLIENT_TOOL_TYPES = {'custom'}
+# Content sources carried in the request. A URL or file source makes
+# Anthropic's servers fetch it.
+INLINE_SOURCES = {'base64', 'text'}
+
+# Request headers passed upstream. Everything else, including any
+# client-supplied credential, is dropped.
 SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-length',
                 'transfer-encoding', 'user-agent', 'git-protocol', 'if-match', 'if-none-match',
                 'if-modified-since', 'if-unmodified-since', 'range', 'anthropic-beta',
-                'x-github-api-version'}
+                'x-github-api-version', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id',
+                'x-mcp-server-id', 'x-mcp-client-session-id', 'mcp-method', 'mcp-name', 'x-upload-token',
+                'anthropic-mcp-client-capabilities', 'anthropic-mcp-discover-protocol-version'}
+# The Artifact tool's headers. Anthropic routes /api/frame/ requests by them
+# (without X-Frame-CP the answer is 404), and new ones keep being added.
+SAFE_HEADER_PREFIXES = ('x-frame-',)
+ANTHROPIC_VERSION = '2023-06-01'
+OAUTH_BETA = 'oauth-2025-04-20'
+
+NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
+
+# ------------------------------------------------------------------------------
+
+LOG = logging.getLogger('policy')
 
 
 class Denied(Exception):
@@ -40,9 +100,8 @@ def check_blocks(content):
     if isinstance(content, str):
         return
     for block in content:
-        # A URL or file source makes Anthropic's servers fetch it.
         source = block.get('source')
-        require(not isinstance(source, dict) or source.get('type') in ('base64', 'text'))
+        require(not isinstance(source, dict) or source.get('type') in INLINE_SOURCES)
         if block.get('type') == 'tool_result':
             check_blocks(block.get('content', ''))
 
@@ -50,9 +109,9 @@ def check_blocks(content):
 def check_messages(raw):
     """Reject the ways a request can make Anthropic's servers contact other hosts."""
     body = json.loads(raw, object_pairs_hook=unique_keys)
-    require(not {'mcp_servers', 'container'} & set(body))
+    require(not DENIED_FIELDS & set(body))
     for tool in body.get('tools', []):
-        require(tool.get('type', 'custom') == 'custom')  # Server tools: web fetch, code execution, ...
+        require(tool.get('type', 'custom') in CLIENT_TOOL_TYPES)
     for message in body['messages']:
         check_blocks(message['content'])
     check_blocks(body.get('system', ''))
@@ -67,18 +126,12 @@ def check_request(req):
     # GitHub may normalize what this check sees as a /repos/... path.
     require(not re.search(r'[\x00-\x1f\x7f%\\]', decoded) and '//' not in decoded
             and not {'.', '..'} & set(decoded.split('/')))
-    if req.host == 'api.github.com':
-        require((req.method, path) in {('POST', '/graphql'), ('GET', '/user')}
-                or re.fullmatch(r'/repos/[^/]+/[^/]+(/.*)?', path))
-    elif req.host == 'github.com':
-        require(re.fullmatch(r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)', path))
-    elif (req.method, path) == ('GET', '/api/hello'):
-        pass  # Claude Code's startup connectivity check.
-    else:
-        require(req.method == 'POST' and path in ('/v1/messages', '/v1/messages/count_tokens'))
-        # A declared bound lets mitmproxy buffer the body for inspection.
-        length = req.headers.get('content-length', '')
-        require(length.isdecimal() and int(length) <= MAX_BODY and 'transfer-encoding' not in req.headers)
+    # Both spellings must match, or an encoded segment (%70erm for perm) could
+    # slip past a pattern that excludes it.
+    require(any(method in (None, req.method) and re.fullmatch(pattern, path) and re.fullmatch(pattern, decoded)
+                for method, pattern in ROUTES[req.host]))
+    if req.host == 'api.anthropic.com':
+        # check_messages reads the body as sent.
         require(req.headers.get('content-encoding', 'identity') == 'identity')
     return path
 
@@ -89,6 +142,7 @@ class PolicyAddon:
         req = flow.request
         LOG.warning('request-denied %s %s%s', req.method, req.pretty_host, urlsplit(req.path).path)
         flow.response = http.Response.make(403, b'blocked: ' + reason.encode(), {'Content-Type': 'text/plain'})
+        flow.metadata['denied'] = True
 
     def http_connect(self, flow):
         if flow.request.host not in HOSTS or flow.request.port != 443:
@@ -107,7 +161,7 @@ class PolicyAddon:
             except Exception:
                 self.deny(flow, NO_CREDENTIALS)
         # mitmproxy reads the whole body before sending a response, so close
-        # instead; except for Anthropic bodies, which check_request bounded, so
+        # instead; except for Anthropic bodies, which are read whole anyway, so
         # that Claude can show the reason.
         bounded = path is not None and req.host == 'api.anthropic.com'
         body = req.headers.get('content-length', '0') != '0' or 'transfer-encoding' in req.headers
@@ -125,23 +179,24 @@ class PolicyAddon:
         except Exception:
             return self.deny(flow)
         req.headers = http.Headers([(name, value) for name, value in req.headers.fields
-                                    if name.decode('ascii').lower() in SAFE_HEADERS])
+                                    if name.decode('ascii').lower() in SAFE_HEADERS
+                                    or name.decode('ascii').lower().startswith(SAFE_HEADER_PREFIXES)])
         req.headers['Host'] = req.host
         if (req.host, path) == HELLO:
-            return  # Needs no credentials, so Claude Code starts before they are injected.
+            return
         try:
             github_token, anthropic_token, auth_mode = read_snapshot()
         except Exception:
             return self.deny(flow, NO_CREDENTIALS)
         try:
             if req.host == 'api.anthropic.com':
-                req.headers['anthropic-version'] = '2023-06-01'
+                req.headers['anthropic-version'] = ANTHROPIC_VERSION
                 if auth_mode == 'api-key':
                     req.headers['x-api-key'] = anthropic_token
                 else:
                     req.headers['Authorization'] = 'Bearer ' + anthropic_token
                     betas = [beta.strip() for beta in req.headers.get('anthropic-beta', '').split(',') if beta.strip()]
-                    req.headers['anthropic-beta'] = ','.join(dict.fromkeys(betas + ['oauth-2025-04-20']))
+                    req.headers['anthropic-beta'] = ','.join(dict.fromkeys(betas + [OAUTH_BETA]))
             elif req.host == 'api.github.com':
                 req.headers['Authorization'] = 'Bearer ' + github_token
             else:
@@ -158,6 +213,12 @@ class PolicyAddon:
     def responseheaders(self, flow):
         # Responses are not inspected; streaming keeps server-sent events live.
         flow.response.stream = True
+        if flow.metadata.get('denied'):
+            return
+        # As with denials, the query is left out.
+        req, res = flow.request, flow.response
+        LOG.warning('upstream %d %s %s%s %s', res.status_code, req.method, req.pretty_host,
+                    urlsplit(req.path).path, res.headers.get('request-id', '-'))
 
 
 addons = [PolicyAddon()]

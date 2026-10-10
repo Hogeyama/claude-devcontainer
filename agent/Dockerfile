@@ -1,4 +1,22 @@
+# sumi masks secrets in what Claude's tools return (CLAUDE_DEVCONTAINER_SUMI in
+# compose.yaml). Its broker and the agent must run the same version.
+FROM scratch AS sumi-amd64
+ADD --chmod=755 --checksum=sha256:43d89c297e8381adac12d2fcc6280bccd99f8386fddce35d13bb4e6aa687f5ed \
+    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-x86_64-linux /sumi
+FROM scratch AS sumi-arm64
+ADD --chmod=755 --checksum=sha256:65f462ffa1831bb3e8b5f13198d5ef82d50d82bc0e6177dd824404d5bc3180f8 \
+    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-aarch64-linux /sumi
+FROM sumi-${TARGETARCH} AS sumi
+# The sumi service: the broker, which alone reads the secrets file.
+FROM scratch AS sumi-serve
+COPY --from=sumi /sumi /sumi
+ENTRYPOINT ["/sumi", "serve"]
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
+# Only agent-setup.sh from the workspace's .devcontainer/, if there is one. A
+# mount of the whole directory would rerun the setup whenever any file in it
+# changed, including this image's own files under claude/.
+FROM scratch AS workspace-setup
+COPY --from=workspace-config agent-setup.s[h] /
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates openssl git gh curl jq ripgrep python3 iptables \
@@ -17,7 +35,8 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec
 COPY dind-bridge/src/ /opt/dind-bridge/
 RUN chmod 755 /opt/dind-bridge/main.mjs \
     && ln -s /opt/dind-bridge/main.mjs /usr/local/bin/dind-bridge \
-    && mkdir -p /etc/claude-code \
+    # The host's settings.json goes in managed-settings.d (scripts/copy-host-config.py).
+    && mkdir -p /etc/claude-code/managed-settings.d \
     && install -d -m 700 -o node -g node /run/dind-bridge \
     && install -d -o node -g node /workspace \
     # The claude-projects volume copies this owner when it is first created.
@@ -28,9 +47,19 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     && printf '%s\n' '. /etc/bash-env.sh' >>/home/node/.bashrc
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
 # the host's network before the proxy applies. Core files are copied after it.
-RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \
+RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
+# The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
+COPY --from=sumi /sumi /usr/local/bin/sumi
+RUN sumi init --agent claude --server /run/sumi/mask.sock --shell /bin/bash --settings /tmp/sumi/settings.json \
+    && install -D -m 644 /tmp/sumi/settings.json /usr/local/share/claude-devcontainer/sumi-settings.json \
+    && rm -rf /tmp/sumi
+# With an OAuth token, an unfinished onboarding makes the CLI check
+# platform.claude.com, which the proxy does not allow, and refuse to start.
+# /workspace is trusted up front: the container and the proxy are the
+# boundary, so its hooks run confined either way.
+COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # Managed skills: only Claude in the container loads them (unlike .claude/skills
 # in the workspace), the agent cannot change them, and copying the host's
 # ~/.claude/skills does not replace them.

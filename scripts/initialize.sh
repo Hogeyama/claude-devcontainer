@@ -10,16 +10,37 @@ if [ ! -d .git ]; then
 fi
 mkdir -p .git/hooks .git/modules
 
-# A setting from the environment, else from .devcontainer/.env, as compose reads it.
+# A setting from the environment, else from .devcontainer/.env, else from
+# .devcontainer/claude.env, as compose reads them.
 setting() {
     eval "value=\${$1-}"
-    if [ -z "$value" ] && [ -f .devcontainer/.env ]; then
-        value=$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .devcontainer/.env | tail -n 1)
-        value=${value%\"}; value=${value#\"}; value=${value%\'}; value=${value#\'}
-    fi
+    eval "present=\${$1+x}"
+    for file in .devcontainer/.env .devcontainer/claude.env; do
+        [ "$present" = x ] && break
+        if [ -f "$file" ]; then
+            # Keep a marker so an empty assignment still overrides the next file.
+            value=$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*/x/p" "$file" | tail -n 1)
+            [ -n "$value" ] || continue
+            present=x
+            value=${value#x}
+            value=${value%\"}; value=${value#\"}; value=${value%\'}; value=${value#\'}
+        fi
+    done
     printf '%s' "${value:-$2}"
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND 0)
+
+# compose.yaml mounts the directory into the sumi service, which reads the file.
+if [ "$(setting CLAUDE_DEVCONTAINER_SUMI 0)" = 1 ]; then
+    dir=$(setting CLAUDE_DEVCONTAINER_SUMI_DIR "$HOME/.claude/sumi")
+    # Relative bind sources in the included compose.yaml use its directory.
+    case "$dir" in /*) ;; *) dir=".devcontainer/claude/$dir" ;; esac
+    secrets="$dir/$(setting CLAUDE_DEVCONTAINER_SUMI_FILE secrets.txt)"
+    if [ ! -f "$secrets" ]; then
+        echo "error: CLAUDE_DEVCONTAINER_SUMI=1 needs $secrets, one secret per line, with mode 0600." >&2
+        exit 1
+    fi
+fi
 
 # Export the flake's dev shell for the agent's bash to load from the read-only
 # .devcontainer/. Evaluate a commit rather than the working tree, which the
