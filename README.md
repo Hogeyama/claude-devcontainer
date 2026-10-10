@@ -32,7 +32,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 
 ```sh
 git subtree add --prefix=.devcontainer/claude https://github.com/Hogeyama/claude-devcontainer dist --squash
-cp .devcontainer/claude/template/{devcontainer.json,compose.yaml,agent-setup.sh} .devcontainer/
+cp .devcontainer/claude/template/{devcontainer.json,compose.yaml,agent-setup.sh,images.txt} .devcontainer/
 git add .devcontainer && git commit -m "Add Claude Code dev container"
 ```
 
@@ -43,6 +43,7 @@ git add .devcontainer && git commit -m "Add Claude Code dev container"
 ├── devcontainer.json   自分のファイル
 ├── compose.yaml        自分のファイル。claude/compose.yamlをincludeする
 ├── agent-setup.sh      自分のファイル。agentにツールを追加する
+├── images.txt          自分のファイル。DinDに読み込むイメージ
 └── claude/             コア。編集しない
 ```
 
@@ -129,6 +130,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 | agentのツール（言語処理系など） | `.devcontainer/agent-setup.sh`。imageのビルド時にrootで実行される |
 | 環境変数・volumeなどcomposeの設定 | `.devcontainer/compose.yaml`の`services:`。相対パスは`.devcontainer/`が基準 |
 | VS Codeの拡張機能など | `.devcontainer/devcontainer.json` |
+| DinDで使うイメージ（Testcontainersなど） | `.devcontainer/images.txt`。[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照 |
 
 `agent-setup.sh`はホストでのビルド時に実行されるので、package registryに接続できます。agentの実行時はproxyを通るため接続できません。
 

@@ -56,12 +56,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         assert denied.stdout == '403', denied.stdout + denied.stderr
         assert cls.compose_run('exec', '-T', 'proxy', 'sh', '-c', 'test ! -e /tmp/upstream.jsonl') == ''
         cls.inject_credentials('api-key')
-        # Copy, rather than mount, synthetic offline image archives into agent.
-        archive = cls.directory / 'images.tar'
-        subprocess.run(['docker', 'save', '-o', str(archive), 'busybox:1.37', 'testcontainers/ryuk:0.14.0'], check=True, capture_output=True, timeout=120)
-        cls.compose_run('cp', str(archive), 'agent:/tmp/cdc-images.tar')
-        cls.exec('docker', 'load', '-i', '/tmp/cdc-images.tar')
-        cls.exec('rm', '/tmp/cdc-images.tar')
+        # images.txt had them loaded into DinD before `up` returned.
+        cls.exec('docker', 'image', 'inspect', 'busybox:1.37', 'testcontainers/ryuk:0.14.0')
         cls.container = cls.exec('docker', 'run', '-d', '-p', '8080', 'busybox:1.37', 'sh', '-c',
                                  'mkdir -p /www; echo bridge-ok > /www/index.html; exec httpd -f -p 8080 -h /www').stdout.strip()
         cls.port = cls.exec('docker', 'inspect', '--format', '{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}', cls.container).stdout.strip()
@@ -88,8 +84,10 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.workspace.mkdir()
         # Lay it out as a consumer would: the distributed core plus its template.
         shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh'):
+        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt'):
             shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
+        with (cls.workspace / '.devcontainer/images.txt').open('a') as images:
+            images.write('busybox:1.37\ntestcontainers/ryuk:0.14.0\n')
         shutil.copytree(ROOT / 'tests', cls.workspace / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
         git = ['git', '-C', str(cls.workspace), '-c', 'user.name=t', '-c', 'user.email=t@example.com']
         for args in (['init', '-q'], ['add', '-A'], ['commit', '-qm', 'fixture']):
@@ -251,8 +249,9 @@ echo nested-network-blocked
             if iteration:
                 self.compose_run('restart', 'agent')
                 # What `devcontainer up` would run after the restart.
-                subprocess.run([sys.executable, str(self.workspace / '.devcontainer/claude/scripts/copy-host-config.py')],
-                               env=self.env, check=True, timeout=120)
+                for script in ('copy-host-config.py', 'load-images.py'):
+                    subprocess.run([sys.executable, str(self.workspace / '.devcontainer/claude/scripts' / script)],
+                                   env=self.env, check=True, timeout=120)
                 result = self.exec('sh', '-c', json.loads((CORE / 'template/devcontainer.json').read_text())['postStartCommand'])
                 self.assertNotIn('warning', result.stderr)
             for args in (['bash', '/workspace/tests/fixtures/bridge_probe.sh'],

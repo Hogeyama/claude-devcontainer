@@ -20,17 +20,21 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 ## DockerとTestcontainers
 
-作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージはホストで取得し、ファイルに保存してからコンテナ内のDockerへ投入します。
+作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは`.devcontainer/images.txt`に1行に1つ`名前:tag`の形で書きます。`#`以降はコメントです。
 
-以下はホストで実行する例です。テスト対象のイメージも同じ手順で追加してください。
-
-```sh
-mkdir -p images
-docker pull busybox:1.37
-docker pull testcontainers/ryuk:0.14.0
-docker save -o images/offline.tar busybox:1.37 testcontainers/ryuk:0.14.0
-devcontainer exec docker load -i /workspace/images/offline.tar
 ```
+testcontainers/ryuk:0.14.0
+postgres:16
+```
+
+`devcontainer up`のたびに、ホストにないイメージをホストでpullし、DinDへ読み込みます。
+
+- ホストにすでにあるイメージは、tagが動いていてもpullし直しません。新しくしたいときは、ホストで`docker pull`してから`up`してください。
+- DinDのデータはvolumeに残るので、送るのは初回と、ホストのイメージが変わったときだけです。
+- コンテナの起動時は、読み込みが終わるまで`up`が待ちます。失敗したイメージは警告に出ます。詳しくは`~/.local/state/claude-devcontainer/load-images.log`を見てください。
+- `up`の後にリストを変えた場合は、ホストで`.devcontainer/claude/scripts/load-images.py`を実行すると反映できます。
+
+ホストはリストにある名前をそのままpullするので、`images.txt`は`.devcontainer/`に置いてagentから書き換えられないようにしています。agentが名前を選べると、ホストを任意のregistryへ接続させられるからです。agentのコミットで`images.txt`が変わっていないかも確認してください。
 
 投入後は、agentのシェルから`docker run`や`docker build --network=none`を実行できます。buildには投入済みのbase imageとローカルにある依存ファイルを使います。Gradleは`--offline`で実行し、その他のツールも事前に用意したキャッシュや依存ファイルを使ってください。ビルド中のオンラインpackage installには対応していません。
 

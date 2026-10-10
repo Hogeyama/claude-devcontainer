@@ -17,7 +17,7 @@
 | Git向け応答 | 9 MiBの応答を逐次配送 |
 | ネットワーク隔離 | agentとDinDからの外部IP・DNS・IPv6・ホストへの接続拒否。DinD内ではbridgeとhost networkの両方を確認 |
 | proxy停止時 | 外部へ直接接続せず、通信が失敗すること |
-| オフラインDocker | イメージのload、build、実行 |
+| オフラインDocker | `images.txt`に書いたイメージの読み込み、build、実行 |
 | Docker APIと公開TCPポート | 通常のagent、別のnetwork namespace、agent再起動後、実Claude Code 2.1.295のBash sandboxからの接続 |
 | Testcontainers 12.1.0 | 起動、HTTP wait、mapped port、exec、Ryukによる残存コンテナの削除 |
 

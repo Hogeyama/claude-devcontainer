@@ -12,4 +12,6 @@ mkdir -p .git/hooks .git/modules
 # Never fail here: the environment works without the configuration.
 "$(dirname "$0")/copy-host-config.py" --background ||
     echo "warning: could not copy the host's configuration into the agent." >&2
+"$(dirname "$0")/load-images.py" --background ||
+    echo "warning: could not load the images in .devcontainer/images.txt into DinD." >&2
 exec "$(dirname "$0")/inject-credentials.py" --background
