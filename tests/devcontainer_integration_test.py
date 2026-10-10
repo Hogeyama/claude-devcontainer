@@ -38,6 +38,15 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.env = {k: v for k, v in os.environ.items() if k not in auth_variables}
         # initializeCommand reads the credentials config; never the developer's own.
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
+        # initializeCommand copies the Claude Code configuration; never the developer's own.
+        claude = cls.directory / 'claude'
+        (claude / 'skills/fixture').mkdir(parents=True)
+        (claude / 'skills/fixture/SKILL.md').write_text('fixture skill')
+        (cls.directory / 'statusline.sh').write_text('echo fixture-status')
+        (claude / 'statusline.sh').symlink_to(cls.directory / 'statusline.sh')
+        (claude / 'settings.json').write_text(json.dumps({'statusLine': {'type': 'command', 'command': 'sh ~/.claude/statusline.sh'}}))
+        (claude / '.credentials.json').write_text('synthetic-credentials')
+        cls.env.update(CLAUDE_CONFIG_DIR=str(claude))
         cls.start_environment()
         denied = cls.exec('curl', '--max-time', '5', '-s', '-o', '/dev/null', '-w', '%{http_code}',
                           'https://api.github.com/user')
@@ -176,6 +185,12 @@ class DevcontainerIntegrationTest(unittest.TestCase):
                     self.assertNotIn('authorization', headers)
                 self.assertNotIn('synthetic-managed-token', self.compose_run('logs', 'proxy'))
         self.inject_credentials('api-key')
+
+    def test_host_claude_configuration_is_copied_before_up_returns(self):
+        result = self.exec('sh', '-c', 'cd ~/.claude && cat skills/fixture/SKILL.md && sh statusline.sh && ls -A')
+        self.assertIn('fixture skill', result.stdout)
+        self.assertIn('fixture-status', result.stdout)
+        self.assertNotIn('.credentials.json', result.stdout)
 
     def test_whole_container_direct_egress_dns_ipv6_host_blocked(self):
         result = self.exec('python3', '/workspace/tests/fixtures/network_probe.py', self.host_ip, str(self.host_server.server_port))

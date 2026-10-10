@@ -134,6 +134,28 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 
 `.devcontainer/compose.yaml`では`cap_add`、`privileged`、`networks`なども上書きできてしまいます。agentの隔離はこれらの設定に依存しているので、変更しないでください。
 
+### Claude Codeの設定を引き継ぐ
+
+`devcontainer up`のたびに、ホストの`~/.claude`から次のものがagentの`~/.claude`へコピーされます。
+
+- `settings.json`、`CLAUDE.md`、`skills/`、`agents/`、`commands/`、`output-styles/`
+- `settings.json`の`statusLine`と`hooks`のコマンドが`~/.claude/…`（`$HOME/.claude/…`でも可）として参照しているファイル
+
+`.credentials.json`、セッション履歴、`plugins/`などはコピーしません。
+
+ほかのファイルを追加したいときは、`~/.config/claude-devcontainer/extra/`に置くとコピーされます。
+これはsymlinkでも構いません。例:
+
+```
+ln -s ~/.claude/statusline.sh ~/.config/claude-devcontainer/extra/statusline.sh
+```
+
+> [!NOTE]
+> - コピーはホストからコンテナへの一方向です。コンテナ内で`/config`などから変えた設定は、次の`up`で上書きされます。
+> - `settings.json`の`env`もそのままagentに見えます。秘密を書いている場合は、`extra/settings.json`でコンテナ用の設定を用意してください。
+> - `/home/<user>/…`のような絶対パスを使ったコマンドはコンテナでは動きません。`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れます。
+> - `up`の後にホストで設定を変えた場合は、`.devcontainer/claude/scripts/copy-claude-config.py`を実行すると反映できます。
+
 ### UIDとネットワークを変える
 
 `.devcontainer/.env`に書きます。書かなかった項目は既定値になります。

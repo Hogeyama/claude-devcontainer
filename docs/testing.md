@@ -10,7 +10,7 @@
 
 | 対象 | 確認内容 |
 |---|---|
-| Dev Containersの起動・実行 | 認証用環境変数がない状態でのbuild/up、起動処理の完了を待ってからの接続、権限を落としたUID・GIDでの実行、認証なし403、注入コマンドでOAuth/API keyを渡した後の通信、通常のCLIからの新規プロセス実行 |
+| Dev Containersの起動・実行 | 認証用環境変数がない状態でのbuild/up、起動処理とClaude Codeの設定のコピーの完了を待ってからの接続、権限を落としたUID・GIDでの実行、認証なし403、注入コマンドでOAuth/API keyを渡した後の通信、通常のCLIからの新規プロセス実行 |
 | proxyの認証処理 | 認証値の上書き、Cookieなど許可外のheaderの除去、認証値の更新と削除 |
 | proxyの通信制限 | raw TCP、SOCKS、平文HTTP、許可外の接続先へのCONNECT、不正なTLS証明書の拒否 |
 | Anthropic向け要求 | chunked本文・過大本文の早期切断、MCP・server tool・URL sourceの拒否、SSEの逐次配送 |

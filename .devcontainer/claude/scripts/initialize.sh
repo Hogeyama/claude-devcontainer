@@ -9,4 +9,7 @@ if [ ! -d .git ]; then
     exit 1
 fi
 mkdir -p .git/hooks .git/modules
+# Never fail here: the environment works without the configuration.
+"$(dirname "$0")/copy-claude-config.py" --background ||
+    echo "warning: could not copy the Claude Code configuration into the agent." >&2
 exec "$(dirname "$0")/inject-credentials.py" --background

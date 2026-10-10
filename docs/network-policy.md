@@ -51,6 +51,8 @@ agentが書き換えたものをホストが実行すると、通信の制限を
 
 このため、作業ディレクトリはGitリポジトリのルートである必要があります。`git worktree`で作った作業ツリーには対応していません。
 
+ホストのClaude Codeの設定（`~/.claude`の一部と`~/.config/claude-devcontainer/extra/`）は、ホストからagentへコピーするだけで、mountもしませんし、逆向きにも戻しません。`~/.claude`をmountすると、agentがhookを書き込んで、ホストのClaude Codeに実行させられるからです。コピーの対象は名前を決めたものだけです。`.credentials.json`やセッション履歴はコピーしません。
+
 ### 人間が気付く必要があるもの
 
 agentは、作業ツリーを書き換えずに、Gitの操作で`.devcontainer/`を変更したコミットを作ったり、indexに載せたりできます。それをホストで`git restore`、`checkout`、`reset --hard`、`pull`などで反映すると、次の`devcontainer up`で実行されます。同じように、agentが途中で止めたrebaseのtodoに`exec`行があると、ホストで`git rebase --continue`したときに実行されます。
