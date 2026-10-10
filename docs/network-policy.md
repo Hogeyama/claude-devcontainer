@@ -36,13 +36,52 @@ rootless DinDはprivilegedコンテナで動かします。同梱の[`dind-bridg
 
 agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの操作権限を読取り専用にはしません。ホストのDocker socketは共有しません。
 
-## 起動設定の保護
+## ホストが実行する設定の保護
 
-`.devcontainer/`はagentへread-onlyでmountします。ここにはホストが実行・ビルドするもの（compose設定、proxyの通信ルール、`initializeCommand`、認証情報の注入スクリプト、`agent-setup.sh`）があり、agentが書き換えると、次に起動したときに通信の制限を外したり、ホストで認証情報を盗んだりできるためです。
+agentが書き換えたものをホストが実行すると、通信の制限を外されたり、ホストで認証情報を盗まれたりします。そこで、ホストが実行・参照するものはagentへread-onlyでmountします。
 
-read-onlyにしても、agentはGitの操作で`.devcontainer/`を変更したコミットを作れます。作業ツリーを書き換えずにコミットやブランチを作れるためです。agentが作ったコミットをホストでcheckoutやmergeする前に、`.devcontainer/`の差分がないことを確認してください。
+| パス | ホストでの使われ方 |
+|---|---|
+| `.devcontainer/` | compose設定、proxyの通信ルール、`initializeCommand`、認証情報の注入、`agent-setup.sh`。次の起動時にホストがビルド・実行する |
+| `.git/config` | `core.fsmonitor`、`core.hooksPath`、`filter.*`、`include.path`など、ホストのGitにコマンドを実行させる設定を書ける |
+| `.git/hooks/` | ホストのGitが実行する |
+| `.git/modules/` | サブモジュールのconfigとhooks |
 
-`.git/hooks`や`.git/config`など、ホストのGitが実行・参照する設定は保護していません。
+`.git`自体も別にmountしているので、agentは`.git`を置き換えられません。`objects`や`refs`などは書き込めるので、agentはコミット、ブランチの作成、pushができます。`.git/config`へは書き込めないので、`git push -u`や`git remote add`は失敗します。push先は`git push origin HEAD`のように明示してください。サブモジュールの追加・更新もできません。
+
+このため、作業ディレクトリはGitリポジトリのルートである必要があります。`git worktree`で作った作業ツリーには対応していません。
+
+### 人間が気付く必要があるもの
+
+agentは、作業ツリーを書き換えずに、Gitの操作で`.devcontainer/`を変更したコミットを作ったり、indexに載せたりできます。それをホストで`git restore`、`checkout`、`reset --hard`、`pull`などで反映すると、次の`devcontainer up`で実行されます。同じように、agentが途中で止めたrebaseのtodoに`exec`行があると、ホストで`git rebase --continue`したときに実行されます。
+
+どちらも仕組みでは止められないので、反映する前に気付く必要があります。`.devcontainer/`がHEADやindexと異なる状態は`git status`に出ます。シェルのプロンプトに警告を出しておくと見落としにくくなります。starshipを使う場合の設定例です。
+
+```toml
+# ~/.config/starship.toml
+[custom.devcontainer_drift]
+when = """
+top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$top/.devcontainer" ] &&
+! { git -C "$top" diff --quiet HEAD -- .devcontainer && git -C "$top" diff --quiet -- .devcontainer; }
+"""
+shell = ["sh"]
+format = "[⚠ .devcontainer differs from HEAD/index ]($style)"
+style = "bold red"
+```
+
+Powerlevel10kを使う場合は、`~/.p10k.zsh`に次の関数を足し、`POWERLEVEL9K_LEFT_PROMPT_ELEMENTS`に`devcontainer_drift`を加えます。
+
+```zsh
+# ~/.p10k.zsh
+function prompt_devcontainer_drift() {
+  local top
+  top=$(git rev-parse --show-toplevel 2>/dev/null) && [[ -d $top/.devcontainer ]] || return
+  git -C $top diff --quiet HEAD -- .devcontainer && git -C $top diff --quiet -- .devcontainer && return
+  p10k segment -f red -t '⚠ .devcontainer differs from HEAD/index'
+}
+```
+
+rebaseの途中であることは、starshipでは標準の`git_state`モジュールが、Powerlevel10kでは標準の`vcs`セグメントが表示します。
 
 ## 保護の対象外
 

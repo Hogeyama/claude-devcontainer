@@ -75,6 +75,9 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh'):
             shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
         shutil.copytree(ROOT / 'tests', cls.workspace / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
+        git = ['git', '-C', str(cls.workspace), '-c', 'user.name=t', '-c', 'user.email=t@example.com']
+        for args in (['init', '-q'], ['add', '-A'], ['commit', '-qm', 'fixture']):
+            subprocess.run([*git, *args], check=True)
         # Delay the production entrypoint so that `up` must wait for postStartCommand.
         startup = cls.directory / 'entrypoint.sh'
         startup.write_text('#!/bin/sh\nsleep 3\nexec /usr/local/bin/entrypoint.sh "$@"\n')
@@ -181,6 +184,19 @@ class DevcontainerIntegrationTest(unittest.TestCase):
                  'touch /workspace/.write-check && rm /workspace/.write-check && echo read-only-ok')
         result = self.exec('sh', '-c', probe, check=False)
         self.assertIn('read-only-ok', result.stdout, result.stdout + result.stderr)
+
+    def test_git_settings_are_read_only_but_commits_work(self):
+        probe = ('set -u; cd /workspace; '
+                 'for op in "git config core.fsmonitor evil" "echo x > .git/hooks/pre-commit" '
+                 '"echo x >> .git/config" "mkdir .git/modules/x" "mv .git .git.old"; do '
+                 'if sh -c "$op" 2>/dev/null; then echo "writable: $op"; exit 1; fi; done; '
+                 'git checkout -qb agent-branch && echo change > agent-file && git add agent-file '
+                 '&& git -c user.name=a -c user.email=a@example.com commit -qm agent && echo git-ok')
+        result = self.exec('sh', '-c', probe, check=False)
+        self.assertIn('git-ok', result.stdout, result.stdout + result.stderr)
+        log = subprocess.run(['git', '-C', str(self.workspace), 'log', '-1', '--format=%s', 'agent-branch'],
+                             capture_output=True, text=True, check=True)
+        self.assertEqual(log.stdout.strip(), 'agent')
 
     def test_dind_bridge_and_host_network_cannot_egress(self):
         control = self.exec('docker', 'run', '--rm', 'busybox:1.37', 'sh', '-c',

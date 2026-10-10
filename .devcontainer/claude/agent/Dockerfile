@@ -17,7 +17,9 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
          --node /usr/local/bin/node --script /usr/local/bin/dind-bridge \
          > /etc/dind-bridge/env.sh \
     && install -d -m 700 -o node -g node /run/dind-bridge \
-    && install -d -o node -g node /workspace
+    && install -d -o node -g node /workspace \
+    # .git/config is read-only (see compose.yaml); do not try to record upstreams.
+    && git config --system branch.autoSetupMerge false
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-config,target=/tmp/workspace-config \

@@ -20,6 +20,8 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 * package registry、GitHubのrelease assetやLFS、Anthropicのweb searchやMCP connectorなどは使えません。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * UID 1000で読み書きできるリポジトリでしか使えません（今のところ）。
+* Gitリポジトリのルートで使います。`git worktree`の作業ツリーには対応していません。
+* agentは`.devcontainer/`と`.git`の設定（config、hooks）を書き換えられません。ただし、agentが作ったコミットに含まれる`.devcontainer/`の変更は、ホストで反映する前に確認してください。詳しくは[ホストが実行する設定の保護](docs/network-policy.md#ホストが実行する設定の保護)を参照してください。
 
 ## クイックスタート
 
