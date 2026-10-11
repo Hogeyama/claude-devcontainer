@@ -1,0 +1,49 @@
+# Owned by this workspace: what the proxy lets through besides Anthropic. The
+# host bakes it into the proxy image on every `devcontainer up`. See
+# "通信ルールを変更する" in docs/network-policy.md of claude-devcontainer.
+#
+# For each host:
+#   routes: the requests to let through, as "METHOD path" or a bare path (any
+#     method). The path is a regular expression for the whole URL path,
+#     without the query.
+#   headers: request headers the agent may send, besides common ones (Accept,
+#     Content-Type, User-Agent, ...). Credentials cannot be passed.
+#   inject: headers the proxy adds, replacing the agent's. ${NAME} is a secret
+#     assigned in ~/.config/claude-devcontainer/credentials on the host; only
+#     the ones named here are sent. "basic:" makes Basic authentication.
+hosts:
+  # GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories
+  # to share: REST for those repositories, GraphQL, and Git over HTTPS.
+  api.github.com:
+    routes:
+      - POST /graphql
+      - GET /user
+      - /repos/[^/]+/[^/]+(/.*)?
+    headers:
+      - X-GitHub-Api-Version
+    inject:
+      Authorization:
+        basic: x-access-token:${GITHUB_TOKEN}
+  github.com:
+    routes:
+      - /[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)
+    headers:
+      - Git-Protocol
+    inject:
+      Authorization:
+        basic: x-access-token:${GITHUB_TOKEN}
+
+  # A public host, such as the fonts a page loads:
+  # fonts.googleapis.com:
+  #   routes:
+  #     - GET /css2?
+
+  # An API with a token. Give the agent a dummy for the proxy to replace
+  # (NOTION_API_KEY: managed-by-proxy in compose.yaml):
+  # api.notion.com:
+  #   routes:
+  #     - /v1/.+
+  #   headers:
+  #     - Notion-Version
+  #   inject:
+  #     Authorization: Bearer ${NOTION_API_KEY}

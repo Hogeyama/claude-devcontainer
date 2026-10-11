@@ -17,6 +17,10 @@ PROXY_IMAGE = os.environ.get('PROXY_TEST_IMAGE', 'claude-devcontainer-proxy:task
 TOKEN = 'synthetic-managed-token'
 
 
+def basic(token):
+    return 'Basic ' + base64.b64encode(f'x-access-token:{token}'.encode()).decode()
+
+
 def docker(*args, **kwargs):
     return subprocess.run(['docker', *args], text=True, capture_output=True, timeout=120, check=True, **kwargs).stdout
 
@@ -66,8 +70,9 @@ class ProxyIntegrationTest(unittest.TestCase):
         self.fail('proxy not ready: ' + docker('logs', self.name))
 
     def inject(self, mode='api-key', github=TOKEN, anthropic=TOKEN):
+        # The image is built with template/proxy.yaml, which injects GITHUB_TOKEN.
         docker('exec', '-i', self.name, 'python', '/opt/proxy/credentials.py', 'inject',
-               input=json.dumps(dict(github_token=github, anthropic_token=anthropic, auth_mode=mode)))
+               input=json.dumps(dict(anthropic_token=anthropic, auth_mode=mode, secrets={'GITHUB_TOKEN': github})))
 
     def captures(self):
         output = docker('exec', self.name, 'sh', '-c', 'cat /tmp/upstream.jsonl 2>/dev/null || true')
@@ -105,17 +110,17 @@ class ProxyIntegrationTest(unittest.TestCase):
         self.inject('oauth', 'rotated-pat', 'rotated-oauth')
         self.assertEqual(self.messages(attacker)[0], 200)
         github, git, api_key, oauth = [{k.lower(): v for k, v in item['headers']} for item in self.captures()]
-        self.assertEqual(github['authorization'], 'Bearer ' + TOKEN)
-        self.assertEqual(git['authorization'], 'Basic ' + base64.b64encode(f'x-access-token:{TOKEN}'.encode()).decode())
+        self.assertEqual(github['authorization'], basic(TOKEN))
+        self.assertEqual(git['authorization'], basic(TOKEN))
         self.assertEqual((api_key['x-api-key'], 'authorization' in api_key), (TOKEN, False))
         self.assertEqual((oauth['authorization'], 'x-api-key' in oauth), ('Bearer rotated-oauth', False))
         self.assertIn('oauth-2025-04-20', oauth['anthropic-beta'])
         self.assertNotIn('cookie', github)
         rejected = subprocess.run(['docker', 'exec', '-i', self.name, 'python', '/opt/proxy/credentials.py', 'inject'],
-                                  input='{"github_token": "x"}', text=True, capture_output=True)
+                                  input='{"anthropic_token": "x"}', text=True, capture_output=True)
         self.assertNotEqual(rejected.returncode, 0)
         self.assertEqual(self.request()[0], 200)
-        self.assertEqual(dict(self.captures()[-1]['headers'])['Authorization'], 'Bearer rotated-pat')
+        self.assertEqual(dict(self.captures()[-1]['headers'])['Authorization'], basic('rotated-pat'))
         docker('exec', self.name, 'rm', '/run/proxy-credentials/credentials.json')
         self.assertEqual(self.request()[0], 403)
         self.assertNotIn(TOKEN, docker('logs', self.name))

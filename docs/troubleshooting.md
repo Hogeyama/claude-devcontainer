@@ -2,7 +2,7 @@
 
 ## HTTP 403が返る
 
-proxyが要求を拒否しています。本文が`blocked: no credentials`の場合は、proxyに認証情報がありません。ホストで`.devcontainer/claude/scripts/inject-credentials.py`を実行して渡してください。起動時の自動注入の記録は`~/.local/state/claude-devcontainer/inject.log`にあります。
+proxyが要求を拒否しています。本文が`blocked: no credentials`の場合は、proxyに認証情報がありません。ホストで`.devcontainer/claude/scripts/inject-credentials.py`を実行して渡してください。`blocked: no secret GITHUB_TOKEN`のように秘密の名前が出る場合は、`proxy.yaml`が参照する秘密が、ホストの`~/.config/claude-devcontainer/credentials`で代入されていません。代入してから同じスクリプトを実行してください。起動時の自動注入の記録は`~/.local/state/claude-devcontainer/inject.log`にあります。
 
 認証値を渡した後も403が返る場合は、proxyのログで拒否された要求を確認してください。
 

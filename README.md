@@ -17,7 +17,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 
 ## 利用上の制限
 
-* 安全に利用するために、読み取り権限のみのGitHub fine-grained tokenを利用することを前提にしています。
+* GitHubを使う場合は、共有するリポジトリだけを対象にしたfine-grained tokenを使う前提です。
 * package registry、GitHubのrelease assetやLFS、Anthropicのweb searchやMCP connectorなどは使えません。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * agentはリポジトリのファイルを1つのUID（既定は1000）で読み書きします。リポジトリの所有者と異なる場合は[UIDとネットワークを変える](#uidとネットワークを変える)で合わせてください。
@@ -45,13 +45,15 @@ git add .devcontainer && git commit -m "Add Claude Code dev container"
 ├── claude.env          自分のファイル。DinDなど、このリポジトリで使う機能の設定
 ├── agent-setup.sh      自分のファイル。agentにツールを追加する
 ├── images.txt          自分のファイル。DinDに読み込むイメージ
-├── proxy.yaml          自分のファイル（任意）。proxyが通す接続先
+├── proxy.yaml          自分のファイル。proxyが通す接続先と付ける認証（雛形はGitHub）
 └── claude/             取り込んだもの。編集しない
 ```
 
 ### 2. 認証情報を用意する
 
 #### GitHub
+
+雛形の`proxy.yaml`は、GitHubへの要求に`GITHUB_TOKEN`を付けます。GitHubを使わない場合は、`proxy.yaml`からGitHubの設定を消してください。
 
 GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
 
@@ -67,7 +69,7 @@ API keyを使う場合は、代わりに[Claude ConsoleのAPI keys](https://plat
 
 ### 3. 認証情報の取り出し方を設定する
 
-ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`のどちらか一方を設定してください。claude.aiのコネクタも使う場合は、代わりにホストのClaude Codeのログインを共有します（[ホストのClaude Codeのログインを共有する](docs/usage.md#ホストのclaude-codeのログインを共有する)）。取り出し方は手元の環境に合わせて選んでください。
+ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`CLAUDE_CODE_OAUTH_TOKEN`か`ANTHROPIC_API_KEY`のどちらか一方と、`proxy.yaml`が参照する秘密（雛形では`GITHUB_TOKEN`）を設定してください。claude.aiのコネクタも使う場合は、代わりにホストのClaude Codeのログインを共有します（[ホストのClaude Codeのログインを共有する](docs/usage.md#ホストのclaude-codeのログインを共有する)）。取り出し方は手元の環境に合わせて選んでください。
 
 ```sh
 GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使う場合
@@ -133,7 +135,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 | 環境変数・volumeなどcomposeの設定 | `.devcontainer/compose.yaml`の`services:`。相対パスは`.devcontainer/`が基準 |
 | VS Codeの拡張機能など | `.devcontainer/devcontainer.json` |
 | DinDで使うイメージ（Testcontainersなど） | `.devcontainer/images.txt`。[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照 |
-| proxyが通す接続先（`fonts.googleapis.com`など） | `.devcontainer/proxy.yaml`。[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照 |
+| proxyが通す接続先と付ける認証（GitHub、`fonts.googleapis.com`、トークンの要るAPIなど） | `.devcontainer/proxy.yaml`と、秘密はホストの`~/.config/claude-devcontainer/credentials`。[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照 |
 | 社内CAを使う接続先 | `.devcontainer/claude.env`か`.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`。[社内CAを信頼させる](docs/network-policy.md#社内caを信頼させる)を参照 |
 | claude.aiのコネクタ（Google Driveなど） | `.devcontainer/.env`の`CLAUDE_DEVCONTAINER_CONNECTORS`。[claude.aiのコネクタを使う](docs/network-policy.md#claudeaiのコネクタを使う)を参照 |
 

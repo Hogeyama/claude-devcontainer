@@ -1,5 +1,4 @@
 """Fixed outbound policy. Only the host-built image can change these rules."""
-import base64
 import json
 import logging
 import os
@@ -7,22 +6,15 @@ import re
 from urllib.parse import unquote, urlsplit
 
 from mitmproxy import http
-from credentials import read_snapshot
+from credentials import read_secrets, read_snapshot
 import workspace_config
 
 # --- Policy -------------------------------------------------------------------
 
 # The only requests let through, by host: (method, path regex). None allows
-# any method. Every host is reached on port 443 over HTTPS only.
+# any method. Every host is reached on port 443 over HTTPS only. Anthropic's
+# are fixed here; the workspace's proxy.yaml adds the others (GitHub, ...).
 ROUTES = {
-    'api.github.com': [
-        ('POST', r'/graphql'),
-        ('GET', r'/user'),
-        (None, r'/repos/[^/]+/[^/]+(/.*)?'),
-    ],
-    'github.com': [
-        (None, r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)'),
-    ],
     'api.anthropic.com': [
         ('GET', r'/api/hello'),  # HELLO below
         ('POST', r'/v1/messages'),
@@ -72,7 +64,10 @@ def connector_routes(value):
 ROUTES.update(connector_routes(os.environ.get('CLAUDE_DEVCONTAINER_CONNECTORS', '')))
 # Only these get credentials. The workspace's routes go to other hosts.
 assert set(ROUTES) <= workspace_config.AUTHENTICATED_HOSTS
-ROUTES.update(workspace_config.routes())
+WORKSPACE = workspace_config.installed()
+ROUTES.update(WORKSPACE.routes)
+WORKSPACE_HEADERS = WORKSPACE.headers
+WORKSPACE_INJECT = WORKSPACE.inject
 HOSTS = set(ROUTES)
 # Claude Code's startup connectivity check. It needs no credentials, so Claude
 # Code starts before they are injected.
@@ -94,9 +89,9 @@ INLINE_SOURCES = {'base64', 'text'}
 # Request headers passed upstream. Everything else, including any
 # client-supplied credential, is dropped.
 SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-length',
-                'transfer-encoding', 'user-agent', 'git-protocol', 'if-match', 'if-none-match',
+                'transfer-encoding', 'user-agent', 'if-match', 'if-none-match',
                 'if-modified-since', 'if-unmodified-since', 'range', 'anthropic-beta',
-                'x-github-api-version', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id',
+                'mcp-session-id', 'mcp-protocol-version', 'last-event-id',
                 'x-mcp-server-id', 'x-mcp-client-session-id', 'mcp-method', 'mcp-name', 'x-upload-token',
                 'anthropic-mcp-client-capabilities', 'anthropic-mcp-discover-protocol-version'}
 # The Artifact tool's headers. Anthropic routes /api/frame/ requests by them
@@ -106,6 +101,8 @@ ANTHROPIC_VERSION = '2023-06-01'
 OAUTH_BETA = 'oauth-2025-04-20'
 
 NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
+NO_SECRET = ('no secret {}; assign it in ~/.config/claude-devcontainer/credentials on the host, '
+             'then run .devcontainer/claude/scripts/inject-credentials.py')
 
 # ------------------------------------------------------------------------------
 
@@ -114,6 +111,12 @@ LOG = logging.getLogger('policy')
 
 class Denied(Exception):
     pass
+
+
+class MissingSecret(Denied):
+    def __init__(self, name):
+        super().__init__(f'no secret {name}')
+        self.name = name
 
 
 def require(condition, reason):
@@ -157,7 +160,7 @@ def check_request(req):
     require('upgrade' not in req.headers, 'upgrade')
     path = urlsplit(req.path).path
     decoded = unquote(path)
-    # GitHub may normalize what this check sees as a /repos/... path.
+    # An upstream may normalize what this check sees, as GitHub does /repos/... paths.
     require(not re.search(r'[\x00-\x1f\x7f%\\]', decoded) and '//' not in decoded
             and not {'.', '..'} & set(decoded.split('/')), 'path spelling')
     # Both spellings must match, or an encoded segment (%70erm for perm) could
@@ -168,6 +171,21 @@ def check_request(req):
         # check_messages reads the body as sent.
         require(req.headers.get('content-encoding', 'identity') == 'identity', 'content-encoding')
     return path
+
+
+def injected_headers(host):
+    """The workspace's inject headers for host, filled with the host's secrets."""
+    entries = WORKSPACE_INJECT.get(host)
+    if not entries:
+        return []
+    secrets = read_secrets()
+    headers = []
+    for name, template in entries:
+        try:
+            headers.append((name, workspace_config.render(template, secrets)))
+        except KeyError as missing:
+            raise MissingSecret(missing.args[0]) from None
+    return headers
 
 
 class PolicyAddon:
@@ -195,6 +213,13 @@ class PolicyAddon:
                 read_snapshot()
             except Exception:
                 self.deny(flow, NO_CREDENTIALS)
+        elif path is not None:
+            try:
+                injected_headers(req.host)
+            except MissingSecret as error:
+                self.deny(flow, NO_SECRET.format(error.name), error=error)
+            except Exception:
+                self.deny(flow, NO_CREDENTIALS)
         # mitmproxy reads the whole body before sending a response, so close
         # instead; except for Anthropic bodies, which are read whole anyway, so
         # that Claude can show the reason.
@@ -213,14 +238,25 @@ class PolicyAddon:
                 check_messages(req.raw_content)
         except Exception as error:
             return self.deny(flow, error=error)
+        passed = WORKSPACE_HEADERS.get(req.host, set())
         req.headers = http.Headers([(name, value) for name, value in req.headers.fields
-                                    if name.decode('ascii').lower() in SAFE_HEADERS
+                                    if name.decode('ascii').lower() in SAFE_HEADERS | passed
                                     or name.decode('ascii').lower().startswith(SAFE_HEADER_PREFIXES)])
         req.headers['Host'] = req.host
-        if req.host not in workspace_config.AUTHENTICATED_HOSTS or (req.host, path) == HELLO:
+        if req.host not in workspace_config.AUTHENTICATED_HOSTS:
+            # proxy.yaml's inject, such as a token, replacing what the agent sent.
+            try:
+                for name, value in injected_headers(req.host):
+                    req.headers[name] = value
+            except MissingSecret as error:
+                return self.deny(flow, NO_SECRET.format(error.name), error=error)
+            except Exception:
+                return self.deny(flow, NO_CREDENTIALS)
+            return
+        if (req.host, path) == HELLO:
             return
         try:
-            github_token, anthropic_token, auth_mode = read_snapshot()
+            anthropic_token, auth_mode = read_snapshot()
         except Exception:
             return self.deny(flow, NO_CREDENTIALS)
         try:
@@ -236,10 +272,6 @@ class PolicyAddon:
                 # Connectors belong to the claude.ai account; an API key has none.
                 require(auth_mode == 'oauth', 'connectors need a claude.ai login')
                 req.headers['Authorization'] = 'Bearer ' + anthropic_token
-            elif req.host == 'api.github.com':
-                req.headers['Authorization'] = 'Bearer ' + github_token
-            elif req.host == 'github.com':
-                req.headers['Authorization'] = 'Basic ' + base64.b64encode(('x-access-token:' + github_token).encode()).decode()
         except Exception as error:
             self.deny(flow, error=error)
 

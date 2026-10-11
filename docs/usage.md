@@ -4,7 +4,7 @@
 
 ## 認証情報を更新する
 
-ホストの`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CREDENTIALS_FILE`のいずれかを更新し、`python3 .devcontainer/claude/scripts/inject-credentials.py`を再実行してください。proxyやagentの再起動・再ビルドは不要です。
+ホストの`~/.config/claude-devcontainer/credentials`で、`proxy.yaml`が参照する秘密（`GITHUB_TOKEN`など）や、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CREDENTIALS_FILE`のいずれかを更新し、`python3 .devcontainer/claude/scripts/inject-credentials.py`を再実行してください。proxyやagentの再起動・再ビルドは不要です。
 
 ```sh
 python3 .devcontainer/claude/scripts/inject-credentials.py
@@ -14,7 +14,7 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 `devcontainer up`で起動すると、注入スクリプトは環境が動いている間ホストで動き続けます。proxyが作り直されれば、その都度注入し直します。
 
-`CLAUDE_CODE_OAUTH_TOKEN`（`claude setup-token`のトークン）とAPI keyは、自動では更新しません。期限が切れたら、`claude setup-token`で再発行するかConsoleで更新し、注入スクリプトを再実行してください。
+`CLAUDE_CODE_OAUTH_TOKEN`（`claude setup-token`のトークン）とAPI key、`proxy.yaml`が参照する秘密は、自動では更新しません。期限が切れたら、`claude setup-token`で再発行するかConsoleで更新し、注入スクリプトを再実行してください。
 
 ### ホストのClaude Codeのログインを共有する
 
@@ -32,7 +32,7 @@ CLAUDE_CREDENTIALS_FILE=~/.claude/.credentials.json
 - agentのClaude Codeには、ログインのscope、subscriptionの種類などを`/etc/claude-code/managed-settings.d/60-claude-login.json`で渡します。トークンは含みません。
 - 更新の要求の形式は、Claude Code 2.1.295の実装に合わせています。Claude Codeがこれを変えると、更新は失敗します。その場合も、ホストのClaude Codeを使っていれば、その更新した値を読み直して動き続けます。
 
-注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。`CLAUDE_CREDENTIALS_FILE`を指定した場合を除き、ホストの認証ファイルは読みません。
+注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。`CLAUDE_CREDENTIALS_FILE`を指定した場合を除き、ホストの認証ファイルは読みません。`proxy.yaml`が参照する秘密は、`~/.config/claude-devcontainer/credentials`で代入したものだけを渡し、環境変数からは取りません。Claudeの認証値は環境変数でも指定でき、その場合はファイルのClaudeの認証値より優先します。
 
 認証方式はproxyが選び、すでに開いているVS Codeのターミナルや通常の`devcontainer exec`からも同じ認証で通信できます。Claudeは起動時にダミーのOAuthトークンを使い、proxyが選択されたOAuthトークンまたはAPI keyへ置き換えます。認証値はすべてのagentプロセスの通信に共通なので、利用者ごとの分離はありません。
 

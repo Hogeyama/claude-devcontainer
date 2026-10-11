@@ -8,6 +8,10 @@ include:
 
 services:
   agent:
+    environment:
+      # Dummies for the tokens that proxy.yaml injects, so that tools send
+      # requests at all; the proxy replaces them.
+      GH_TOKEN: managed-by-proxy
     # The host keeps sumi's list inside this repository. Hide it from the
     # workspace mount; only the sumi service receives the real directory.
     volumes:

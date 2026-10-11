@@ -1,4 +1,5 @@
 """Whole-container, offline Docker, actual Claude Bash and SDK integration checks."""
+import base64
 import http.server
 import json
 import os
@@ -98,7 +99,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         # Lay it out as a consumer would: the distributed core plus its template.
         shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', symlinks=True,
                         ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt', 'claude.env'):
+        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt', 'claude.env', 'proxy.yaml'):
             shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
         # The workspace's settings, and this host's overriding them: with the
         # wrong precedence, initializeCommand finds no secrets file and up fails.
@@ -157,7 +158,11 @@ class DevcontainerIntegrationTest(unittest.TestCase):
 
     @classmethod
     def inject_credentials(cls, mode):
-        environment = {**cls.env, 'GITHUB_TOKEN': 'synthetic-managed-token'}
+        # proxy.yaml's secrets come only from the credentials config.
+        config = cls.directory / 'config/claude-devcontainer'
+        config.mkdir(parents=True, exist_ok=True)
+        (config / 'credentials').write_text('GITHUB_TOKEN=synthetic-managed-token\n')
+        environment = dict(cls.env)
         environment['CLAUDE_CODE_OAUTH_TOKEN' if mode == 'oauth' else 'ANTHROPIC_API_KEY'] = 'synthetic-managed-token'
         result = subprocess.run([sys.executable, str(cls.workspace / '.devcontainer/claude/scripts/inject-credentials.py')],
                                 env=environment, capture_output=True, text=True, timeout=90)
@@ -308,7 +313,8 @@ echo nested-network-blocked
         else:
             self.fail('background injection did not happen: ' + (self.directory / 'state/claude-devcontainer/inject.log').read_text())
         item = json.loads(self.compose_run('exec', '-T', 'proxy', 'tail', '-n', '1', '/tmp/upstream.jsonl'))
-        self.assertEqual(dict(item['headers'])['Authorization'], 'Bearer synthetic-config-token')
+        self.assertEqual(dict(item['headers'])['Authorization'],
+                         'Basic ' + base64.b64encode(b'x-access-token:synthetic-config-token').decode())
         self.inject_credentials('api-key')
 
     def test_actual_claude_bash_uses_docker(self):

@@ -10,8 +10,32 @@ from mitmproxy.test import tflow
 
 import addon
 from addon import PolicyAddon
+import workspace_config
 
-CREDENTIALS = ('managed-pat', 'managed-anthropic', 'api-key')
+CREDENTIALS = ('managed-anthropic', 'api-key')
+# The GitHub part of template/proxy.yaml.
+WORKSPACE = workspace_config.parse(r"""
+hosts:
+  api.github.com:
+    routes:
+      - POST /graphql
+      - GET /user
+      - /repos/[^/]+/[^/]+(/.*)?
+    headers:
+      - X-GitHub-Api-Version
+    inject:
+      Authorization:
+        basic: x-access-token:${GITHUB_TOKEN}
+  github.com:
+    routes:
+      - /[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)
+    headers:
+      - Git-Protocol
+    inject:
+      Authorization:
+        basic: x-access-token:${GITHUB_TOKEN}
+""")
+GITHUB_BASIC = 'Basic ' + base64.b64encode(b'x-access-token:managed-pat').decode()
 
 
 def flow(url='https://api.github.com/graphql', method='POST', body=b'{}', headers=()):
@@ -36,14 +60,25 @@ class PolicyTest(unittest.TestCase):
     def setUp(self):
         self.addon = PolicyAddon()
         self.credentials = CREDENTIALS
-        patcher = patch('addon.read_snapshot', side_effect=self.read_snapshot)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.secrets = {'GITHUB_TOKEN': 'managed-pat'}
+        for patcher in [patch('addon.read_snapshot', side_effect=self.read_snapshot),
+                        patch('addon.read_secrets', side_effect=self.read_secrets),
+                        patch.dict(addon.ROUTES, WORKSPACE.routes),
+                        patch('addon.HOSTS', {*addon.HOSTS, *WORKSPACE.routes}),
+                        patch.dict(addon.WORKSPACE_HEADERS, WORKSPACE.headers),
+                        patch.dict(addon.WORKSPACE_INJECT, WORKSPACE.inject)]:
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def read_snapshot(self):
         if self.credentials is None:
             raise FileNotFoundError()
         return self.credentials
+
+    def read_secrets(self):
+        if self.credentials is None:
+            raise FileNotFoundError()
+        return self.secrets
 
     def send(self, f):
         self.addon.requestheaders(f)
@@ -57,16 +92,31 @@ class PolicyTest(unittest.TestCase):
     def denied(self, f):
         self.assertEqual(self.send(f).response.status_code, 403)
 
-    def test_github_credentials_replace_client_credentials(self):
+    def test_injected_credentials_replace_client_credentials(self):
         attacker = [('Authorization', 'Bearer attacker'), ('Authorization', 'Basic attacker'),
-                    ('Cookie', 'session=attacker'), ('X-Api-Key', 'attacker'), ('Host', 'github.com')]
+                    ('Cookie', 'session=attacker'), ('X-Api-Key', 'attacker'), ('Host', 'github.com'),
+                    ('X-GitHub-Api-Version', '2022-11-28'), ('Git-Protocol', 'version=2')]
         headers = self.allowed(flow(headers=attacker))
-        self.assertEqual(headers.get_all('Authorization'), ['Bearer managed-pat'])
+        self.assertEqual(headers.get_all('Authorization'), [GITHUB_BASIC])
         self.assertEqual(headers.get_all('Host'), ['api.github.com'])
         self.assertNotIn('Cookie', headers)
         self.assertNotIn('X-Api-Key', headers)
+        self.assertEqual(headers['X-GitHub-Api-Version'], '2022-11-28')
+        self.assertNotIn('Git-Protocol', headers, 'passed to github.com only')
         headers = self.allowed(flow('https://github.com/owner/repo.git/git-upload-pack', headers=attacker))
-        self.assertEqual(headers['Authorization'], 'Basic ' + base64.b64encode(b'x-access-token:managed-pat').decode())
+        self.assertEqual(headers.get_all('Authorization'), [GITHUB_BASIC])
+        self.assertEqual(headers['Git-Protocol'], 'version=2')
+
+    def test_missing_secret_is_named(self):
+        self.secrets = {}
+        for f in [flow(), flow('https://github.com/o/r.git/git-upload-pack')]:
+            self.addon.requestheaders(f)
+            self.assertEqual(f.response.status_code, 403)
+            self.assertIn(b'no secret GITHUB_TOKEN', f.response.content)
+            self.assertIsNotNone(f.error, 'a body is refused before buffering')
+        f = flow('https://api.github.com/user', 'GET', b'')
+        del f.request.headers['Content-Length']
+        self.denied(f)
 
     def test_github_endpoints(self):
         for url, method in [('https://api.github.com/user', 'GET'), ('https://api.github.com/repos/o/r/issues', 'POST'),
@@ -106,14 +156,14 @@ class PolicyTest(unittest.TestCase):
         self.allowed(flow('https://api.anthropic.com/api/hello', 'GET', b''))
 
     def test_anthropic_oauth(self):
-        self.credentials = ('managed-pat', 'managed-oauth', 'oauth')
+        self.credentials = ('managed-oauth', 'oauth')
         headers = self.allowed(anthropic(headers=[('X-Api-Key', 'attacker'), ('Authorization', 'Bearer attacker')]))
         self.assertEqual(headers.get_all('Authorization'), ['Bearer managed-oauth'])
         self.assertNotIn('X-Api-Key', headers)
         self.assertIn('oauth-2025-04-20', headers['anthropic-beta'])
 
     def test_anthropic_artifacts(self):
-        self.credentials = ('managed-pat', 'managed-oauth', 'oauth')
+        self.credentials = ('managed-oauth', 'oauth')
         for path in ['/v1/mcp_servers?limit=1000', '/api/claude_code/policy_limits', '/api/oauth/profile', '/api/artifacts/mcp',
                      '/api/claude_code/settings']:
             with self.subTest(path=path):
@@ -231,6 +281,38 @@ class PolicyTest(unittest.TestCase):
             self.addon.http_connect(f)
             self.assertIsNone(f.response)
 
+    def test_workspace_inject_and_headers_are_per_host(self):
+        notion = workspace_config.parse("""
+hosts:
+  api.notion.com:
+    routes:
+      - /v1/.+
+    headers:
+      - Notion-Version
+    inject:
+      Authorization: Bearer ${NOTION_API_KEY}
+  fonts.googleapis.com:
+    routes:
+      - GET /css2
+""")
+        self.secrets = {'NOTION_API_KEY': 'managed-notion', 'GITHUB_TOKEN': 'managed-pat'}
+        with patch.dict(addon.ROUTES, notion.routes), patch('addon.HOSTS', {*addon.HOSTS, *notion.routes}), \
+                patch.dict(addon.WORKSPACE_HEADERS, notion.headers), patch.dict(addon.WORKSPACE_INJECT, notion.inject):
+            sent = [('Authorization', 'Bearer managed-by-proxy'), ('Notion-Version', '2022-06-28'),
+                    ('X-Other', 'dropped'), ('Cookie', 'session=attacker')]
+            headers = self.allowed(flow('https://api.notion.com/v1/search', headers=sent))
+            self.assertEqual(headers.get_all('Authorization'), ['Bearer managed-notion'])
+            self.assertEqual(headers['Notion-Version'], '2022-06-28')
+            self.assertNotIn('X-Other', headers)
+            self.assertNotIn('Cookie', headers)
+            self.denied(flow('https://api.notion.com/oauth/token'))
+            headers = self.allowed(flow('https://fonts.googleapis.com/css2', 'GET', b'', sent))
+            self.assertNotIn('Authorization', headers)
+            self.assertNotIn('Notion-Version', headers)
+            self.credentials = None  # No snapshot: hosts without inject still work.
+            self.allowed(flow('https://fonts.googleapis.com/css2', 'GET', b''))
+            self.denied(flow('https://api.notion.com/v1/search'))
+
     def test_connectors(self):
         self.assertEqual(addon.connector_routes(''), {})
         for value in ['mcpsrv_01abc', 'gmail', 'mcpsrv_01abc;mcpsrv_02', 'mcpsrv_', 'mcpsrv_01abc/..']:
@@ -241,7 +323,7 @@ class PolicyTest(unittest.TestCase):
         url = 'https://mcp-proxy.anthropic.com/v1/mcp/'
         with patch.dict(addon.ROUTES, routes), patch('addon.HOSTS', {*addon.HOSTS, *routes}):
             attacker = [('Authorization', 'Bearer attacker'), ('Mcp-Session-Id', 's1'), ('Mcp-Protocol-Version', '2025-06-18')]
-            self.credentials = ('managed-pat', 'managed-anthropic', 'oauth')
+            self.credentials = ('managed-anthropic', 'oauth')
             for path in ['mcpsrv_01abc', 'mcprs_01abc', 'mcpsrv_02def', 'mcpsrv_01abc/sse']:
                 with self.subTest(path=path):
                     headers = self.allowed(flow(url + path, headers=attacker))
@@ -251,7 +333,7 @@ class PolicyTest(unittest.TestCase):
                 with self.subTest(path=path):
                     self.denied(flow(url + path))
             self.denied(flow('https://mcp-proxy.anthropic.com/v2/mcp/mcpsrv_01abc'))
-            self.credentials = ('managed-pat', 'managed-key', 'api-key')
+            self.credentials = ('managed-key', 'api-key')
             self.denied(flow(url + 'mcpsrv_01abc'))
             self.credentials = None
             self.denied(flow(url + 'mcpsrv_01abc'))

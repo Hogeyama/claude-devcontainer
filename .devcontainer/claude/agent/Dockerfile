@@ -66,6 +66,9 @@ COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 COPY agent/skills/ /etc/claude-code/.claude/skills/
 COPY agent/bash-env.sh /etc/bash-env.sh
 COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh /usr/local/bin/
+# Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
+# reach anything (a Next.js server calling an API, for one).
+ENV NODE_USE_ENV_PROXY=1
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
     CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \

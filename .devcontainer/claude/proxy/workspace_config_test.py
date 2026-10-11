@@ -1,4 +1,5 @@
 """Tests of the workspace's proxy.yaml; run with mitmproxy 11.1.3 installed."""
+import base64
 import datetime
 from pathlib import Path
 import tempfile
@@ -24,49 +25,109 @@ def certificate(ca=True):
     return builder.sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.PEM)
 
 
+def host(name, body):
+    return f'hosts:\n  {name}:\n' + ''.join(f'    {line}\n' for line in body.strip('\n').split('\n'))
+
+
 class ParseTest(unittest.TestCase):
     def test_empty(self):
-        for text in ['', '# nothing yet\n', '{}']:
-            self.assertEqual(workspace_config.parse(text), {})
+        for text in ['', '# nothing yet\n', 'hosts:\n', 'hosts: {}']:
+            config = workspace_config.parse(text)
+            self.assertEqual((config.routes, config.headers, config.inject), ({}, {}, {}))
 
     def test_routes(self):
-        routes = workspace_config.parse('''
-routes:
-  - {method: GET, host: fonts.googleapis.com, path: /css2?}
-  - {method: "*", host: fonts.gstatic.com, path: /s/.+}  # a comment
-  - method: HEAD
-    host: fonts.gstatic.com
-    path: /
-''')
-        self.assertEqual(routes, {'fonts.googleapis.com': [('GET', '/css2?')],
-                                  'fonts.gstatic.com': [(None, '/s/.+'), ('HEAD', '/')]})
+        config = workspace_config.parse("""
+hosts:
+  fonts.googleapis.com:
+    routes:
+      - GET /css2?
+  fonts.gstatic.com:
+    routes:
+      - /s/.+  # any method
+      - HEAD /
+""")
+        self.assertEqual(config.routes, {'fonts.googleapis.com': [('GET', '/css2?')],
+                                         'fonts.gstatic.com': [(None, '/s/.+'), ('HEAD', '/')]})
+        self.assertEqual(config.secrets(), [])
+
+    def test_inject_and_headers(self):
+        config = workspace_config.parse("""
+hosts:
+  api.notion.com:
+    routes:
+      - /v1/.+
+    headers:
+      - Notion-Version
+    inject:
+      Authorization: Bearer ${NOTION_API_KEY}
+      X-Pair: ${A}-${B_2}
+  github.com:
+    routes:
+      - /[^/]+/[^/]+\\.git/info/refs
+    inject:
+      Authorization:
+        basic: x-access-token:${GITHUB_TOKEN}
+""")
+        self.assertEqual(config.headers, {'api.notion.com': {'notion-version'}})
+        self.assertEqual(config.secrets(), ['A', 'B_2', 'GITHUB_TOKEN', 'NOTION_API_KEY'])
+        secrets = {'NOTION_API_KEY': 'n', 'A': 'a', 'B_2': 'b', 'GITHUB_TOKEN': 'pat'}
+        rendered = {host: [(name, workspace_config.render(template, secrets)) for name, template in entries]
+                    for host, entries in config.inject.items()}
+        self.assertEqual(rendered, {
+            'api.notion.com': [('Authorization', 'Bearer n'), ('X-Pair', 'a-b')],
+            'github.com': [('Authorization', 'Basic ' + base64.b64encode(b'x-access-token:pat').decode())]})
+        with self.assertRaises(KeyError):
+            workspace_config.render(config.inject['github.com'][0][1], {})
 
     def test_invalid(self):
-        route = '{method: GET, host: example.com, path: /}'
-        for text in ['routes: [', '[]', 'routes: {}', 'other: 1', 'routes: []\nroutes: []',
+        for text in ['hosts: [', '[]', 'routes: []', 'hosts: []', 'hosts:\n  a.example.com:\n',
+                     'hosts:\n  a.example.com:\n    routes:\n      - /\n  a.example.com:\n    routes:\n      - /\n',
                      '!!python/object/apply:os.system [true]',
-                     'routes: [{method: GET, host: example.com, path: /, port: 80}]',
-                     'routes: [{host: example.com, path: /}]',
-                     'routes: [{method: GET, host: Example.com, path: /}]',
-                     'routes: [{method: GET, host: "example.com:8443", path: /}]',
-                     'routes: [{method: GET, host: 10.0.0.1, path: /}]',
-                     'routes: [{method: GET, host: localhost, path: /}]',
-                     'routes: [{method: GET, host: "*.example.com", path: /}]',
-                     'routes: [{method: get, host: example.com, path: /}]',
-                     'routes: [{method: null, host: example.com, path: /}]',
-                     'routes: [{method: GET, host: example.com, path: example}]',
-                     'routes: [{method: GET, host: example.com, path: /(}]',
-                     f'routes: [{route}]\nca: [certs/company.pem]']:
+                     host('a.example.com', 'routes: []'),
+                     host('a.example.com', 'routes:\n  - /\nport: 80'),
+                     host('Example.com', 'routes:\n  - /'),
+                     host('"example.com:8443"', 'routes:\n  - /'),
+                     host('10.0.0.1', 'routes:\n  - /'),
+                     host('localhost', 'routes:\n  - /'),
+                     host('"*.example.com"', 'routes:\n  - /'),
+                     host('a.example.com', 'routes:\n  - get /'),
+                     host('a.example.com', 'routes:\n  - GET'),
+                     host('a.example.com', 'routes:\n  - example'),
+                     host('a.example.com', 'routes:\n  - /('),
+                     host('a.example.com', 'routes:\n  - method: GET'),
+                     host('a.example.com', 'routes:\n  - /\nheaders:\n  - Bad Name'),
+                     host('a.example.com', 'routes:\n  - /\nheaders: X-A'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  - Authorization'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  Host: x'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  Content-Length: "1"'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  X-A: $HOME'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  X-A: ${lower}'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  X-A: ""'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  X-A:\n    basic: x\n    other: y'),
+                     host('a.example.com', 'routes:\n  - /\ninject:\n  X-A:\n    - x')]:
             with self.subTest(text=text), self.assertRaises(ValueError):
                 workspace_config.parse(text)
 
-    def test_authenticated_hosts_stay_fixed(self):
-        for host in workspace_config.AUTHENTICATED_HOSTS:
-            with self.subTest(host=host), self.assertRaisesRegex(ValueError, 'authenticated'):
-                workspace_config.parse(f'routes: [{{method: GET, host: {host}, path: /gists}}]')
+    def test_unpassable_headers(self):
+        for name in ['Authorization', 'cookie', 'X-Api-Key', 'Host', 'Proxy-Authorization', 'Upgrade']:
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'use inject'):
+                workspace_config.parse(host('a.example.com', f'routes:\n  - /\nheaders:\n  - {name}'))
 
-    def test_missing_file_adds_no_routes(self):
-        self.assertEqual(workspace_config.routes('/nonexistent/proxy.yaml'), {})
+    def test_authenticated_hosts_stay_fixed(self):
+        for name in workspace_config.AUTHENTICATED_HOSTS:
+            with self.subTest(host=name), self.assertRaisesRegex(ValueError, 'authenticated'):
+                workspace_config.parse(host(name, 'routes:\n  - GET /v1/messages'))
+
+    def test_template(self):
+        config = workspace_config.parse((Path(__file__).parent / '../template/proxy.yaml').read_text()) \
+            if (Path(__file__).parent / '../template/proxy.yaml').exists() else None
+        if config is None:
+            self.skipTest('template/proxy.yaml is not mounted')
+        self.assertEqual(set(config.routes), {'api.github.com', 'github.com'})
+        self.assertEqual(config.secrets(), ['GITHUB_TOKEN'])
+
+    def test_missing_file_is_empty(self):
+        self.assertEqual(workspace_config.installed('/nonexistent/proxy.yaml').routes, {})
 
 
 class InstallTest(unittest.TestCase):
@@ -79,13 +140,14 @@ class InstallTest(unittest.TestCase):
         workspace_config.install(self.directory, self.directory / 'installed')
         self.assertFalse((self.directory / 'installed').exists())
 
-    def test_routes(self):
-        (self.directory / 'proxy.yaml').write_text('routes: [{method: GET, host: example.com, path: /}]')
+    def test_installed(self):
+        (self.directory / 'proxy.yaml').write_text(host('example.com', 'routes:\n  - GET /'))
         workspace_config.install(self.directory, self.directory / 'installed')
-        self.assertEqual(workspace_config.routes(self.directory / 'installed/proxy.yaml'), {'example.com': [('GET', '/')]})
+        self.assertEqual(workspace_config.installed(self.directory / 'installed/proxy.yaml').routes,
+                         {'example.com': [('GET', '/')]})
 
     def test_invalid_file_is_not_installed(self):
-        (self.directory / 'proxy.yaml').write_text('routes: [{method: GET, host: github.com, path: /}]')
+        (self.directory / 'proxy.yaml').write_text(host('api.anthropic.com', 'routes:\n  - /'))
         with self.assertRaises(ValueError):
             workspace_config.install(self.directory, self.directory / 'installed')
         self.assertFalse((self.directory / 'installed').exists())

@@ -189,29 +189,55 @@ class LoginTest(unittest.TestCase):
 
 
 class ConfigTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.config = Path(directory.name) / 'credentials'
+        patcher = mock.patch.object(inject_credentials, 'CONFIG', self.config)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def load(self, text=None, **environment):
+        if text is not None:
+            self.config.write_text(text)
+        with mock.patch.dict(os.environ, {'PATH': os.environ['PATH'], **environment}, clear=True):
+            return inject_credentials.config()
+
     def test_exactly_one_claude_credential(self):
-        base = {'GITHUB_TOKEN': 'gh'}
         for claude, ok in [({}, False), ({'CLAUDE_CREDENTIALS_FILE': '~/.claude/.credentials.json'}, True),
                            ({'CLAUDE_CODE_OAUTH_TOKEN': 't', 'CLAUDE_CREDENTIALS_FILE': 'f'}, False),
                            ({'ANTHROPIC_API_KEY': 'k'}, True)]:
-            environment = {**base, **claude}
-            with self.subTest(claude=claude), mock.patch.dict(os.environ, environment, clear=True), \
-                    mock.patch.object(inject_credentials, 'CONFIG', Path('/nonexistent')):
+            with self.subTest(claude=claude):
                 if ok:
-                    self.assertEqual(inject_credentials.config()['GITHUB_TOKEN'], 'gh')
+                    self.assertEqual(self.load(**claude)['secrets'], {})
                 else:
                     with self.assertRaises(inject_credentials.Unavailable):
-                        inject_credentials.config()
+                        self.load(**claude)
 
     def test_environment_claude_credential_replaces_the_files(self):
-        with tempfile.TemporaryDirectory() as directory:
-            config = Path(directory) / 'credentials'
-            config.write_text('GITHUB_TOKEN=gh-file\nCLAUDE_CODE_OAUTH_TOKEN=setup-token\n')
-            with mock.patch.object(inject_credentials, 'CONFIG', config), \
-                    mock.patch.dict(os.environ, {'PATH': os.environ['PATH'], 'CLAUDE_CREDENTIALS_FILE': 'login'}, clear=True):
-                values = inject_credentials.config()
-        self.assertEqual((values['GITHUB_TOKEN'], values['CLAUDE_CODE_OAUTH_TOKEN'], values['CLAUDE_CREDENTIALS_FILE']),
-                         ('gh-file', '', 'login'))
+        values = self.load('CLAUDE_CODE_OAUTH_TOKEN=setup-token\nGITHUB_TOKEN=gh-file\n', CLAUDE_CREDENTIALS_FILE='login')
+        self.assertEqual((values['CLAUDE_CODE_OAUTH_TOKEN'], values['CLAUDE_CREDENTIALS_FILE']), ('', 'login'))
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh-file'})
+
+    def test_secrets_are_only_what_the_file_assigns(self):
+        values = self.load('CLAUDE_CODE_OAUTH_TOKEN=t\n'
+                           'GITHUB_TOKEN=$(echo pat-from-file)\n'
+                           'NOTION_API_KEY="secret with spaces"\n'
+                           'lowercase=ignored\n'
+                           'HOST_SECRET_COPY=$HOST_SECRET\n',
+                           HOST_SECRET='from-the-environment', AWS_SECRET_ACCESS_KEY='not-assigned')
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'pat-from-file', 'NOTION_API_KEY': 'secret with spaces',
+                                             'HOST_SECRET_COPY': 'from-the-environment'})
+        self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', values['secrets'], 'the Claude credential is never a secret')
+
+    def test_snapshot_sends_only_the_requested_secrets(self):
+        values = self.load('CLAUDE_CODE_OAUTH_TOKEN=t\nGITHUB_TOKEN=pat\nNOTION_API_KEY=n\n')
+        source = inject_credentials.StaticClaude('oauth', 't')
+        with mock.patch.object(inject_credentials, 'log') as log:
+            snapshot = json.loads(inject_credentials.snapshot(values, source, ['GITHUB_TOKEN', 'REDMINE_API_KEY']))
+        self.assertEqual(snapshot, {'anthropic_token': 't', 'auth_mode': 'oauth', 'secrets': {'GITHUB_TOKEN': 'pat'}})
+        self.assertIn('REDMINE_API_KEY', str(log.call_args))
+        self.assertNotIn('pat', str(log.call_args))
 
 
 if __name__ == '__main__':

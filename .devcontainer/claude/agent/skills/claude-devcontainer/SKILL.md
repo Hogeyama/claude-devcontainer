@@ -11,13 +11,12 @@ You run in an isolated container. Most of its limits are deliberate, and working
 
 All traffic goes through the proxy in `HTTPS_PROXY`. Only these destinations are allowed:
 
-- `github.com`: Git smart HTTP (clone, fetch, push)
-- `api.github.com`: the REST and GraphQL APIs for repositories. `gh` works; the proxy adds the credential, so leave the dummy `GH_TOKEN` as it is.
 - `api.anthropic.com`: Claude's own traffic only. Do not call it from commands: the proxy adds the real credentials to every request.
+- What `.devcontainer/proxy.yaml` lists under `hosts:`, usually `github.com` (Git smart HTTP: clone, fetch, push) and `api.github.com` (the REST and GraphQL APIs for repositories). `gh` works. The proxy adds the credentials named in its `inject:`, so leave dummy tokens such as `GH_TOKEN=managed-by-proxy` as they are.
 
 Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. WebSearch is disabled.
 
-- **HTTP 403**: the proxy refused the request. Check that the destination is one of the above. A body of `blocked: no credentials` means the proxy has no credentials yet; the human must run `python3 .devcontainer/claude/scripts/inject-credentials.py` on the host.
+- **HTTP 403**: the proxy refused the request. Check that the destination is one of the above. A body of `blocked: no credentials` means the proxy has no credentials yet; the human must run `python3 .devcontainer/claude/scripts/inject-credentials.py` on the host. `blocked: no secret NAME` means the host's credentials file lacks the secret that proxy.yaml injects; tell the human the NAME.
 - **Timeout or `Could not resolve host`**: the program did not use the proxy. Tools that ignore `HTTPS_PROXY` cannot reach anything.
 - **Certificate errors**: the proxy inspects HTTPS and signs with its own CA. The system trust store and the Node.js, Git, and curl variables already include it. For a tool with its own trust store (a Java keystore, Python's `certifi`), add `/public-ca/mitmproxy-ca-cert.pem` to it. Do not disable TLS verification.
 
@@ -51,7 +50,7 @@ Nothing can be installed from a package registry while you run. The host provide
 |---|---|
 | A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built |
 | An image for DinD | `.devcontainer/images.txt` |
-| A public host that needs no credentials, such as `fonts.googleapis.com` | `routes:` in `.devcontainer/proxy.yaml`: `- {method: GET, host: ..., path: <regex of the path>}`. The proxy adds no credentials to these requests, so propose it only for public endpoints, and name the narrowest path |
+| Another host or API | `.devcontainer/proxy.yaml`, under `hosts:` with the narrowest `routes:` (`GET /path` or a bare path for any method). For a token, `inject:` (e.g. `Authorization: Bearer ${NOTION_API_KEY}`), the human's `NOTION_API_KEY=...` in `~/.config/claude-devcontainer/credentials`, and a dummy `NOTION_API_KEY: managed-by-proxy` in `.devcontainer/compose.yaml` |
 | The nix dev shell of the repository's flake | `CLAUDE_DEVCONTAINER_NIX=1` in `.devcontainer/claude.env` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
 | Environment variables or volumes | `.devcontainer/compose.yaml` |
 | A claude.ai connector (Google Drive, ...) | `CLAUDE_DEVCONTAINER_CONNECTORS=<id>` in `.devcontainer/.env`. List the IDs with `curl -s 'https://api.anthropic.com/v1/mcp_servers?limit=1000' -H 'anthropic-beta: mcp-servers-2025-12-04' \| jq -r '.data[] \| "\(.id)\t\(.display_name)"'` and give the human the ID of the one needed. It needs the host's login shared (`CLAUDE_CREDENTIALS_FILE`); with a setup-token the list fails with a missing `user:mcp_servers` scope |

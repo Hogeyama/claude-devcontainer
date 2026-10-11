@@ -5,3 +5,10 @@ include:
   - path: claude/compose.yaml
     # The workspace's settings. .env, if present, overrides them for this host.
     env_file: [claude.env]
+
+services:
+  agent:
+    environment:
+      # Dummies for the tokens that proxy.yaml injects, so that tools send
+      # requests at all; the proxy replaces them.
+      GH_TOKEN: managed-by-proxy

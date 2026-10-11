@@ -16,10 +16,12 @@ docker run --rm -v "$PWD/proxy:/work/proxy:ro" -w /work \
   -m unittest discover -s proxy -p '*_test.py' -v
 ```
 
-Build using `docker build -t claude-devcontainer-proxy proxy`. The proxy starts
-without credentials. `python /opt/proxy/credentials.py inject` reads a JSON
-snapshot with `github_token`, `anthropic_token` and `auth_mode` (`api-key` or
-`oauth`) from stdin and stores it in `/run/proxy-credentials`, which must be a
+Build using `docker build -t claude-devcontainer-proxy --build-context
+workspace-config=<.devcontainer> proxy`; the workspace's `proxy.yaml` there is
+checked and baked in, and without it only Anthropic is reachable. The proxy
+starts without credentials. `python /opt/proxy/credentials.py inject` reads a
+JSON snapshot with `anthropic_token`, `auth_mode` (`api-key` or `oauth`) and
+optionally `secrets` (`{NAME: value}` for proxy.yaml's `${NAME}`) from stdin and stores it in `/run/proxy-credentials`, which must be a
 private tmpfs; `scripts/inject-credentials.py` sends it from the host. Requests
 are denied while the stored snapshot is missing or malformed. The image runs as the mitmproxy user (UID 1000).
 The private CA stays in `/home/mitmproxy/.mitmproxy`; only its certificate is
@@ -38,12 +40,13 @@ claude.ai connectors (mcp-proxy.anthropic.com) are closed unless their IDs are
 listed in CLAUDE_DEVCONTAINER_CONNECTORS; listed ones get the claude.ai OAuth
 token, and what they do on the connected account is not inspected.
 
-GitHub GraphQL bodies are opaque, including invalid syntax. GitHub's scoped
-PAT must enforce repository permissions. REST is limited to `/repos/...`,
-`GET /user`, and `POST /graphql`; Git smart HTTP uses `.git` repository URLs.
-Archive, LFS, release download hosts, and other endpoints are not supported.
-Anthropic and GitHub request bodies are buffered without an application size
-limit; responses stream without a cap. Deploy a memory limit for the proxy to
+Other hosts come only from the workspace's proxy.yaml: its routes, the
+headers the agent may pass, and the headers injected with the host's secrets,
+which replace the agent's credentials. `python /opt/proxy/workspace_config.py
+secrets` lists the secret names, which the host injector asks for. The
+template's GitHub setting injects the PAT as Basic authentication; GraphQL
+bodies are opaque, so the PAT's scope must enforce repository permissions.
+Request bodies are buffered without an application size limit; responses stream without a cap. Deploy a memory limit for the proxy to
 contain request-buffer exhaustion. WebSockets, plaintext upstream HTTP, and
 non-443 upstream ports are rejected. Denials are logged with method, host,
 path and the check that failed, but never the query or body content.

@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -21,13 +22,17 @@ import urllib.request
 
 # The workspace root: this script is .devcontainer/claude/scripts/ in it.
 ROOT = Path(__file__).resolve().parents[3]
-# Shell assignments such as GITHUB_TOKEN=$(pass github/token). The host runs it,
-# so it must stay outside the workspace, which the agent can write.
+# Shell assignments such as GITHUB_TOKEN=$(pass github/token): the Claude
+# credential, and the secrets that the workspace's proxy.yaml injects as
+# ${NAME}. The host runs it, so it must stay outside the workspace, which the
+# agent can write.
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/credentials'
 STATE = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer'
 LOG = STATE / 'inject.log'
-KEYS = ('GITHUB_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE')
-CLAUDE_KEYS = KEYS[1:]
+CLAUDE_KEYS = ('CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE')
+SECRET_NAME = re.compile(r'[A-Z_][A-Z0-9_]*')
+# What the shell itself changes while reading the file.
+SHELL_VARIABLES = {'PWD', 'OLDPWD', 'SHLVL', '_'}
 # How long the watcher waits for the environment to (re)appear before exiting.
 WAIT_SECONDS = 60
 POLL_SECONDS = 5
@@ -64,21 +69,28 @@ def docker(*arguments, data=None):
 
 
 def config():
-    """Return the settings, from the environment or else from CONFIG."""
-    values = {key: os.environ.get(key, '') for key in KEYS}
-    complete = values['GITHUB_TOKEN'] and any(values[key] for key in CLAUDE_KEYS)
-    if not complete and CONFIG.exists():
+    """Return the Claude credential and the secrets assigned in CONFIG.
+
+    The secrets are only what CONFIG assigns: the workspace's proxy.yaml names
+    the ones to send, and must not reach the rest of the host's environment.
+    """
+    values = {key: os.environ.get(key, '') for key in CLAUDE_KEYS}
+    secrets = {}
+    if CONFIG.exists():
         result = subprocess.run(['sh', '-c', 'set -a; . "$1"; env -0', 'sh', str(CONFIG)], stdout=subprocess.PIPE)
         if result.returncode:
             raise Unavailable(f'{CONFIG} failed with exit code {result.returncode}.')
         loaded = dict(item.split('=', 1) for item in result.stdout.decode(errors='replace').split('\0') if '=' in item)
+        secrets = {name: value for name, value in loaded.items()
+                   if SECRET_NAME.fullmatch(name) and name not in SHELL_VARIABLES and os.environ.get(name) != value}
         # A Claude credential in the environment replaces the file's, of any kind.
-        keys = ('GITHUB_TOKEN',) if any(values[key] for key in CLAUDE_KEYS) else KEYS
-        values = {key: values[key] or (loaded.get(key, '') if key in keys else '') for key in KEYS}
-    if not values['GITHUB_TOKEN']:
-        raise Unavailable(f'GITHUB_TOKEN is set neither in the environment nor in {CONFIG}.')
-    if sum(bool(values[key]) for key in CLAUDE_KEYS) != 1:
+        if not any(values.values()):
+            values = {key: loaded.get(key, '') if key in secrets else '' for key in CLAUDE_KEYS}
+    if sum(bool(value) for value in values.values()) != 1:
         raise Unavailable('Set exactly one of CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS_FILE.')
+    for key in CLAUDE_KEYS:
+        secrets.pop(key, None)  # Never a secret to inject elsewhere.
+    values['secrets'] = secrets
     return values
 
 
@@ -258,9 +270,19 @@ def claude(values):
     return StaticClaude('api-key', values['ANTHROPIC_API_KEY'])
 
 
-def snapshot(github, source):
-    """The proxy's JSON."""
-    return json.dumps(dict(github_token=github, anthropic_token=source.current(), auth_mode=source.mode))
+def requested_secrets(proxy):
+    """The names of the secrets that the proxy's proxy.yaml injects."""
+    return docker('exec', proxy, 'python', '/opt/proxy/workspace_config.py', 'secrets').split()
+
+
+def snapshot(values, source, names):
+    """The proxy's JSON, with the requested secrets that CONFIG assigns."""
+    missing = [name for name in names if name not in values['secrets']]
+    if missing:
+        # The proxy refuses the requests that need them, naming them too.
+        log(f'proxy.yaml injects {", ".join(missing)}, which {CONFIG} does not assign.')
+    return json.dumps(dict(anthropic_token=source.current(), auth_mode=source.mode,
+                           secrets={name: values['secrets'][name] for name in names if name in values['secrets']}))
 
 
 def find_environment():
@@ -292,15 +314,17 @@ def install_settings(agent, settings):
 def watch(values):
     """Inject into the environment while it runs, and again on a new proxy or token."""
     take_over()
-    github, source = values['GITHUB_TOKEN'], claude(values)
-    injected = None
+    source = claude(values)
+    injected, names = None, []
     last_seen = time.monotonic()
     while time.monotonic() - last_seen < WAIT_SECONDS:
         try:
             agent, proxy = find_environment()
             if proxy:
                 last_seen = time.monotonic()
-                state = (agent, proxy, snapshot(github, source), json.dumps(source.settings()))
+                if injected is None or injected[1] != proxy:
+                    names = requested_secrets(proxy)
+                state = (agent, proxy, snapshot(values, source, names), json.dumps(source.settings()))
                 if state != injected:
                     inject(proxy, state[2])
                     install_settings(agent, source.settings())
@@ -365,7 +389,7 @@ def main():
     agent, proxy = find_environment()
     if not proxy:
         sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
-    inject(proxy, snapshot(values['GITHUB_TOKEN'], source))
+    inject(proxy, snapshot(values, source, requested_secrets(proxy)))
     install_settings(agent, source.settings())
 
 

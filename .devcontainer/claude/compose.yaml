@@ -59,10 +59,10 @@ services:
       CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
       CLAUDE_DEVCONTAINER_NIX: ${CLAUDE_DEVCONTAINER_NIX:-0}
       CLAUDE_DEVCONTAINER_SUMI: ${CLAUDE_DEVCONTAINER_SUMI:-0}
-      # Dummies that the proxy replaces with the real credentials. Claude takes
+      # A dummy that the proxy replaces with the real credential. Claude takes
       # an OAuth token, not an API key, so that it counts as a claude.ai login
-      # and offers Artifacts.
-      GH_TOKEN: managed-by-proxy
+      # and offers Artifacts. The workspace's own dummies (GH_TOKEN, ...) go in
+      # its compose.yaml.
       CLAUDE_CODE_OAUTH_TOKEN: managed-by-proxy
     volumes:
       - ../..:/workspace
