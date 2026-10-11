@@ -23,4 +23,26 @@ case "$projects" in
     echo "error: more than one environment of $root found: $projects" >&2
     exit 1 ;;
 esac
-exec docker compose -p "$projects" -f "$root/.devcontainer/compose.yaml" "$@"
+compose() {
+    exec docker compose -p "$projects" -f "$root/.devcontainer/compose.yaml" "$@"
+}
+# initializeCommand does not run here; bring .generated/ up to date with
+# claude.toml as it would.
+if python3 "$root/.devcontainer/claude/scripts/settings.py" generate; then
+    compose "$@"
+fi
+# A setting in the environment or .devcontainer/.env, which generate refuses,
+# would win over the previous .generated/settings.env. So go on only to stop or
+# inspect the environment, without them: --env-file replaces .env.
+case "$1" in
+down|stop|kill|ps|logs)
+    echo "warning: the settings are invalid; running $1 with the previous ones." >&2
+    for name in $(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import settings; print(*settings.VARIABLES)' \
+            "$root/.devcontainer/claude/scripts"); do
+        unset "$name"
+    done
+    exec docker compose --env-file /dev/null -p "$projects" -f "$root/.devcontainer/compose.yaml" "$@" ;;
+*)
+    echo "error: fix the settings first; only down, stop, kill, ps and logs run with invalid ones." >&2
+    exit 1 ;;
+esac

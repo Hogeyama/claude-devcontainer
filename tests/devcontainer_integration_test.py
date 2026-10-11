@@ -20,9 +20,11 @@ CORE = ROOT / '.devcontainer/claude'
 AGENT_IMAGE = os.environ.get('AGENT_TEST_IMAGE', 'claude-devcontainer-agent:task2')
 SUMI_IMAGE = os.environ.get('SUMI_TEST_IMAGE', 'claude-devcontainer-sumi:task2')
 SECRET = 'Tr0ub4dor-fixture'
-# The same settings as .devcontainer/.env or claude.env; AGENT_IMAGE must be built with this UID/GID.
+# The test workspace's agent.uid and agent.gid; AGENT_IMAGE must be built with them.
 AGENT_UID = os.environ.get('CLAUDE_DEVCONTAINER_UID', '1000')
 AGENT_GID = os.environ.get('CLAUDE_DEVCONTAINER_GID', '1000')
+# The test workspace's subnets; unset, initializeCommand chooses free ones.
+SUBNETS = {key: os.environ.get(f'CLAUDE_DEVCONTAINER_{key.upper()}_NET', '') for key in ('proxy', 'dind')}
 
 
 @unittest.skipUnless(os.environ.get('RUN_DOCKER_TESTS') == '1', 'Docker integration disabled; set RUN_DOCKER_TESTS=1')
@@ -37,16 +39,16 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         fixtures(cls.directory)
         auth_variables = ('GITHUB_TOKEN', 'GH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE',
                           'ANTHROPIC_AUTH_TOKEN')
-        # The sumi settings come from the workspace's files (start_environment).
+        # The settings come only from the workspace's claude.toml and
+        # claude.local.toml (start_environment); initializeCommand refuses
+        # them in the environment, where the agent itself has some.
         cls.env = {k: v for k, v in os.environ.items()
-                   if k not in auth_variables and not k.startswith('CLAUDE_DEVCONTAINER_SUMI')}
+                   if k not in auth_variables and not k.startswith('CLAUDE_DEVCONTAINER_')}
         # initializeCommand reads the credentials config; never the developer's own.
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
-        # Every test here but the credentials ones relies on Docker.
-        cls.env.update(CLAUDE_DEVCONTAINER_DIND='1')
         # The sumi service reads a secrets file outside the workspace, under a
         # name other than the default. Not in cls.directory, which the agent mounts.
-        # start_environment() sets it up through claude.env and .env.
+        # start_environment() sets it up through claude.toml and claude.local.toml.
         cls.sumi = Path(tempfile.mkdtemp(prefix='cdc-sumi-'))
         cls.addClassCleanup(shutil.rmtree, cls.sumi)
         (cls.sumi / 'list.txt').write_text(SECRET + '\n')
@@ -66,7 +68,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.start_environment()
         # initializeCommand chose free subnets unless they were set.
         chosen = cls.workspace / '.devcontainer/.generated/networks.env'
-        cls.dind_net = cls.env.get('CLAUDE_DEVCONTAINER_DIND_NET') or dict(
+        cls.dind_net = SUBNETS['dind'] or dict(
             line.split('=', 1) for line in chosen.read_text().splitlines() if '=' in line and not line.startswith('#')
         )['CLAUDE_DEVCONTAINER_DIND_NET']
         denied = cls.exec('curl', '--max-time', '5', '-s', '-o', '/dev/null', '-w', '%{http_code}',
@@ -74,7 +76,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         assert denied.stdout == '403', denied.stdout + denied.stderr
         assert cls.compose_run('exec', '-T', 'proxy', 'sh', '-c', 'test ! -e /tmp/upstream.jsonl') == ''
         cls.inject_credentials('api-key')
-        # images.txt had them loaded into DinD before `up` returned.
+        # docker.images had them loaded into DinD before `up` returned.
         cls.exec('docker', 'image', 'inspect', 'busybox:1.37', 'testcontainers/ryuk:0.14.0')
         cls.container = cls.exec('docker', 'run', '-d', '-p', '8080', 'busybox:1.37', 'sh', '-c',
                                  'mkdir -p /www; echo bridge-ok > /www/index.html; exec httpd -f -p 8080 -h /www').stdout.strip()
@@ -103,16 +105,18 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         # Lay it out as a consumer would: the distributed core plus its template.
         shutil.copytree(CORE, cls.workspace / '.devcontainer/claude', symlinks=True,
                         ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'images.txt', 'claude.env', 'proxy.yaml'):
+        for name in ('devcontainer.json', 'compose.yaml', 'agent-setup.sh', 'claude.toml', '.gitignore'):
             shutil.copy(CORE / 'template' / name, cls.workspace / '.devcontainer' / name)
         # The workspace's settings, and this host's overriding them: with the
         # wrong precedence, initializeCommand finds no secrets file and up fails.
-        with (cls.workspace / '.devcontainer/claude.env').open('a') as settings:
-            settings.write('CLAUDE_DEVCONTAINER_SUMI=1\nCLAUDE_DEVCONTAINER_SUMI_FILE=missing.txt\n')
-        (cls.workspace / '.devcontainer/.env').write_text(
-            f'CLAUDE_DEVCONTAINER_SUMI_DIR={cls.sumi}\nCLAUDE_DEVCONTAINER_SUMI_FILE=list.txt\n')
-        with (cls.workspace / '.devcontainer/images.txt').open('a') as images:
-            images.write('busybox:1.37\ntestcontainers/ryuk:0.14.0\n')
+        # Every test here but the credentials ones relies on Docker.
+        shared = cls.workspace / '.devcontainer/claude.toml'
+        shared.write_text(shared.read_text()
+                          .replace('\n[docker]\n', '\n[docker]\nenabled = true\nimages = ["busybox:1.37", "testcontainers/ryuk:0.14.0"]\n')
+                          .replace('\n[sumi]\n', '\n[sumi]\nenabled = true\nsecrets = "missing.txt"\n'))
+        local = f'[sumi]\nsecrets = "{cls.sumi}/list.txt"\n[agent]\nuid = {AGENT_UID}\ngid = {AGENT_GID}\n'
+        local += '[subnets]\n' + ''.join(f'{key} = "{net}"\n' for key, net in SUBNETS.items() if net)
+        (cls.workspace / '.devcontainer/claude.local.toml').write_text(local)
         shutil.copytree(ROOT / 'tests', cls.workspace / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
         git = ['git', '-C', str(cls.workspace), '-c', 'user.name=t', '-c', 'user.email=t@example.com']
         for args in (['init', '-q'], ['add', '-A'], ['commit', '-qm', 'fixture']):
@@ -162,7 +166,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
 
     @classmethod
     def inject_credentials(cls, mode):
-        # proxy.yaml's secrets come only from the credentials config.
+        # proxy.hosts' secrets come only from the credentials config.
         config = cls.directory / 'config/claude-devcontainer'
         config.mkdir(parents=True, exist_ok=True)
         (config / 'credentials').write_text('GITHUB_TOKEN=synthetic-managed-token\n')
@@ -225,6 +229,10 @@ class DevcontainerIntegrationTest(unittest.TestCase):
                     self.assertNotIn('authorization', headers)
                 self.assertNotIn('synthetic-managed-token', self.compose_run('logs', 'proxy'))
         self.inject_credentials('api-key')
+
+    def test_dummy_tokens_of_proxy_hosts(self):
+        # env of api.github.com in template/claude.toml.
+        self.assertEqual(self.exec('printenv', 'GH_TOKEN').stdout, 'managed-by-proxy\n')
 
     def test_host_claude_configuration_is_copied_before_up_returns(self):
         result = self.exec('sh', '-c', 'git config --global user.name; cd ~/.claude && cat skills/fixture/SKILL.md && sh statusline.sh && ls -A')

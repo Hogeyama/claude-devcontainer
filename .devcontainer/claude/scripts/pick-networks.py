@@ -4,8 +4,8 @@
 Docker cannot pick them: the agent's firewall and proxy settings name the proxy
 and DinD by fixed addresses in them. So the first free pair in 10.231.x (outside
 Docker's default pools) is chosen once, kept while it stays free, and written
-to .devcontainer/.generated/networks.env, which compose reads below claude.env,
-.env and the environment. A value set in one of those is used instead.
+to .devcontainer/.generated/networks.env, which compose reads below
+settings.env. A value set in subnets of claude.toml is used instead.
 
 Usage: pick-networks.py PROXY_NET DIND_NET, each the set value or empty; run
 from the workspace root (initializeCommand).
@@ -68,7 +68,7 @@ def choose(set_values, kept, used):
             net = next((candidate for candidate in CANDIDATES
                         if not any(subnet(candidate).overlaps(other) for other in used)), None)
             if net is None:
-                raise SystemExit(f'error: no free 10.231.x.0/24 for {name}; set it in .devcontainer/.env.')
+                raise SystemExit(f'error: no free 10.231.x.0/24 for {name}; set subnets in .devcontainer/claude.local.toml.')
         used.append(subnet(net))
         chosen[name] = net
     return chosen
@@ -84,8 +84,8 @@ def main():
     chosen = choose(set_values, previous(), used)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     (OUT.parent / '.gitignore').write_text('*\n')
-    text = ('# Written by initializeCommand (scripts/pick-networks.py). A value set in\n'
-            '# the environment, .env or claude.env replaces these.\n'
+    text = ('# Written by initializeCommand (scripts/pick-networks.py). subnets in\n'
+            '# claude.toml, through settings.env, replaces these.\n'
             + ''.join(f'{name}={net}\n' for name, net in chosen.items()))
     temporary = OUT.with_name(OUT.name + '.tmp')
     temporary.write_text(text)

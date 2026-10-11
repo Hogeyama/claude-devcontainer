@@ -23,8 +23,8 @@ import urllib.request
 # The workspace root: this script is .devcontainer/claude/scripts/ in it.
 ROOT = Path(__file__).resolve().parents[3]
 # Shell assignments such as GITHUB_TOKEN=$(pass github/token): the Claude
-# credential, and the secrets that the workspace's proxy.yaml injects as
-# ${NAME}. The host runs it, so it must stay outside the workspace, which the
+# credential, and the secrets that proxy.hosts of the workspace's claude.toml
+# injects as ${NAME}. The host runs it, so it must stay outside the workspace, which the
 # agent can write.
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/credentials'
 STATE = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer'
@@ -78,7 +78,7 @@ def docker(*arguments, data=None):
 def config():
     """Return the Claude credential and the secrets assigned in CONFIG.
 
-    The secrets are only what CONFIG assigns: the workspace's proxy.yaml names
+    The secrets are only what CONFIG assigns: the workspace's proxy.hosts names
     the ones to send, and must not reach the rest of the host's environment.
     """
     values = {key: os.environ.get(key, '') for key in CLAUDE_KEYS}
@@ -285,7 +285,7 @@ def claude(values):
 
 
 def requested_secrets(proxy):
-    """The names of the secrets that the proxy's proxy.yaml injects."""
+    """The names of the secrets that the proxy's proxy.hosts injects."""
     return docker('exec', proxy, 'python', '/opt/proxy/workspace_config.py', 'secrets').split()
 
 
@@ -294,7 +294,7 @@ def snapshot(values, source, names):
     missing = [name for name in names if name not in values['secrets']]
     if missing:
         # The proxy refuses the requests that need them, naming them too.
-        log(f'proxy.yaml injects {", ".join(missing)}, which {CONFIG} does not assign.')
+        log(f'proxy.hosts injects {", ".join(missing)}, which {CONFIG} does not assign.')
     return json.dumps(dict(anthropic_token=source.current(), auth_mode=source.mode,
                            secrets={name: values['secrets'][name] for name in names if name in values['secrets']}))
 

@@ -17,11 +17,12 @@ docker run --rm -v "$PWD/proxy:/work/proxy:ro" -w /work \
 ```
 
 Build using `docker build -t claude-devcontainer-proxy --build-context
-workspace-config=<.devcontainer> proxy`; the workspace's `proxy.yaml` there is
-checked and baked in, and without it only Anthropic is reachable. The proxy
+workspace-config=<.devcontainer> proxy`; the workspace's `.generated/proxy.json`
+there (`proxy.hosts` of `claude.toml`, merged by `scripts/settings.py`) is
+checked and baked in, and the build fails without it. The proxy
 starts without credentials. `python /opt/proxy/credentials.py inject` reads a
 JSON snapshot with `anthropic_token`, `auth_mode` (`api-key` or `oauth`) and
-optionally `secrets` (`{NAME: value}` for proxy.yaml's `${NAME}`) from stdin and stores it in `/run/proxy-credentials`, which must be a
+optionally `secrets` (`{NAME: value}` for proxy.hosts' `${NAME}`) from stdin and stores it in `/run/proxy-credentials`, which must be a
 private tmpfs; `scripts/inject-credentials.py` sends it from the host. Requests
 are denied while the stored snapshot is missing or malformed. The image runs as the mitmproxy user (UID 1000).
 The private CA stays in `/home/mitmproxy/.mitmproxy`; only its certificate is
@@ -37,10 +38,10 @@ and beta headers pass, so new Claude Code features need no policy update; a
 future server-side feature in some other shape would pass too.
 
 claude.ai connectors (mcp-proxy.anthropic.com) are closed unless their IDs are
-listed in CLAUDE_DEVCONTAINER_CONNECTORS; listed ones get the claude.ai OAuth
+listed in `proxy.connectors` of `claude.toml`; listed ones get the claude.ai OAuth
 token, and what they do on the connected account is not inspected.
 
-Other hosts come only from the workspace's proxy.yaml: its routes, the
+Other hosts come only from the workspace's `proxy.hosts`: its routes, the
 headers the agent may pass, and the headers injected with the host's secrets,
 which replace the agent's credentials. `python /opt/proxy/workspace_config.py
 secrets` lists the secret names, which the host injector asks for. The

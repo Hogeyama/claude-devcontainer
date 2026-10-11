@@ -70,7 +70,7 @@ class ProxyIntegrationTest(unittest.TestCase):
         self.fail('proxy not ready: ' + docker('logs', self.name))
 
     def inject(self, mode='api-key', github=TOKEN, anthropic=TOKEN):
-        # The image is built with template/proxy.yaml, which injects GITHUB_TOKEN.
+        # The image is built with proxy.hosts of template/claude.toml, which injects GITHUB_TOKEN.
         docker('exec', '-i', self.name, 'python', '/opt/proxy/credentials.py', 'inject',
                input=json.dumps(dict(anthropic_token=anthropic, auth_mode=mode, secrets={'GITHUB_TOKEN': github})))
 

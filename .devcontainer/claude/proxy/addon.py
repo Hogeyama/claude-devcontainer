@@ -13,7 +13,7 @@ import workspace_config
 
 # The only requests let through, by host: (method, path regex). None allows
 # any method. Every host is reached on port 443 over HTTPS only. Anthropic's
-# are fixed here; the workspace's proxy.yaml adds the others (GitHub, ...).
+# are fixed here; proxy.hosts in the workspace's claude.toml adds the others (GitHub, ...).
 ROUTES = {
     'api.anthropic.com': [
         ('GET', r'/api/hello'),  # HELLO below
@@ -43,7 +43,7 @@ ROUTES = {
 
 
 def connector_routes(value):
-    """Routes to the claude.ai connectors in CLAUDE_DEVCONTAINER_CONNECTORS.
+    """Routes to the claude.ai connectors in proxy.connectors of claude.toml.
 
     Claude Code reaches a connector through mcp-proxy.anthropic.com with the
     claude.ai token, and Anthropic's servers then act on the connected account
@@ -54,7 +54,7 @@ def connector_routes(value):
     ids = []
     for item in value.replace(',', ' ').split():
         if not re.fullmatch(r'mcp(srv|rs)_[A-Za-z0-9]+', item):
-            raise ValueError(f'CLAUDE_DEVCONTAINER_CONNECTORS: {item!r} is not a connector ID (mcpsrv_...)')
+            raise ValueError(f'proxy.connectors: {item!r} is not a connector ID (mcpsrv_...)')
         ids.append(item.split('_', 1)[1])
     if not ids:
         return {}
@@ -244,7 +244,7 @@ class PolicyAddon:
                                     or name.decode('ascii').lower().startswith(SAFE_HEADER_PREFIXES)])
         req.headers['Host'] = req.host
         if req.host not in workspace_config.AUTHENTICATED_HOSTS:
-            # proxy.yaml's inject, such as a token, replacing what the agent sent.
+            # proxy.hosts' inject, such as a token, replacing what the agent sent.
             try:
                 for name, value in injected_headers(req.host):
                     req.headers[name] = value

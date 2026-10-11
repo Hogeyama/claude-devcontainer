@@ -8,7 +8,7 @@ import tempfile
 
 SNAPSHOT = Path('/run/proxy-credentials/credentials.json')
 KEYS = {'anthropic_token', 'auth_mode'}
-# Optional: {NAME: value} for the ${NAME}s in the workspace's proxy.yaml.
+# Optional: {NAME: value} for the ${NAME}s in proxy.hosts of the workspace's claude.toml.
 SECRETS = 'secrets'
 SECRET_NAME = re.compile(r'[A-Z_][A-Z0-9_]*')
 

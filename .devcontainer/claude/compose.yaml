@@ -1,29 +1,9 @@
 # Distributed core. Include it from .devcontainer/compose.yaml and extend there;
 # paths here assume this directory is .devcontainer/claude in the workspace.
 #
-# Settings, read from the environment of `devcontainer up`, else from
-# .devcontainer/.env (this host's), else from .devcontainer/claude.env (the
-# workspace's; see template/compose.yaml):
-#   CLAUDE_DEVCONTAINER_UID, CLAUDE_DEVCONTAINER_GID  the agent's user; it must be
-#     able to write the workspace on the host. Default 1000.
-#   CLAUDE_DEVCONTAINER_PROXY_NET, CLAUDE_DEVCONTAINER_DIND_NET  the first three
-#     octets of the two internal /24 networks. Unset, initializeCommand picks
-#     a free pair in 10.231.x (scripts/pick-networks.py); 10.231.70 and .71
-#     without it.
-#   CLAUDE_DEVCONTAINER_DIND=1  run Docker in DinD for the agent. Default 0.
-#   CLAUDE_DEVCONTAINER_NIX=1  mount the host's /nix/store and load the dev shell
-#     that initializeCommand exports (see scripts/initialize.sh). Default 0.
-#   CLAUDE_DEVCONTAINER_SUMI=1  mask the values in a secrets file in what
-#     Claude's tools return. Default 0.
-#   CLAUDE_DEVCONTAINER_SUMI_DIR, CLAUDE_DEVCONTAINER_SUMI_FILE  the host
-#     directory holding the secrets file, and its name in it. Default
-#     ~/.claude/sumi and secrets.txt. Relative directories are based here,
-#     at .devcontainer/claude/.
-#   CLAUDE_DEVCONTAINER_PROXY_CA  a host PEM file of CA certificates, such as an
-#     in-house root under /etc, that the proxy trusts for upstream TLS besides
-#     the public roots. Default none.
-#   CLAUDE_DEVCONTAINER_CONNECTORS  IDs (mcpsrv_...) of the claude.ai connectors
-#     that the proxy lets Claude use, separated by commas or spaces. Default none.
+# The variables below come from .devcontainer/.generated/settings.env, which
+# initializeCommand writes from .devcontainer/claude.toml and claude.local.toml
+# (scripts/settings.py describes them and the names); never set them otherwise.
 # Features are 0 or 1: compose can neither add a service nor a mount
 # conditionally, so the values select a scale and a path instead.
 services:
@@ -63,9 +43,13 @@ services:
       CLAUDE_DEVCONTAINER_SUMI: ${CLAUDE_DEVCONTAINER_SUMI:-0}
       # A dummy that the proxy replaces with the real credential. Claude takes
       # an OAuth token, not an API key, so that it counts as a claude.ai login
-      # and offers Artifacts. The workspace's own dummies (GH_TOKEN, ...) go in
-      # its compose.yaml.
+      # and offers Artifacts.
       CLAUDE_CODE_OAUTH_TOKEN: managed-by-proxy
+    # The workspace's own dummies, such as GH_TOKEN: env of each host in
+    # proxy.hosts of claude.toml.
+    env_file:
+      - path: ../.generated/agent.env
+        required: false
     volumes:
       - ../..:/workspace
       # The host builds and runs what is here (compose files, the proxy's
@@ -114,16 +98,16 @@ services:
         required: false
       sumi:
         condition: service_started
-        # Absent unless CLAUDE_DEVCONTAINER_SUMI=1.
+        # Absent unless sumi.enabled.
         required: false
   proxy:
     # Build on every `up`: `devcontainer build` builds only the agent, and the
-    # policy (addon.py, the workspace's proxy.yaml) would otherwise stay as
-    # first built. The cache makes an unchanged build quick.
+    # policy (addon.py, the workspace's .generated/proxy.json) would otherwise
+    # stay as first built. The cache makes an unchanged build quick.
     pull_policy: build
     build:
       context: proxy
-      # The workspace's .devcontainer/, for its optional proxy.yaml.
+      # The workspace's .devcontainer/, for its .generated/proxy.json.
       additional_contexts:
         workspace-config: ..
     mem_limit: 512m
@@ -212,7 +196,7 @@ services:
       # The directory, not the file: an editor that replaces the file on save
       # would leave a file mount on the old content.
       - type: bind
-        source: ${CLAUDE_DEVCONTAINER_SUMI_DIR:-${HOME}/.claude/sumi}
+        source: ${CLAUDE_DEVCONTAINER_SUMI_DIR:-${HOME}/.config/claude-devcontainer/sumi}
         target: /secrets
         read_only: true
         bind: {create_host_path: false}

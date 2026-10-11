@@ -1,0 +1,97 @@
+# Settings of this workspace's container, committed with it. Every setting may
+# be left out; the values shown commented out are the defaults or examples.
+#
+# Settings for one host only (UID, networks, connectors, paths, hosts only some
+# users need) go in claude.local.toml next to this file, in the same form and
+# not committed. Its tables merge into these key by key; other values, lists
+# included, replace these, and each of its proxy.hosts replaces the same host
+# here as a whole.
+#
+# After a change, stop the environment and run `devcontainer up` again; for
+# agent.*, docker.enabled, nix.enabled and sumi.enabled, with
+# --remove-existing-container. Relative paths are from this directory, and ~ is
+# the host's home.
+
+[agent]
+# The agent's user, which must be able to write the workspace on the host.
+# uid = 1000
+# gid = 1000
+
+[docker]
+# Run Docker in DinD for the agent.
+# enabled = false
+# Images to load into DinD, as name:tag. The host pulls the ones it lacks on
+# `devcontainer up` and copies them in; DinD cannot reach a registry.
+# Testcontainers also needs the Ryuk image of the version your library uses.
+# images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
+
+[nix]
+# Mount the host's /nix/store and load the flake's dev shell, evaluated at a
+# commit on the host.
+# enabled = false
+# ref = "HEAD"
+# shell = "devShells.x86_64-linux.foo"   # default: the default dev shell
+
+[sumi]
+# Mask the values in a secrets file, one per line with mode 0600, in what
+# Claude's tools return.
+# enabled = false
+# secrets = "~/.config/claude-devcontainer/sumi/secrets.txt"
+
+[proxy]
+# A host PEM file of CA certificates, such as an in-house root under /etc, that
+# the proxy trusts for upstream TLS besides the public roots.
+# ca = "/etc/ssl/certs/company-root.pem"
+# IDs of the claude.ai connectors that Claude may use. They are per account, so
+# they usually go in claude.local.toml.
+# connectors = ["mcpsrv_01AbCdEf"]
+
+# What the proxy lets through besides Anthropic, by host. The host bakes it
+# into the proxy image on every `devcontainer up`. See "通信ルールを変更する" in
+# docs/network-policy.md of claude-devcontainer. Quote host names, which
+# contain dots.
+#
+#   routes: the requests to let through, as "METHOD path" or a bare path (any
+#     method). The path is a regular expression for the whole URL path,
+#     without the query.
+#   headers: request headers the agent may send, besides common ones (Accept,
+#     Content-Type, User-Agent, ...). Credentials cannot be passed.
+#   inject: headers the proxy adds, replacing the agent's. ${NAME} is a secret
+#     assigned in ~/.config/claude-devcontainer/credentials on the host; only
+#     the ones named here are sent. { basic = "user:password" } makes Basic
+#     authentication.
+#   env: environment variables that the agent gets as the dummy
+#     "managed-by-proxy", so that tools send requests at all; the proxy
+#     replaces the credential.
+
+# GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories to
+# share: REST for those repositories, GraphQL, and Git over HTTPS.
+[proxy.hosts."api.github.com"]
+routes = ["POST /graphql", "GET /user", '/repos/[^/]+/[^/]+(/.*)?']
+headers = ["X-GitHub-Api-Version"]
+inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
+env = ["GH_TOKEN"]
+
+[proxy.hosts."github.com"]
+routes = ['/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)']
+headers = ["Git-Protocol"]
+inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
+
+# A public host, such as the fonts a page loads:
+# [proxy.hosts."fonts.googleapis.com"]
+# routes = ["GET /css2?"]
+
+# An API with a token. An inline table must fit on one line; with more than
+# one header, write inject as its own table:
+# [proxy.hosts."api.notion.com"]
+# routes = ["/v1/.+"]
+# headers = ["Notion-Version"]
+# env = ["NOTION_API_KEY"]
+# [proxy.hosts."api.notion.com".inject]
+# Authorization = "Bearer ${NOTION_API_KEY}"
+
+[subnets]
+# The first three octets of the two internal /24 networks. Unset, `devcontainer
+# up` picks a free pair in 10.231.x and keeps it.
+# proxy = "10.231.70"
+# dind = "10.231.71"

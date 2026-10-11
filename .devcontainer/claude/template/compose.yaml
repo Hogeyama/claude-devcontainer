@@ -3,13 +3,6 @@
 # .devcontainer/.
 include:
   - path: claude/compose.yaml
-    # The workspace's settings. .env, if present, overrides them for this host.
-    # Before them, the subnets that initializeCommand chose (they win over it).
-    env_file: [.generated/networks.env, claude.env]
-
-services:
-  agent:
-    environment:
-      # Dummies for the tokens that proxy.yaml injects, so that tools send
-      # requests at all; the proxy replaces them.
-      GH_TOKEN: managed-by-proxy
+    # Written by initializeCommand from claude.toml and claude.local.toml;
+    # settings.env wins over the subnets chosen in networks.env.
+    env_file: [.generated/networks.env, .generated/settings.env]

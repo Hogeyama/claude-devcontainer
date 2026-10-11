@@ -10,31 +10,22 @@ from mitmproxy.test import tflow
 
 import addon
 from addon import PolicyAddon
-import workspace_config
+import policy
 
 CREDENTIALS = ('managed-anthropic', 'api-key')
-# The GitHub part of template/proxy.yaml.
-WORKSPACE = workspace_config.parse(r"""
-hosts:
-  api.github.com:
-    routes:
-      - POST /graphql
-      - GET /user
-      - /repos/[^/]+/[^/]+(/.*)?
-    headers:
-      - X-GitHub-Api-Version
-    inject:
-      Authorization:
-        basic: x-access-token:${GITHUB_TOKEN}
-  github.com:
-    routes:
-      - /[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)
-    headers:
-      - Git-Protocol
-    inject:
-      Authorization:
-        basic: x-access-token:${GITHUB_TOKEN}
-""")
+# The GitHub part of template/claude.toml.
+WORKSPACE = policy.parse({
+    'api.github.com': {
+        'routes': ['POST /graphql', 'GET /user', '/repos/[^/]+/[^/]+(/.*)?'],
+        'headers': ['X-GitHub-Api-Version'],
+        'inject': {'Authorization': {'basic': 'x-access-token:${GITHUB_TOKEN}'}},
+    },
+    'github.com': {
+        'routes': [r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)'],
+        'headers': ['Git-Protocol'],
+        'inject': {'Authorization': {'basic': 'x-access-token:${GITHUB_TOKEN}'}},
+    },
+})
 GITHUB_BASIC = 'Basic ' + base64.b64encode(b'x-access-token:managed-pat').decode()
 
 
@@ -282,19 +273,11 @@ class PolicyTest(unittest.TestCase):
             self.assertIsNone(f.response)
 
     def test_workspace_inject_and_headers_are_per_host(self):
-        notion = workspace_config.parse("""
-hosts:
-  api.notion.com:
-    routes:
-      - /v1/.+
-    headers:
-      - Notion-Version
-    inject:
-      Authorization: Bearer ${NOTION_API_KEY}
-  fonts.googleapis.com:
-    routes:
-      - GET /css2
-""")
+        notion = policy.parse({
+            'api.notion.com': {'routes': ['/v1/.+'], 'headers': ['Notion-Version'],
+                               'inject': {'Authorization': 'Bearer ${NOTION_API_KEY}'}},
+            'fonts.googleapis.com': {'routes': ['GET /css2']},
+        })
         self.secrets = {'NOTION_API_KEY': 'managed-notion', 'GITHUB_TOKEN': 'managed-pat'}
         with patch.dict(addon.ROUTES, notion.routes), patch('addon.HOSTS', {*addon.HOSTS, *notion.routes}), \
                 patch.dict(addon.WORKSPACE_HEADERS, notion.headers), patch.dict(addon.WORKSPACE_INJECT, notion.inject):

@@ -4,118 +4,164 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 CORE = Path(__file__).resolve().parents[1] / '.devcontainer/claude'
 FLAG = 'CLAUDE_DEVCONTAINER_DIND'
 # The real pick-networks.py asks Docker (pick_networks_test.py covers it); this
-# writes what it would, the lowest of the settings.
+# writes what it would.
 PICK_NETWORKS = '''from pathlib import Path
 out = Path('.devcontainer/.generated/networks.env')
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text('CLAUDE_DEVCONTAINER_PROXY_NET=10.231.90\\nCLAUDE_DEVCONTAINER_DIND_NET=10.231.91\\n')
 '''
+# compose.sh finds the environment with `docker ps`; this answers it, and runs
+# `down` as `config`, which needs no daemon, to show what compose would use.
+DOCKER = '''#!/usr/bin/env python3
+import os, sys
+if sys.argv[1] == 'ps':
+    print('cdc-settings')
+    sys.exit()
+args = [word for arg in sys.argv[1:] for word in (['config', '--format', 'json'] if arg == 'down' else [arg])]
+os.execv(os.environ['REAL_DOCKER'], ['docker', *args])
+'''
+
+
+def environment():
+    return {k: v for k, v in os.environ.items() if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
 
 
 @unittest.skipUnless(shutil.which('docker'), 'Docker Compose CLI required')
 class SettingsIntegrationTest(unittest.TestCase):
-    def test_sumi_relative_directory_matches_compose(self):
-        with tempfile.TemporaryDirectory(prefix='cdc-settings-') as directory:
-            root = Path(directory)
-            (root / '.git').mkdir()
-            config = root / '.devcontainer'
-            scripts = config / 'claude/scripts'
-            scripts.mkdir(parents=True)
-            shutil.copy(CORE / 'compose.yaml', config / 'claude/compose.yaml')
-            shutil.copy(CORE / 'template/compose.yaml', config / 'compose.yaml')
-            shutil.copy(CORE / 'scripts/initialize.sh', scripts / 'initialize.sh')
-            secrets = root / '.secrets/sumi'
-            secrets.mkdir(parents=True)
-            (secrets / 'secrets.txt').write_text('test-only-secret\n')
-            (config / 'claude.env').write_text(
-                'CLAUDE_DEVCONTAINER_SUMI=1\n'
-                'CLAUDE_DEVCONTAINER_SUMI_DIR=../../.secrets/sumi\n')
-            for helper in ('copy-host-config.py', 'inject-credentials.py'):
-                path = scripts / helper
-                path.write_text('#!/bin/sh\nexit 0\n')
-                path.chmod(0o755)
-            (scripts / 'pick-networks.py').write_text(PICK_NETWORKS)
-            env = {k: v for k, v in os.environ.items()
-                   if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
-            initialized = subprocess.run(['sh', str(scripts / 'initialize.sh')], cwd=root, env=env,
-                                         capture_output=True, text=True)
-            self.assertEqual(initialized.returncode, 0, initialized.stderr)
-            compose = subprocess.run(['docker', 'compose', '-f', str(config / 'compose.yaml'),
-                                      'config', '--format', 'json'], cwd=root, env=env,
-                                     capture_output=True, text=True, check=True)
-            mounts = json.loads(compose.stdout)['services']['sumi']['volumes']
-            self.assertEqual(next(m['source'] for m in mounts if m['target'] == '/secrets'), str(secrets))
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix='cdc-settings-')
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        (self.root / '.git').mkdir()
+        self.config = self.root / '.devcontainer'
+        scripts = self.config / 'claude/scripts'
+        scripts.mkdir(parents=True)
+        (self.config / 'claude/proxy').mkdir()
+        shutil.copy(CORE / 'compose.yaml', self.config / 'claude/compose.yaml')
+        shutil.copy(CORE / 'template/compose.yaml', self.config / 'compose.yaml')
+        shutil.copy(CORE / 'proxy/policy.py', self.config / 'claude/proxy/policy.py')
+        for script in ('initialize.sh', 'settings.py', 'compose.sh'):
+            shutil.copy(CORE / 'scripts' / script, scripts / script)
+        # Replace background side effects, keeping the real initialization
+        # script and its decision to load images.
+        for helper in ('copy-host-config.py', 'inject-credentials.py', 'load-images.py'):
+            path = scripts / helper
+            path.write_text('#!/bin/sh\n' + ('echo load-images\n' if helper == 'load-images.py' else 'exit 0\n'))
+            path.chmod(0o755)
+        (scripts / 'pick-networks.py').write_text(PICK_NETWORKS)
+        self.env = environment()
 
-    def test_compose_and_initialize_use_the_same_precedence(self):
-        cases = [
-            ('defaults', None, None, None, '0'),
-            ('workspace', '1', None, None, '1'),
-            ('host', '1', '0', None, '0'),
-            ('environment', '0', '0', '1', '1'),
-            ('empty host', '1', '', None, '0'),
-            ('empty environment', '1', '1', '', '0'),
-        ]
-        for name, workspace, host, environment, expected in cases:
-            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='cdc-settings-') as directory:
-                root = Path(directory)
-                (root / '.git').mkdir()
-                config = root / '.devcontainer'
-                scripts = config / 'claude/scripts'
-                scripts.mkdir(parents=True)
-                shutil.copy(CORE / 'compose.yaml', config / 'claude/compose.yaml')
-                shutil.copy(CORE / 'template/compose.yaml', config / 'compose.yaml')
-                shutil.copy(CORE / 'scripts/initialize.sh', scripts / 'initialize.sh')
-                (config / 'claude.env').write_text('' if workspace is None else f'{FLAG}={workspace}\n')
-                if host is not None:
-                    (config / '.env').write_text(f'{FLAG}={host}\n')
-                # Replace background side effects, keeping the real initialization
-                # script and its decision to load images.
-                for helper in ('copy-host-config.py', 'inject-credentials.py', 'load-images.py'):
-                    path = scripts / helper
-                    path.write_text('#!/bin/sh\n' + ('echo load-images\n' if helper == 'load-images.py' else 'exit 0\n'))
-                    path.chmod(0o755)
-                (scripts / 'pick-networks.py').write_text(PICK_NETWORKS)
-                env = {k: v for k, v in os.environ.items()
-                       if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
-                if environment is not None:
-                    env[FLAG] = environment
-                initialized = subprocess.run(['sh', str(scripts / 'initialize.sh')], cwd=root, env=env,
-                                             capture_output=True, text=True, check=True)
-                self.assertEqual(initialized.stdout.strip(), 'load-images' if expected == '1' else '')
-                compose = subprocess.run(['docker', 'compose', '-f', str(config / 'compose.yaml'),
-                                          'config', '--format', 'json'], cwd=root, env=env,
-                                         capture_output=True, text=True, check=True)
-                services = json.loads(compose.stdout)['services']
+    def write(self, name, text):
+        (self.config / name).write_text(text)
+
+    def initialize(self, check=True):
+        return subprocess.run(['sh', str(self.config / 'claude/scripts/initialize.sh')], cwd=self.root, env=self.env,
+                              capture_output=True, text=True, check=check)
+
+    def compose_config(self, *options):
+        compose = subprocess.run(['docker', 'compose', *options, '-f', str(self.config / 'compose.yaml'),
+                                  'config', '--format', 'json'], cwd=self.root, env=self.env,
+                                 capture_output=True, text=True, check=True)
+        return json.loads(compose.stdout)
+
+    def test_sumi_relative_path_matches_compose(self):
+        secrets = self.root / '.secrets/sumi'
+        secrets.mkdir(parents=True)
+        (secrets / 'secrets.txt').write_text('test-only-secret\n')
+        self.write('claude.toml', '[sumi]\nenabled = true\nsecrets = "../.secrets/sumi/secrets.txt"\n')
+        self.initialize()
+        sumi = self.compose_config()['services']['sumi']
+        self.assertEqual(next(m['source'] for m in sumi['volumes'] if m['target'] == '/secrets'), str(secrets))
+        self.assertIn('/secrets/secrets.txt', sumi['command'])
+
+    def test_compose_and_initialize_use_the_same_settings(self):
+        cases = [('defaults', None, None, '0'), ('workspace', 'true', None, '1'), ('host', 'true', 'false', '0'),
+                 ('host only', None, 'true', '1')]
+        for name, workspace, host, expected in cases:
+            with self.subTest(name=name):
+                for file, value in (('claude.toml', workspace), ('claude.local.toml', host)):
+                    self.write(file, '' if value is None else f'[docker]\nenabled = {value}\n')
+                self.assertEqual(self.initialize().stdout.strip(), 'load-images' if expected == '1' else '')
+                services = self.compose_config()['services']
                 self.assertEqual(services['agent']['environment'][FLAG], expected)
                 self.assertEqual(services['dind']['scale'], int(expected))
+
+    def test_settings_outside_the_files_stop_initialization(self):
+        self.env[FLAG] = '1'
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn(f'{FLAG} in the environment', failed.stderr)
+        del self.env[FLAG]
+        self.write('.env', f'{FLAG}=1\n')
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn(f'{FLAG} in .devcontainer/.env', failed.stderr)
+        # compose reads this form as well.
+        self.write('.env', f'{FLAG}: 1\n')
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn(f'{FLAG} in .devcontainer/.env', failed.stderr)
+        # compose sets this one in the agent; it is not a setting.
+        self.write('.env', '')
+        self.env['CLAUDE_DEVCONTAINER_PROXY_ADDRESS'] = '10.231.90.10'
+        self.initialize()
 
     def test_chosen_subnets_are_the_lowest_setting(self):
         cases = [('chosen', None, None, '10.231.90'), ('workspace', '10.231.80', None, '10.231.80'),
                  ('host', '10.231.80', '10.231.81', '10.231.81')]
         for name, workspace, host, expected in cases:
-            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='cdc-settings-') as directory:
-                config = Path(directory) / '.devcontainer'
-                (config / 'claude').mkdir(parents=True)
-                shutil.copy(CORE / 'compose.yaml', config / 'claude/compose.yaml')
-                shutil.copy(CORE / 'template/compose.yaml', config / 'compose.yaml')
-                subprocess.run(['python3', '-c', PICK_NETWORKS], cwd=directory, check=True)
-                (config / 'claude.env').write_text('' if workspace is None else f'CLAUDE_DEVCONTAINER_PROXY_NET={workspace}\n')
-                if host is not None:
-                    (config / '.env').write_text(f'CLAUDE_DEVCONTAINER_PROXY_NET={host}\n')
-                env = {k: v for k, v in os.environ.items()
-                       if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
-                compose = subprocess.run(['docker', 'compose', '-f', str(config / 'compose.yaml'),
-                                          'config', '--format', 'json'], cwd=directory, env=env,
-                                         capture_output=True, text=True, check=True)
-                services = json.loads(compose.stdout)['services']
+            with self.subTest(name=name):
+                for file, value in (('claude.toml', workspace), ('claude.local.toml', host)):
+                    self.write(file, '' if value is None else f'[subnets]\nproxy = "{value}"\n')
+                self.initialize()
+                services = self.compose_config()['services']
                 self.assertEqual(services['proxy']['networks']['proxy-internal']['ipv4_address'], expected + '.10')
                 self.assertEqual(services['dind']['networks']['dind-internal']['ipv4_address'], '10.231.91.10')
+
+    def test_dummy_tokens_reach_the_agent(self):
+        self.write('claude.toml', '[proxy.hosts."api.github.com"]\nroutes = ["GET /user"]\nenv = ["GH_TOKEN"]\n')
+        self.initialize()
+        environment = self.compose_config()['services']['agent']['environment']
+        self.assertEqual(environment['GH_TOKEN'], 'managed-by-proxy')
+        self.assertEqual(environment['CLAUDE_CODE_OAUTH_TOKEN'], 'managed-by-proxy')
+
+    def test_compose_sh(self):
+        binary = self.root / 'bin'
+        binary.mkdir()
+        (binary / 'docker').write_text(DOCKER)
+        (binary / 'docker').chmod(0o755)
+        self.env.update(PATH=f'{binary}:{self.env["PATH"]}', REAL_DOCKER=shutil.which('docker'))
+        script = str(self.config / 'claude/scripts/compose.sh')
+
+        def run(*args):
+            return subprocess.run([script, *args], cwd=self.root, env=self.env, capture_output=True, text=True)
+        # As after a first `devcontainer up`.
+        subprocess.run([sys.executable, '-c', PICK_NETWORKS], cwd=self.root, check=True)
+        # It writes .generated/ from claude.toml as initializeCommand would.
+        self.write('claude.toml', '[docker]\nenabled = true\n')
+        shown = run('down')
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(json.loads(shown.stdout)['services']['dind']['scale'], 1)
+        # With invalid settings, the previous ones; never the environment's or
+        # .env's, which the settings refuse.
+        self.write('claude.toml', '[docker]\nenabled = false\n')
+        run('down')
+        self.env[FLAG] = '1'
+        self.write('.env', f'{FLAG}=1\n')
+        shown = run('down')
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertIn('warning: the settings are invalid', shown.stderr)
+        self.assertEqual(json.loads(shown.stdout)['services']['dind']['scale'], 0)
+        refused = run('up', '-d')
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn('fix the settings first', refused.stderr)
 
 
 if __name__ == '__main__':

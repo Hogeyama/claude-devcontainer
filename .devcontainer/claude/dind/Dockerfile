@@ -6,7 +6,7 @@ USER root
 # rootlesskit maps the subordinate IDs 100000-165535 besides the user's own UID,
 # so the two must not overlap. Alpine has no usermod.
 RUN if [ "$ROOTLESS_UID" -le 0 ] || { [ "$ROOTLESS_UID" -ge 100000 ] && [ "$ROOTLESS_UID" -lt 165536 ]; }; then \
-        echo "error: CLAUDE_DEVCONTAINER_UID=$ROOTLESS_UID must be positive and outside 100000-165535." >&2; exit 1; \
+        echo "error: agent.uid = $ROOTLESS_UID must be positive and outside 100000-165535." >&2; exit 1; \
     fi \
     && sed -i "s/^rootless:x:1000:1000:/rootless:x:$ROOTLESS_UID:$ROOTLESS_GID:/" /etc/passwd \
     && sed -i "s/^rootless:x:1000:/rootless:x:$ROOTLESS_GID:/" /etc/group \

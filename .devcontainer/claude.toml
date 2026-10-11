@@ -1,0 +1,27 @@
+# This repository's own settings; see claude/template/claude.toml for all of them.
+
+[docker]
+enabled = true
+# Images needed by this repository's offline Docker probes.
+images = ["busybox:1.37", "testcontainers/ryuk:0.14.0"]
+
+[nix]
+enabled = true
+
+[sumi]
+enabled = true
+# Kept in this repository; compose.yaml hides it from the agent.
+secrets = "../.secrets/sumi/secrets.txt"
+
+# GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories to
+# share: REST for those repositories, GraphQL, and Git over HTTPS.
+[proxy.hosts."api.github.com"]
+routes = ["POST /graphql", "GET /user", '/repos/[^/]+/[^/]+(/.*)?']
+headers = ["X-GitHub-Api-Version"]
+inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
+env = ["GH_TOKEN"]
+
+[proxy.hosts."github.com"]
+routes = ['/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)']
+headers = ["Git-Protocol"]
+inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }

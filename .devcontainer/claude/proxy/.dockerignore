@@ -3,4 +3,5 @@
 !addon.py
 !entrypoint.py
 !credentials.py
+!policy.py
 !workspace_config.py

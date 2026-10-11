@@ -4,7 +4,7 @@
 
 ## 認証情報を更新する
 
-Claudeの認証には、ホストのClaude Codeのログインを使います。ホストで`claude`にログインしていれば、設定は要りません。ログインし直した場合や、`~/.config/claude-devcontainer/credentials`で`proxy.yaml`が参照する秘密（`GITHUB_TOKEN`など）を変えた場合は、注入スクリプトを再実行してください。proxyやagentの再起動・再ビルドは不要です。
+Claudeの認証には、ホストのClaude Codeのログインを使います。ホストで`claude`にログインしていれば、設定は要りません。ログインし直した場合や、`~/.config/claude-devcontainer/credentials`で`proxy.hosts`が参照する秘密（`GITHUB_TOKEN`など）を変えた場合は、注入スクリプトを再実行してください。proxyやagentの再起動・再ビルドは不要です。
 
 ```sh
 python3 .devcontainer/claude/scripts/inject-credentials.py
@@ -31,17 +31,18 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 ログインの代わりに、Claude ConsoleのAPI keyも使えます。`~/.config/claude-devcontainer/credentials`に`ANTHROPIC_API_KEY=…`と書いてください。API keyでは、Claude CodeがArtifactsとclaude.aiのコネクタを使えません。API keyは自動では更新しないので、Consoleで更新したら注入スクリプトを再実行してください。
 
-注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。`proxy.yaml`が参照する秘密は、`~/.config/claude-devcontainer/credentials`で代入したものだけを渡し、環境変数からは取りません。Claudeの認証（`ANTHROPIC_API_KEY`か`CLAUDE_CREDENTIALS_FILE`）は環境変数でも指定でき、その場合はファイルの指定より優先します。
+注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。`proxy.hosts`が参照する秘密は、`~/.config/claude-devcontainer/credentials`で代入したものだけを渡し、環境変数からは取りません。Claudeの認証（`ANTHROPIC_API_KEY`か`CLAUDE_CREDENTIALS_FILE`）は環境変数でも指定でき、その場合はファイルの指定より優先します。
 
 認証値はすべてのagentプロセスの通信に共通です。すでに開いているVS Codeのターミナルや通常の`devcontainer exec`からも同じ認証で通信でき、利用者ごとの分離はありません。agentのClaude Codeは起動時にダミーのOAuthトークンを使い、proxyが本物のトークンまたはAPI keyへ置き換えます。
 
 ## DockerとTestcontainers
 
-DinDは`.devcontainer/claude.env`に`CLAUDE_DEVCONTAINER_DIND=1`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは`.devcontainer/images.txt`に1行に1つ`名前:tag`の形で書いてください。`#`以降はコメントです。
+DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは、同じ`[docker]`の`images`に`名前:tag`の形で並べてください。
 
-```
-testcontainers/ryuk:0.14.0
-postgres:16
+```toml
+[docker]
+enabled = true
+images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
 ```
 
 `devcontainer up`のたびに、イメージ読み込みスクリプトがホストにないイメージをホストでpullし、DinDへ読み込みます。
@@ -49,9 +50,9 @@ postgres:16
 - イメージ読み込みスクリプトは、ホストにすでにあるイメージをtagが動いていてもpullし直しません。新しくしたいときは、ホストで`docker pull`してから`up`してください。
 - DinDのデータはvolumeに残るので、送るのは初回と、ホストのイメージが変わったときだけです。
 - コンテナの起動時は、読み込みが終わるまで`up`が待ちます。失敗したイメージは警告に出ます。詳しくは`~/.local/state/claude-devcontainer/load-images.log`を見てください。
-- `up`の後にリストを変えた場合は、ホストで`.devcontainer/claude/scripts/load-images.py`を実行すると反映できます。
+- `up`の後に`images`を変えた場合は、ホストで`.devcontainer/claude/scripts/load-images.py`を実行すると反映できます。
 
-イメージ読み込みスクリプトは、リストにある名前をホストでそのままpullするので、`images.txt`は`.devcontainer/`に置いてagentから書き換えられないようにしています。agentが名前を選べると、ホストを任意のregistryへ接続させられるからです。agentのコミットで`images.txt`が変わっていないかも確認してください。
+イメージ読み込みスクリプトは、`images`にある名前をホストでそのままpullするので、`claude.toml`は`.devcontainer/`に置いてagentから書き換えられないようにしています。agentが名前を選べると、ホストを任意のregistryへ接続させられるからです。agentのコミットで`claude.toml`が変わっていないかも確認してください。
 
 投入後は、agentのシェルから`docker run`や`docker build --network=none`を実行できます。buildには投入済みのbase imageとローカルにある依存ファイルを使ってください。Gradleは`--offline`で実行し、その他のツールも事前に用意したキャッシュや依存ファイルを使ってください。ビルド中のオンラインpackage installには対応していません。
 

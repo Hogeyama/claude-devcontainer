@@ -2,7 +2,11 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -99,39 +103,52 @@ class ArchiveTest(unittest.TestCase):
             'env': {'CLAUDE_CODE_SHELL_PREFIX': f"bash -c 'exec \"$@\"' p /opt/sumi run --secrets-file {self.source}/keys/prefix.txt"}})
         self.extra.mkdir()
         (self.extra / '.claude').symlink_to(self.source)
-        with mock.patch.dict('os.environ', CLAUDE_DEVCONTAINER_SUMI_DIR=str(self.source / 'keys'),
-                             CLAUDE_DEVCONTAINER_SUMI_FILE='container.txt'):
+        self.workspace(f'[sumi]\nsecrets = "{self.source}/keys/container.txt"\n')
+        with mock.patch.object(copy_host_config, 'ROOT', self.root):
             members = self.members()
         self.assertEqual({name for name in members if name.startswith('.claude/keys/')}, {'.claude/keys/other.txt'})
 
-    def test_settings_come_from_the_environment_then_env_then_claude_env(self):
-        (self.root / '.devcontainer').mkdir()
-        (self.root / '.devcontainer/claude.env').write_text('A=workspace\nB=workspace\nC=workspace\n')
-        (self.root / '.devcontainer/.env').write_text('B=host\nC="host"\n')
-        with mock.patch.object(copy_host_config, 'ROOT', self.root), mock.patch.dict('os.environ', {'C': 'environment'}, clear=True):
-            got = [copy_host_config.setting(name, 'default') for name in 'ABCD']
-        self.assertEqual(got, ['workspace', 'host', 'environment', 'default'])
+    def workspace(self, shared, local=None):
+        (self.root / '.devcontainer').mkdir(exist_ok=True)
+        (self.root / '.devcontainer/claude.toml').write_text(shared)
+        if local is not None:
+            (self.root / '.devcontainer/claude.local.toml').write_text(local)
 
-    def test_relative_sumi_directory_is_excluded_from_copied_config(self):
-        (self.root / '.devcontainer/claude').mkdir(parents=True)
+    def test_relative_sumi_secrets_are_excluded_from_copied_config(self):
         (self.source / 'keys').mkdir()
         (self.source / 'keys/secrets.txt').write_text('test-only-secret')
         (self.source / 'keys/other.txt').write_text('ordinary config')
         self.extra.mkdir()
         (self.extra / '.claude').symlink_to(self.source)
-        with mock.patch.object(copy_host_config, 'ROOT', self.root), mock.patch.dict(
-                'os.environ', {'CLAUDE_DEVCONTAINER_SUMI_DIR': '../../claude/keys'}, clear=True):
+        # Relative to .devcontainer/; claude.local.toml overrides claude.toml.
+        self.workspace('[sumi]\nsecrets = "../claude/keys/other.txt"\n', '[sumi]\nsecrets = "../claude/keys/secrets.txt"\n')
+        with mock.patch.object(copy_host_config, 'ROOT', self.root):
             members = self.members()
         self.assertNotIn('.claude/keys/secrets.txt', members)
         self.assertIn('.claude/keys/other.txt', members)
 
-    def test_empty_override_uses_default_instead_of_a_lower_priority_file(self):
-        (self.root / '.devcontainer').mkdir()
-        (self.root / '.devcontainer/claude.env').write_text('A=workspace\nB=workspace\n')
-        (self.root / '.devcontainer/.env').write_text('A=\nB=host\n')
-        with mock.patch.object(copy_host_config, 'ROOT', self.root), mock.patch.dict('os.environ', {'B': ''}, clear=True):
-            self.assertEqual([copy_host_config.setting(name, 'default') for name in 'AB'],
-                             ['default', 'default'])
+    def test_invalid_settings_copy_nothing(self):
+        # Which file sumi.secrets names is unknown, and extra/ may link to it.
+        (self.source / 'keys').mkdir()
+        (self.source / 'keys/secrets.txt').write_text('test-only-secret')
+        self.extra.mkdir()
+        (self.extra / '.claude').symlink_to(self.source)
+        self.workspace('[sumi]\nsecrets = "../claude/keys/secrets.txt"\n[docker]\nenabeld = true\n')
+        with mock.patch.object(copy_host_config, 'ROOT', self.root), self.assertRaisesRegex(ValueError, 'enabeld'):
+            self.members()
+        script = self.root / '.devcontainer/claude/scripts'
+        script.mkdir(parents=True)
+        for name in ('copy-host-config.py', 'settings.py'):
+            shutil.copy(ROOT / '.devcontainer/claude/scripts' / name, script / name)
+        (self.root / '.devcontainer/claude/proxy').mkdir()
+        shutil.copy(ROOT / '.devcontainer/claude/proxy/policy.py', self.root / '.devcontainer/claude/proxy/policy.py')
+        result = subprocess.run([sys.executable, str(script / 'copy-host-config.py'), '--background'],
+                                env={**os.environ, 'CLAUDE_CONFIG_DIR': str(self.source),
+                                     'XDG_CONFIG_HOME': str(self.root / 'config'), 'XDG_STATE_HOME': str(self.root / 'state')},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Nothing was copied', result.stderr)
+        self.assertFalse((self.root / 'state').exists())
 
     def test_extra_overlays_the_home_directory(self):
         self.settings({'model': 'opus'})
