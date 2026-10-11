@@ -50,7 +50,10 @@ SCOPES_SETTINGS = '/etc/claude-code/managed-settings.d/60-claude-login.json'
 # Claude Code's login refresh, as Claude Code 2.1.295 does it.
 TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
-REFRESH_BEFORE_MS = 5 * 60 * 1000
+# Earlier than Claude Code's 5 minutes: the host need not run Claude Code, so
+# this is usually the only refresher, and a failed refresh gets ~60 retries
+# before the token expires.
+REFRESH_BEFORE_MS = 30 * 60 * 1000
 REFRESH_RETRY_SECONDS = 30
 # Claude Code's locks around a refresh, in proper-lockfile's form: a directory,
 # its mtime renewed while held, taken over once it is that stale.
