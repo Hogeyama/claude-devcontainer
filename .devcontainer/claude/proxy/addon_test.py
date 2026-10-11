@@ -87,7 +87,8 @@ class PolicyTest(unittest.TestCase):
 
     def test_anthropic_local_tools_and_inline_content(self):
         body = messages(system=[{'type': 'text', 'text': 'system', 'cache_control': {'type': 'ephemeral'}}],
-                        tools=[{'name': 'Bash', 'input_schema': {'properties': {'mcp_servers': {}}}}], stream=True)
+                        tools=[{'name': 'Bash', 'input_schema': {'properties': {'mcp_servers': {}}}},
+                               {'type': 'advisor_20260301', 'name': 'advisor', 'model': 'claude-opus-5-5'}], stream=True)
         body['messages'] += [
             {'role': 'assistant', 'content': [{'type': 'thinking', 'thinking': 't', 'signature': 's'},
                                               {'type': 'tool_use', 'id': '1', 'name': 'Bash', 'input': {'source': {'type': 'url'}}}]},
@@ -142,7 +143,9 @@ class PolicyTest(unittest.TestCase):
 
     def test_anthropic_rejects_ways_to_reach_other_hosts(self):
         variants = [messages(mcp_servers=[]), messages(container='c'),
-                    messages(tools=[{'type': 'web_fetch_20250910', 'name': 'web_fetch'}])]
+                    messages(tools=[{'type': 'web_fetch_20250910', 'name': 'web_fetch'}]),
+                    messages(tools=[{'type': 'advisor_20270101', 'name': 'advisor'}]),
+                    messages(tools=[{'type': ['advisor_20260301'], 'name': 'x'}])]
         for block in [{'type': 'image', 'source': {'type': 'url', 'url': 'https://attacker.example'}},
                       {'type': 'document', 'source': {'type': 'file', 'file_id': 'f'}}]:
             for content in [[block], [{'type': 'tool_result', 'tool_use_id': '1', 'content': [block]}]]:
@@ -227,6 +230,35 @@ class PolicyTest(unittest.TestCase):
             f.request = http.Request.make('CONNECT', 'https://fonts.googleapis.com:443')
             self.addon.http_connect(f)
             self.assertIsNone(f.response)
+
+    def test_connectors(self):
+        self.assertEqual(addon.connector_routes(''), {})
+        for value in ['mcpsrv_01abc', 'gmail', 'mcpsrv_01abc;mcpsrv_02', 'mcpsrv_', 'mcpsrv_01abc/..']:
+            if value != 'mcpsrv_01abc':
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    addon.connector_routes(value)
+        routes = addon.connector_routes('mcpsrv_01abc, mcprs_02def')
+        url = 'https://mcp-proxy.anthropic.com/v1/mcp/'
+        with patch.dict(addon.ROUTES, routes), patch('addon.HOSTS', {*addon.HOSTS, *routes}):
+            attacker = [('Authorization', 'Bearer attacker'), ('Mcp-Session-Id', 's1'), ('Mcp-Protocol-Version', '2025-06-18')]
+            self.credentials = ('managed-pat', 'managed-anthropic', 'oauth')
+            for path in ['mcpsrv_01abc', 'mcprs_01abc', 'mcpsrv_02def', 'mcpsrv_01abc/sse']:
+                with self.subTest(path=path):
+                    headers = self.allowed(flow(url + path, headers=attacker))
+                    self.assertEqual(headers.get_all('Authorization'), ['Bearer managed-anthropic'])
+                    self.assertEqual(headers['Mcp-Session-Id'], 's1')
+            for path in ['mcpsrv_03ghi', 'mcpsrv_01abcd', 'mcpx_01abc', '../mcpsrv_01abc', 'mcpsrv_01abc%2f..%2fmcpsrv_03ghi']:
+                with self.subTest(path=path):
+                    self.denied(flow(url + path))
+            self.denied(flow('https://mcp-proxy.anthropic.com/v2/mcp/mcpsrv_01abc'))
+            self.credentials = ('managed-pat', 'managed-key', 'api-key')
+            self.denied(flow(url + 'mcpsrv_01abc'))
+            self.credentials = None
+            self.denied(flow(url + 'mcpsrv_01abc'))
+
+    def test_connectors_are_closed_by_default(self):
+        self.assertNotIn('mcp-proxy.anthropic.com', addon.HOSTS)
+        self.denied(flow('https://mcp-proxy.anthropic.com/v1/mcp/mcprs_01abc'))
 
 
 if __name__ == '__main__':

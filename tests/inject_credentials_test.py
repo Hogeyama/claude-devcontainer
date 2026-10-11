@@ -1,0 +1,218 @@
+"""How inject-credentials.py keeps the host's Claude login fresh; no Docker or network needed."""
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import tempfile
+import threading
+import time
+import unittest
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('inject_credentials', ROOT / '.devcontainer/claude/scripts/inject-credentials.py')
+inject_credentials = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(inject_credentials)
+
+SCOPES = ['user:profile', 'user:inference', 'user:mcp_servers']
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+class LoginTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.home = Path(directory.name) / '.claude'
+        self.home.mkdir()
+        self.path = self.home / '.credentials.json'
+        self.requests = []
+        self.answer = {'access_token': 'access-2', 'refresh_token': 'refresh-2', 'expires_in': 3600}
+        patcher = mock.patch.object(inject_credentials.urllib.request, 'urlopen', side_effect=self.urlopen)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name, value in [('LOCK_ATTEMPTS', 2), ('LOCK_RENEW_SECONDS', 0.05)]:
+            patcher = mock.patch.object(inject_credentials, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        sleep = mock.patch.object(inject_credentials.time, 'sleep')
+        sleep.start()
+        self.addCleanup(sleep.stop)
+
+    def urlopen(self, request, timeout):
+        self.requests.append((request.full_url, json.loads(request.data), dict(request.header_items())))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return io.BytesIO(json.dumps(self.answer).encode())
+
+    def write(self, expires_in_ms, access='access-1', **extra):
+        self.path.write_text(json.dumps({
+            'claudeAiOauth': {'accessToken': access, 'refreshToken': 'refresh-1', 'expiresAt': now_ms() + expires_in_ms,
+                              'scopes': SCOPES, 'subscriptionType': 'max', 'rateLimitTier': 'tier', **extra},
+            'mcpOAuth': {'server': {'accessToken': 'mcp-token'}}}))
+        os.chmod(self.path, 0o600)
+
+    def saved(self):
+        return json.loads(self.path.read_text())
+
+    def test_fresh_token_is_used_as_is(self):
+        self.write(60 * 60 * 1000)
+        self.assertEqual(inject_credentials.Login(self.path).current(), 'access-1')
+        self.assertEqual(self.requests, [])
+
+    def test_expiring_token_is_refreshed_and_written_back(self):
+        self.write(60 * 1000, clientId='client-from-file')
+        login = inject_credentials.Login(self.path)
+        self.assertEqual(login.current(), 'access-2')
+        [(url, body, headers)] = self.requests
+        self.assertEqual(url, 'https://platform.claude.com/v1/oauth/token')
+        self.assertEqual(body, {'grant_type': 'refresh_token', 'refresh_token': 'refresh-1',
+                                'client_id': 'client-from-file', 'scope': ' '.join(SCOPES)})
+        saved = self.saved()
+        self.assertEqual(saved['claudeAiOauth']['accessToken'], 'access-2')
+        self.assertEqual(saved['claudeAiOauth']['refreshToken'], 'refresh-2')
+        self.assertGreater(saved['claudeAiOauth']['expiresAt'], now_ms() + 50 * 60 * 1000)
+        # Everything else is kept.
+        self.assertEqual(saved['claudeAiOauth']['scopes'], SCOPES)
+        self.assertEqual(saved['mcpOAuth'], {'server': {'accessToken': 'mcp-token'}})
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(sorted(path.name for path in self.home.iterdir()), ['.credentials.json'])
+        self.assertFalse(Path(str(self.home) + '.lock').exists())
+        # The next call uses the new token without another request.
+        self.assertEqual(login.current(), 'access-2')
+        self.assertEqual(len(self.requests), 1)
+
+    def test_default_client_and_kept_refresh_token(self):
+        self.write(60 * 1000)
+        self.answer = {'access_token': 'access-2', 'expires_in': 3600}
+        inject_credentials.Login(self.path).current()
+        self.assertEqual(self.requests[0][1]['client_id'], '9d1c250a-e61b-44d9-88ed-5944d1962f5e')
+        self.assertEqual(self.saved()['claudeAiOauth']['refreshToken'], 'refresh-1')
+
+    def test_token_refreshed_by_the_host_is_adopted(self):
+        self.write(60 * 60 * 1000)
+        login = inject_credentials.Login(self.path)
+        self.write(2 * 60 * 60 * 1000, access='access-from-host')
+        self.assertEqual(login.current(), 'access-from-host')
+        self.assertEqual(self.requests, [])
+
+    def test_refresh_under_the_lock_rereads_the_file(self):
+        self.write(60 * 1000)
+        login = inject_credentials.Login(self.path)
+        real = inject_credentials.Lock
+
+        def lock_then_host_refreshes(path):
+            taken = real(path)
+            if path.name == '.oauth_refresh.lock':
+                self.write(2 * 60 * 60 * 1000, access='access-from-host')
+            return taken
+        with mock.patch.object(inject_credentials, 'Lock', side_effect=lock_then_host_refreshes):
+            self.assertEqual(login.current(), 'access-from-host')
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.saved()['claudeAiOauth']['accessToken'], 'access-from-host')
+
+    def test_held_lock_is_waited_for_then_the_host_token_adopted(self):
+        self.write(60 * 1000)
+        login = inject_credentials.Login(self.path)
+        (self.home / '.oauth_refresh.lock').mkdir()
+
+        def host_refreshes(seconds):
+            self.write(2 * 60 * 60 * 1000, access='access-from-host')
+        with mock.patch.object(inject_credentials.time, 'sleep', side_effect=host_refreshes):
+            self.assertEqual(login.current(), 'access-from-host')
+        self.assertEqual(self.requests, [])
+        self.assertTrue((self.home / '.oauth_refresh.lock').exists(), 'the other holder keeps its lock')
+
+    def test_stale_lock_is_taken_over(self):
+        self.write(60 * 1000)
+        lock = self.home / '.oauth_refresh.lock'
+        lock.mkdir()
+        old = time.time() - 120
+        os.utime(lock, (old, old))
+        self.assertEqual(inject_credentials.Login(self.path).current(), 'access-2')
+        self.assertFalse(lock.exists())
+
+    def test_lock_held_throughout_fails_and_keeps_the_token(self):
+        self.write(60 * 1000)
+        (self.home / '.oauth_refresh.lock').mkdir()
+        login = inject_credentials.Login(self.path)
+        with mock.patch.object(inject_credentials, 'log') as log:
+            self.assertEqual(login.current(), 'access-1')
+        self.assertIn('locks stayed held', str(log.call_args))
+        self.assertEqual(self.requests, [])
+
+    def test_failed_refresh_keeps_the_token_and_retries_later(self):
+        self.write(60 * 1000)
+        self.answer = OSError('network down')
+        login = inject_credentials.Login(self.path)
+        with mock.patch.object(inject_credentials, 'log'):
+            self.assertEqual(login.current(), 'access-1')
+            self.assertEqual(login.current(), 'access-1')
+        self.assertEqual(len(self.requests), 1, 'no retry before REFRESH_RETRY_SECONDS')
+        self.assertEqual(self.saved()['claudeAiOauth']['accessToken'], 'access-1')
+        self.assertFalse((self.home / '.oauth_refresh.lock').exists())
+        login.retry_at = 0
+        self.answer = {'access_token': 'access-2', 'expires_in': 3600}
+        self.assertEqual(login.current(), 'access-2')
+
+    def test_missing_login(self):
+        for content in [None, '{}', '{"claudeAiOauth": {"accessToken": "a"}}', 'not json']:
+            with self.subTest(content=content):
+                if content is None:
+                    self.path.unlink(missing_ok=True)
+                else:
+                    self.path.write_text(content)
+                with self.assertRaises(inject_credentials.Unavailable):
+                    inject_credentials.Login(self.path)
+
+    def test_settings_for_the_agent(self):
+        self.write(60 * 60 * 1000)
+        self.assertEqual(inject_credentials.Login(self.path).settings(), {'env': {
+            'CLAUDE_CODE_OAUTH_SCOPES': ' '.join(SCOPES), 'CLAUDE_CODE_SUBSCRIPTION_TYPE': 'max',
+            'CLAUDE_CODE_RATE_LIMIT_TIER': 'tier'}})
+        self.assertIsNone(inject_credentials.StaticClaude('oauth', 'setup-token').settings())
+
+    def test_lock_is_renewed_while_held(self):
+        path = self.home / 'renewed.lock'
+        lock = inject_credentials.Lock(path)
+        old = time.time() - 120
+        os.utime(path, (old, old))
+        deadline = time.monotonic() + 2
+        while path.stat().st_mtime < time.time() - 60 and time.monotonic() < deadline:
+            threading.Event().wait(0.02)
+        self.assertGreater(path.stat().st_mtime, time.time() - 60)
+        lock.release()
+        self.assertFalse(path.exists())
+
+
+class ConfigTest(unittest.TestCase):
+    def test_exactly_one_claude_credential(self):
+        base = {'GITHUB_TOKEN': 'gh'}
+        for claude, ok in [({}, False), ({'CLAUDE_CREDENTIALS_FILE': '~/.claude/.credentials.json'}, True),
+                           ({'CLAUDE_CODE_OAUTH_TOKEN': 't', 'CLAUDE_CREDENTIALS_FILE': 'f'}, False),
+                           ({'ANTHROPIC_API_KEY': 'k'}, True)]:
+            environment = {**base, **claude}
+            with self.subTest(claude=claude), mock.patch.dict(os.environ, environment, clear=True), \
+                    mock.patch.object(inject_credentials, 'CONFIG', Path('/nonexistent')):
+                if ok:
+                    self.assertEqual(inject_credentials.config()['GITHUB_TOKEN'], 'gh')
+                else:
+                    with self.assertRaises(inject_credentials.Unavailable):
+                        inject_credentials.config()
+
+    def test_environment_claude_credential_replaces_the_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'credentials'
+            config.write_text('GITHUB_TOKEN=gh-file\nCLAUDE_CODE_OAUTH_TOKEN=setup-token\n')
+            with mock.patch.object(inject_credentials, 'CONFIG', config), \
+                    mock.patch.dict(os.environ, {'PATH': os.environ['PATH'], 'CLAUDE_CREDENTIALS_FILE': 'login'}, clear=True):
+                values = inject_credentials.config()
+        self.assertEqual((values['GITHUB_TOKEN'], values['CLAUDE_CODE_OAUTH_TOKEN'], values['CLAUDE_CREDENTIALS_FILE']),
+                         ('gh-file', '', 'login'))
+
+
+if __name__ == '__main__':
+    unittest.main()

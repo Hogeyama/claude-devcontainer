@@ -54,5 +54,6 @@ Nothing can be installed from a package registry while you run. The host provide
 | A public host that needs no credentials, such as `fonts.googleapis.com` | `routes:` in `.devcontainer/proxy.yaml`: `- {method: GET, host: ..., path: <regex of the path>}`. The proxy adds no credentials to these requests, so propose it only for public endpoints, and name the narrowest path |
 | The nix dev shell of the repository's flake | `CLAUDE_DEVCONTAINER_NIX=1` in `.devcontainer/claude.env` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
 | Environment variables or volumes | `.devcontainer/compose.yaml` |
+| A claude.ai connector (Google Drive, ...) | `CLAUDE_DEVCONTAINER_CONNECTORS=<id>` in `.devcontainer/.env`. List the IDs with `curl -s 'https://api.anthropic.com/v1/mcp_servers?limit=1000' -H 'anthropic-beta: mcp-servers-2025-12-04' \| jq -r '.data[] \| "\(.id)\t\(.display_name)"'` and give the human the ID of the one needed. It needs the host's login shared (`CLAUDE_CREDENTIALS_FILE`); with a setup-token the list fails with a missing `user:mcp_servers` scope |
 
 Project dependencies that are already in the working tree, such as `node_modules`, can be used. If they are missing, ask the human to fetch them on the host.

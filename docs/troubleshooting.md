@@ -14,7 +14,7 @@ project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.p
 docker compose -p "$project" -f .devcontainer/compose.yaml logs proxy | tail
 ```
 
-`request-denied POST api.anthropic.com/v1/messages`のように、拒否した要求のメソッド、ホスト、パスが出ます。proxyはクエリをログに出しません。Claude Codeが設定やテレメトリの取得に使う`/api/...`の拒否は通常の動作で、Claudeはそれらなしで動きます。それ以外の拒否は、[許可される通信](network-policy.md#許可される通信)と照らし合わせてください。
+`request-denied POST api.anthropic.com/v1/messages (tool type web_search_20250305)`のように、拒否した要求のメソッド、ホスト、パスと、拒否した理由が出ます。理由の`route`は許可していないパス、`host`は許可していない接続先、`tool type …`や`field …`はAnthropicの要求本文の検査で拒否したことを示します。proxyはクエリをログに出しません。Claude Codeが設定やテレメトリの取得に使う`/api/...`の拒否は通常の動作で、Claudeはそれらなしで動きます。それ以外の拒否は、[許可される通信](network-policy.md#許可される通信)と照らし合わせてください。
 
 ## 接続がタイムアウトする
 

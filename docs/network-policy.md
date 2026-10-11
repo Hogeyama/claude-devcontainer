@@ -9,12 +9,13 @@
 | `api.github.com` | リポジトリ向けREST API、GraphQL、`GET /user` |
 | `github.com` | Git smart HTTPによるclone、fetch、push |
 | `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`）、remote managed settingsの取得、Artifacts（公開・読取り・一覧などの`/api/frame/`以下。ただし共有範囲を変える`/api/frame/perm/`は除く。MCPサーバー`/api/artifacts/mcp`、その利用に必要なclaude.ai MCPサーバー一覧、組織のポリシー、アカウント情報の取得） |
+| `mcp-proxy.anthropic.com` | `CLAUDE_DEVCONTAINER_CONNECTORS`で指定したclaude.aiのコネクタだけ。既定では許可しない。[claude.aiのコネクタを使う](#claudeaiのコネクタを使う)を参照 |
 
 proxyは、GitHubの認証を注入済みのfine-grained PATで上書きします。proxyはGraphQLの本文を解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。
 
 GitHubのarchive、LFS、release assetや、package registryには対応していません。proxyはWebSocket、SOCKS、raw TCP、平文HTTPによる外部接続も拒否します。
 
-proxyはAnthropic向けの要求では、Anthropicのサーバーから別の接続先へ通信させる指定だけを拒否します。対象はMCP connector、web search／fetchなどサーバー側で実行するtool、code executionのcontainer、URLやファイルIDで指定するcontentです。それ以外の項目やbeta headerは通すため、Claude Codeの新しい機能でproxyの更新は要りません。この4種類以外の形でサーバーから外部へ接続する機能が今後追加された場合は、それも通ります。
+proxyはAnthropic向けの要求では、Anthropicのサーバーから別の接続先へ通信させる指定だけを拒否します。対象はMCP connector、web search／fetchなどサーバー側で実行するtool、code executionのcontainer、URLやファイルIDで指定するcontentです。claude.aiのコネクタは、明示的に指定したものだけ例外として通します。サーバー側のtoolのうち、Anthropicのサーバー内でモデルを呼ぶだけのadvisor（`advisor_20260301`）は、他の接続先に接続しないので通します。新しい版のadvisorは、確認するまで拒否します。その間は、Claude Codeで`/advisor off`にすると推論を続けられます。それ以外の項目やbeta headerは通すため、Claude Codeの新しい機能でproxyの更新は要りません。この4種類以外の形でサーバーから外部へ接続する機能が今後追加された場合は、それも通ります。
 
 proxyは拒否した要求に通常HTTP 403を返します。本文付きの要求をheaderの段階で拒否した場合は、本文を受信し続けないよう接続を切断します。
 
@@ -99,6 +100,8 @@ VS Codeから使う場合には、エディタを通じたホスト認証の転�
 
 ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。リポジトリごとに認証の要らない接続先を足す場合は、下の`proxy.yaml`を使ってください。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
 
+追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、`devcontainer up`で起動し直してください。proxyのimageは起動のたびにビルドし直されます。変更がなければキャッシュが使われます。`devcontainer build`がビルドするのはagentのimageだけなので、proxyの変更には使えません。
+
 ### 接続先を追加する
 
 `.devcontainer/proxy.yaml`の`routes`に、通す要求をmethod、host、pathの組で書きます。たとえば、ページの描画にGoogle Fontsが要る場合です。雛形は[`template/proxy.yaml`](../.devcontainer/claude/template/proxy.yaml)にあります。
@@ -127,17 +130,32 @@ routes:
 CLAUDE_DEVCONTAINER_PROXY_CA=/etc/ssl/certs/company-root.pem
 ```
 
-proxyは起動時にこのファイルを読み取り専用でmountし、公開のルート証明書に加えて信頼します。CA証明書でないものが含まれていると、proxyは理由を表示して起動しません。imageには組み込まないので、ファイルを変えたらproxyを再起動するだけで反映されます。
+proxyは起動時にこのファイルを読み取り専用でmountし、公開のルート証明書に加えて信頼します。CA証明書でないものが含まれていると、proxyは理由を表示して起動しません。imageには組み込まないので、再ビルドは要りません。ファイルを変えたら、環境を停止して`devcontainer up`で起動し直してください。
 
 信頼はホストごとに分けられず、すべての接続先に及びます。このCAの秘密鍵を持つ者は`api.github.com`などの証明書も偽造でき、proxyとの間で認証値を盗み見られます。信頼できる組織のCAだけを指定してください。
 
-追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、ホストで取り込んだリポジトリのルートで次を実行してください。
+### claude.aiのコネクタを使う
+
+Claude Codeは、claude.aiで接続したコネクタ（Google Driveなど）を`mcp-proxy.anthropic.com`経由で使います。Anthropicのサーバーが、接続済みのアカウントの権限でDriveなどを操作します。proxyは既定でこの接続を拒否し、`CLAUDE_DEVCONTAINER_CONNECTORS`に書いたコネクタだけを、claude.aiの認証値を付けて通します。
+
+コネクタには、ホストのClaude Codeのログインを共有する方式（[認証情報を更新する](usage.md#認証情報を更新する)の`CLAUDE_CREDENTIALS_FILE`）が必要です。`claude setup-token`のトークンは推論用のscope（`user:inference`）しか持たず、コネクタの一覧も取得できません。API keyでも使えません。
+
+コネクタのIDはアカウントごとに異なります。agentのシェルで一覧を表示してください。
 
 ```sh
-devcontainer build
-devcontainer up
-python3 .devcontainer/claude/scripts/inject-credentials.py
+curl -s 'https://api.anthropic.com/v1/mcp_servers?limit=1000' -H 'anthropic-beta: mcp-servers-2025-12-04' \
+  | jq -r '.data[] | "\(.id)\t\(.display_name)"'
 ```
+
+使うIDを、カンマか空白で区切って`.devcontainer/.env`に書き、READMEの停止手順で環境を停止してから`devcontainer up`で起動し直してください。imageの再ビルドは要りません。起動時に認証値も注入し直されます。IDの形式が不正な場合は、proxyが理由を表示して起動しません。
+
+```sh
+CLAUDE_DEVCONTAINER_CONNECTORS=mcpsrv_01AbCdEf
+```
+
+指定していないコネクタはproxyが拒否するので、Claude Codeでは接続失敗と表示されます。
+
+コネクタにできる操作はproxyでは検査しません。agentは、指定したコネクタの機能をアカウントの権限の範囲ですべて使えます。書込みや共有ができるコネクタは、ファイルの作成や公開を通じた外部への送信経路になります。また、コネクタが返す内容は未信頼の入力としてモデルに届きます。読取りだけで足りる用途のコネクタを選んでください。
 
 proxyはAnthropicの要求本文全体を受信してから検査・転送します。AnthropicとGitの要求本文には上限を設けていないため、大きな要求や同時接続でメモリを使い切る可能性が残ります。proxyのメモリ上限は512 MiBで、停止した場合は通信も停止します。
 

@@ -67,7 +67,7 @@ API keyを使う場合は、代わりに[Claude ConsoleのAPI keys](https://plat
 
 ### 3. 認証情報の取り出し方を設定する
 
-ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`のどちらか一方を設定してください。取り出し方は手元の環境に合わせて選んでください。
+ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`GITHUB_TOKEN`と、`CLAUDE_CODE_OAUTH_TOKEN`または`ANTHROPIC_API_KEY`のどちらか一方を設定してください。claude.aiのコネクタも使う場合は、代わりにホストのClaude Codeのログインを共有します（[ホストのClaude Codeのログインを共有する](docs/usage.md#ホストのclaude-codeのログインを共有する)）。取り出し方は手元の環境に合わせて選んでください。
 
 ```sh
 GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使う場合
@@ -135,6 +135,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 | DinDで使うイメージ（Testcontainersなど） | `.devcontainer/images.txt`。[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照 |
 | proxyが通す接続先（`fonts.googleapis.com`など） | `.devcontainer/proxy.yaml`。[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照 |
 | 社内CAを使う接続先 | `.devcontainer/claude.env`か`.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`。[社内CAを信頼させる](docs/network-policy.md#社内caを信頼させる)を参照 |
+| claude.aiのコネクタ（Google Driveなど） | `.devcontainer/.env`の`CLAUDE_DEVCONTAINER_CONNECTORS`。[claude.aiのコネクタを使う](docs/network-policy.md#claudeaiのコネクタを使う)を参照 |
 
 `agent-setup.sh`はホストでのビルド時に実行されるので、package registryに接続できます。agentの実行時はproxyを通るため接続できません。
 

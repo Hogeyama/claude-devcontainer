@@ -25,7 +25,7 @@ UPSTREAM_CA = Path('/tmp/proxy/upstream-ca.pem')
 HOST = re.compile(r'(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}')
 METHOD = re.compile(r'[A-Z]+')
 # The hosts addon.py sends credentials to (its ROUTES; addon.py checks).
-AUTHENTICATED_HOSTS = {'api.github.com', 'github.com', 'api.anthropic.com'}
+AUTHENTICATED_HOSTS = {'api.github.com', 'github.com', 'api.anthropic.com', 'mcp-proxy.anthropic.com'}
 
 
 def parse(text, source='proxy.yaml'):

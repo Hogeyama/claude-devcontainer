@@ -28,10 +28,15 @@ exported to `/public-ca/mitmproxy-ca-cert.pem`.
 Anthropic requests need no Content-Encoding, so that Messages/token-count
 bodies can be buffered and inspected as sent. The inspection rejects only the
 ways a request can make Anthropic's servers contact other hosts: `mcp_servers`,
-`container`, server tools (any tool whose type is not `custom`), and URL or
+`container`, server tools (any tool whose type is not `custom`, except the
+advisor_20260301, which only runs a model; later versions until checked), and URL or
 file sources in messages, the system prompt, and tool results. Other fields
 and beta headers pass, so new Claude Code features need no policy update; a
 future server-side feature in some other shape would pass too.
+
+claude.ai connectors (mcp-proxy.anthropic.com) are closed unless their IDs are
+listed in CLAUDE_DEVCONTAINER_CONNECTORS; listed ones get the claude.ai OAuth
+token, and what they do on the connected account is not inspected.
 
 GitHub GraphQL bodies are opaque, including invalid syntax. GitHub's scoped
 PAT must enforce repository permissions. REST is limited to `/repos/...`,
@@ -40,5 +45,5 @@ Archive, LFS, release download hosts, and other endpoints are not supported.
 Anthropic and GitHub request bodies are buffered without an application size
 limit; responses stream without a cap. Deploy a memory limit for the proxy to
 contain request-buffer exhaustion. WebSockets, plaintext upstream HTTP, and
-non-443 upstream ports are rejected. Denials are logged with method, host and
-path, but never the query.
+non-443 upstream ports are rejected. Denials are logged with method, host,
+path and the check that failed, but never the query or body content.

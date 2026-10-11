@@ -20,6 +20,8 @@
 #   CLAUDE_DEVCONTAINER_PROXY_CA  a host PEM file of CA certificates, such as an
 #     in-house root under /etc, that the proxy trusts for upstream TLS besides
 #     the public roots. Default none.
+#   CLAUDE_DEVCONTAINER_CONNECTORS  IDs (mcpsrv_...) of the claude.ai connectors
+#     that the proxy lets Claude use, separated by commas or spaces. Default none.
 # Features are 0 or 1: compose can neither add a service nor a mount
 # conditionally, so the values select a scale and a path instead.
 services:
@@ -113,6 +115,10 @@ services:
         # Absent unless CLAUDE_DEVCONTAINER_SUMI=1.
         required: false
   proxy:
+    # Build on every `up`: `devcontainer build` builds only the agent, and the
+    # policy (addon.py, the workspace's proxy.yaml) would otherwise stay as
+    # first built. The cache makes an unchanged build quick.
+    pull_policy: build
     build:
       context: proxy
       # The workspace's .devcontainer/, for its optional proxy.yaml.
@@ -124,6 +130,8 @@ services:
     sysctls:
       net.ipv4.ip_forward: "0"
       net.ipv6.conf.all.disable_ipv6: "1"
+    environment:
+      CLAUDE_DEVCONTAINER_CONNECTORS: ${CLAUDE_DEVCONTAINER_CONNECTORS:-}
     tmpfs:
       - /run/proxy-credentials:uid=1000,gid=1000,mode=0700,size=1m
     volumes:
