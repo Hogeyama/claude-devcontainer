@@ -11,13 +11,12 @@ You run in an isolated container. Most of its limits are deliberate, and working
 
 All traffic goes through the proxy in `HTTPS_PROXY`. Only these destinations are allowed:
 
-- `github.com`: Git smart HTTP (clone, fetch, push)
-- `api.github.com`: the REST and GraphQL APIs for repositories. `gh` works; the proxy adds the credential, so leave the dummy `GH_TOKEN` as it is.
 - `api.anthropic.com`: Claude's own traffic only. Do not call it from commands: the proxy adds the real credentials to every request.
+- What `.devcontainer/claude.toml` (and the host's `claude.local.toml`) lists under `[proxy.hosts."..."]`, usually `github.com` (Git smart HTTP: clone, fetch, push) and `api.github.com` (the REST and GraphQL APIs for repositories). `gh` works. The proxy adds the credentials named in its `inject`, so leave dummy tokens such as `GH_TOKEN=managed-by-proxy` as they are.
 
 Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. WebSearch is disabled.
 
-- **HTTP 403**: the proxy refused the request. Check that the destination is one of the above. A body of `blocked: no credentials` means the proxy has no credentials yet; the human must run `python3 .devcontainer/claude/scripts/inject-credentials.py` on the host.
+- **HTTP 403**: the proxy refused the request. Check that the destination is one of the above. A body of `blocked: no credentials` means the proxy has no credentials yet; the human must run `python3 .devcontainer/claude/scripts/inject-credentials.py` on the host. `blocked: no secret NAME` means the host's credentials file lacks the secret that `proxy.hosts` injects; tell the human the NAME.
 - **Timeout or `Could not resolve host`**: the program did not use the proxy. Tools that ignore `HTTPS_PROXY` cannot reach anything.
 - **Certificate errors**: the proxy inspects HTTPS and signs with its own CA. The system trust store and the Node.js, Git, and curl variables already include it. For a tool with its own trust store (a Java keystore, Python's `certifi`), add `/public-ca/mitmproxy-ca-cert.pem` to it. Do not disable TLS verification.
 
@@ -35,13 +34,13 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Docker (DinD)
 
-Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docker` cannot work, and the human has to set `CLAUDE_DEVCONTAINER_DIND=1` in `.devcontainer/claude.env`.
+Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docker` cannot work, and the human has to set `enabled = true` under `[docker]` in `.devcontainer/claude.toml`.
 
 - DinD reaches no registry and no external DNS. `docker pull` fails, and so does any network access during a build (`apt-get install`, `npm install`, ...).
-- The only images are those the human listed in `.devcontainer/images.txt`; `docker images` shows them. If one is missing, give the human its exact `name:tag`.
+- The only images are those the human listed in `images` under `[docker]` in `.devcontainer/claude.toml`; `docker images` shows them. If one is missing, give the human its exact `name:tag`.
 - Build with `docker build --network=none`, from images already loaded and dependency files already on disk. Run Gradle with `--offline`.
 - Publish ports on `0.0.0.0` (`-p 8080` or `-p 18080:8080`) and connect to `127.0.0.1:<published port>`. Ports published on loopback only (`-p 127.0.0.1:8080:8080`) and port 2375 are not relayed.
-- `DOCKER_HOST` and the Testcontainers variables are already set. Testcontainers also needs the Ryuk image (e.g. `testcontainers/ryuk:0.14.0`) in `images.txt`.
+- `DOCKER_HOST` and the Testcontainers variables are already set. Testcontainers also needs the Ryuk image (e.g. `testcontainers/ryuk:0.14.0`) in that list.
 
 ## Adding tools and dependencies
 
@@ -50,8 +49,10 @@ Nothing can be installed from a package registry while you run. The host provide
 | What is needed | Change for the human to make |
 |---|---|
 | A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built |
-| An image for DinD | `.devcontainer/images.txt` |
-| The nix dev shell of the repository's flake | `CLAUDE_DEVCONTAINER_NIX=1` in `.devcontainer/claude.env` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
+| An image for DinD | `images` under `[docker]` in `.devcontainer/claude.toml` |
+| Another host or API | `.devcontainer/claude.toml`, a `[proxy.hosts."api.example.com"]` table (the host name quoted) with the narrowest `routes` (`"GET /path"` or a bare path for any method). For a token, `inject` (e.g. `inject = { Authorization = "Bearer ${NOTION_API_KEY}" }`), `env = ["NOTION_API_KEY"]` for the dummy the tool reads, and the human's `NOTION_API_KEY=...` in `~/.config/claude-devcontainer/credentials`. A host only this human uses goes in `.devcontainer/claude.local.toml` instead |
+| The nix dev shell of the repository's flake | `enabled = true` under `[nix]` in `.devcontainer/claude.toml` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
 | Environment variables or volumes | `.devcontainer/compose.yaml` |
+| A claude.ai connector (Google Drive, ...) | `connectors = ["<id>"]` under `[proxy]` in `.devcontainer/claude.local.toml`. List the IDs with `curl -s 'https://api.anthropic.com/v1/mcp_servers?limit=1000' -H 'anthropic-beta: mcp-servers-2025-12-04' \| jq -r '.data[] \| "\(.id)\t\(.display_name)"'` and give the human the ID of the one needed. It needs the host's Claude login; with an API key there are no connectors |
 
 Project dependencies that are already in the working tree, such as `node_modules`, can be used. If they are missing, ask the human to fetch them on the host.

@@ -1,0 +1,2 @@
+# This host's settings, which override claude.toml.
+claude.local.toml

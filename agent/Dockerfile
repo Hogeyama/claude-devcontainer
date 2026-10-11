@@ -1,5 +1,5 @@
-# sumi masks secrets in what Claude's tools return (CLAUDE_DEVCONTAINER_SUMI in
-# compose.yaml). Its broker and the agent must run the same version.
+# sumi masks secrets in what Claude's tools return (sumi.enabled in
+# claude.toml). Its broker and the agent must run the same version.
 FROM scratch AS sumi-amd64
 ADD --chmod=755 --checksum=sha256:43d89c297e8381adac12d2fcc6280bccd99f8386fddce35d13bb4e6aa687f5ed \
     https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-x86_64-linux /sumi
@@ -24,10 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code@2.1.295 \
     && npm cache clean --force
-# The workspace's owner on the host (CLAUDE_DEVCONTAINER_UID/GID in compose.yaml).
+# The workspace's owner on the host (agent.uid and agent.gid in claude.toml).
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
-RUN if [ "$AGENT_UID" -le 0 ]; then echo "error: CLAUDE_DEVCONTAINER_UID must be positive." >&2; exit 1; fi \
+RUN if [ "$AGENT_UID" -le 0 ]; then echo "error: agent.uid must be positive." >&2; exit 1; fi \
     && groupmod -o -g "$AGENT_GID" node \
     && usermod -o -u "$AGENT_UID" -g "$AGENT_GID" node
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
@@ -66,6 +66,9 @@ COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 COPY agent/skills/ /etc/claude-code/.claude/skills/
 COPY agent/bash-env.sh /etc/bash-env.sh
 COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh /usr/local/bin/
+# Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
+# reach anything (a Next.js server calling an API, for one).
+ENV NODE_USE_ENV_PROXY=1
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
     CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \

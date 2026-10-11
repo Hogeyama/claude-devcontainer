@@ -3,11 +3,11 @@
 
 The copy goes one way only: nothing in the agent's home reaches the host, where
 an agent-written hook or memory would run or be read outside the container.
-Copied are the entries of ~/.claude in ENTRIES, the files under ~/.claude that
-statusLine and hooks commands name, and then everything in EXTRA, mirrored onto
-the home directory (e.g. EXTRA/.gitconfig becomes ~/.gitconfig). Symbolic links
-are followed on the host, so they may point anywhere the host can read (e.g.
-/nix/store).
+Copied are settings.json, the entries of ~/.claude in ENTRIES, and the files
+under ~/.claude that statusLine and hooks commands name. Everything in EXTRA
+is then mirrored onto the home directory (e.g. EXTRA/.gitconfig becomes
+~/.gitconfig). Symbolic links are followed on the host, so they may point
+anywhere the host can read (e.g. /nix/store).
 
 The agent must not be able to drop the host's hooks or change what they run, so
 settings.json becomes a managed settings file, and the rest of ~/.claude is
@@ -18,6 +18,7 @@ Without arguments, copy now. With --background, as the Dev Containers
 initializeCommand runs it before the containers start, archive now and hand the
 archive to a detached process that copies it once the agent is up.
 """
+import importlib.util
 import io
 import json
 import os
@@ -36,7 +37,8 @@ EXTRA = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'cl
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/copy-config.log'
 # Configuration, not state. An allowlist, because ~/.claude also holds
 # credentials and history, and new kinds of state appear with new versions.
-ENTRIES = ('settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
+# settings.json is handled separately as a managed settings file.
+ENTRIES = ('CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
 # Never copied, nor anything under them, even when a command names it or EXTRA
 # links to all of ~/.claude. sumi/ is where sumi's README keeps secrets.txt; the
 # secrets files actually in use are found by secrets_files().
@@ -74,26 +76,23 @@ def referenced(settings):
     return sorted(paths)
 
 
-def setting(name, default):
-    """Return a setting from the environment, else from .devcontainer/.env, else from
-    .devcontainer/claude.env, as compose reads them."""
-    value = os.environ.get(name)
-    for file in ('.env', 'claude.env'):
-        # An explicit empty value overrides lower-priority files too; Compose's
-        # ${NAME:-default} then selects the default.
-        if value is not None:
-            break
-        try:
-            for line in (ROOT / '.devcontainer' / file).read_text().splitlines():
-                key, _, rest = line.partition('=')
-                if key.strip() == name:
-                    value = rest.strip().strip('"\'')
-        except OSError:
-            pass
-    return value or default
+def _settings():
+    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def secrets_files(settings):
+settings_py = _settings()
+
+
+def sumi_secrets():
+    """The secrets file of sumi.secrets. ValueError if the settings are invalid:
+    without them, the file to leave out is unknown, and nothing may be copied."""
+    return settings_py.load(ROOT)['sumi']['secrets']
+
+
+def secrets_files(settings, container):
     """Return the secrets files sumi reads, on the host and for the container, resolved."""
     commands = []
     for groups in (settings.get('hooks') or {}).values():
@@ -103,10 +102,7 @@ def secrets_files(settings):
                     args = hook.get('args')
                     commands.append([str(arg) for arg in args] if isinstance(args, list) else str(hook['command']))
     commands.append(str((settings.get('env') or {}).get('CLAUDE_CODE_SHELL_PREFIX', '')))
-    # Match the included compose.yaml's base for relative bind sources.
-    files = [ROOT / '.devcontainer/claude'
-             / Path(setting('CLAUDE_DEVCONTAINER_SUMI_DIR', str(Path.home() / '.claude/sumi')))
-             / setting('CLAUDE_DEVCONTAINER_SUMI_FILE', 'secrets.txt')]
+    files = [container]
     for command in commands:
         try:
             words = command if isinstance(command, list) else shlex.split(command)
@@ -123,7 +119,7 @@ def secrets_files(settings):
 def without_sumi(settings):
     """Remove the host's sumi hooks and shell, whose paths only exist on the host.
 
-    CLAUDE_DEVCONTAINER_SUMI=1 brings the container's own; a broken copy of the
+    sumi.enabled in claude.toml brings the container's own; a broken copy of the
     host's would refuse every tool result.
     """
     hooks = settings.get('hooks')
@@ -152,12 +148,13 @@ def without_sumi(settings):
 
 def archive(source=SOURCE, extra=EXTRA):
     """Return a tar of the configuration to extract into the agent's home."""
-    names = [Path(name) for name in ENTRIES if name != 'settings.json']
-    excluded = secrets_files({})
+    names = [Path(name) for name in ENTRIES]
+    container = sumi_secrets()
+    excluded = secrets_files({}, container)
     try:
         settings = json.loads((source / 'settings.json').read_text())
         names += referenced(settings)
-        excluded = secrets_files(settings)
+        excluded = secrets_files(settings, container)
         settings = json.dumps(without_sumi(settings), indent=2).encode()
     except OSError:
         settings = None
@@ -257,8 +254,7 @@ chown node:node {MARKER}
 
 
 def copy(agent, data):
-    entries = [name for name in ENTRIES if name != 'settings.json']
-    docker('exec', '-i', '--user', '0', agent, 'sh', '-c', COPY_SCRIPT, 'sh', *entries, data=data)
+    docker('exec', '-i', '--user', '0', agent, 'sh', '-c', COPY_SCRIPT, 'sh', *ENTRIES, data=data)
 
 
 def wait_and_copy(data):
@@ -304,3 +300,5 @@ if __name__ == '__main__':
         main()
     except subprocess.CalledProcessError as error:
         sys.exit(error.returncode)
+    except ValueError as error:
+        sys.exit(f'error: {error}. Nothing was copied: the settings name the secrets file to leave out.')

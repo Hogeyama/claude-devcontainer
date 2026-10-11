@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Load the images listed in .devcontainer/images.txt into this workspace's DinD.
+"""Load the images of docker.images in .devcontainer/claude.toml into this workspace's DinD.
 
 DinD cannot reach a registry, so the host pulls the images and copies them in.
 The list lives in .devcontainer/, which the agent cannot write: the host pulls
 whatever it names, so a name the agent chose would make the host contact a
-registry of the agent's choosing.
+registry of the agent's choosing. The list is read from the settings as
+scripts/settings.py writes it to .generated/images.txt, one per line, so that a
+change after `up` is loaded too.
 
 Without arguments, load now. With --background, as the Dev Containers
 initializeCommand runs it before the containers start, pull now and hand the
@@ -12,6 +14,7 @@ loading to a detached process that runs once DinD is up. Either way, the agent's
 postStartCommand (wait-ready.sh) waits for the marker this writes into the agent.
 """
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,7 +24,6 @@ import time
 
 # The workspace root: this script is .devcontainer/claude/scripts/ in it.
 ROOT = Path(__file__).resolve().parents[3]
-LIST = ROOT / '.devcontainer/images.txt'
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/load-images.log'
 # Kept in DinD's data volume, so that images survive rebuilds without being sent
 # again. DinD's own image IDs cannot be compared: it uses the containerd image
@@ -31,6 +33,17 @@ RECORD = '/home/rootless/.local/share/docker/claude-devcontainer-images.json'
 MARKERS = '/run/claude-devcontainer'
 WAIT_SECONDS = 600
 DIND_DOCKER = 'export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock; '
+
+
+def listed():
+    """The list as settings.py writes it to .generated/images.txt, which wait-ready.sh reads."""
+    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
+    settings = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(settings)
+    try:
+        return settings.images_txt(settings.load(ROOT)).encode()
+    except ValueError as error:
+        sys.exit(f'error: {error}')
 
 
 def images(content):
@@ -150,7 +163,7 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else None
     if mode == '--wait':
         return wait_and_load(sys.stdin.buffer.read())
-    content = LIST.read_bytes() if LIST.exists() else b''
+    content = listed()
     if not images(content):
         return
     pull(images(content))
