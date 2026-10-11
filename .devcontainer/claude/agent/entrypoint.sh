@@ -22,8 +22,5 @@ if [ "${CLAUDE_DEVCONTAINER_DIND:-0}" != 1 ]; then
     exec "$@"
 fi
 /usr/local/bin/dind-bridge \
-    --docker-host unix:///var/run/dind/docker.sock \
-    --publish-host "$CLAUDE_DEVCONTAINER_DIND_ADDRESS" --publish-ip 0.0.0.0 \
-    --api tcp://127.0.0.1:2375 \
     </dev/null >>/run/dind-bridge/serve.log 2>&1 &
 exec "$@"

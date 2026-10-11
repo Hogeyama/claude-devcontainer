@@ -1,5 +1,6 @@
 import { createServer as createHttpServer, request } from "node:http";
 import { createServer } from "node:net";
+import { waitForDocker } from "./docker_ready.mjs";
 import {
   closeServer,
   listen,
@@ -70,7 +71,7 @@ function dockerJson(socketPath, path) {
  * address is the whole authorization: no request can steer a connection to
  * another service.
  *
- * The first API request waits for `beforeFirstRequest` and an initial port
+ * The first API request waits for Docker to be ready and an initial port
  * snapshot, so the relay can listen before dockerd is up. A start or restart
  * response is held until the ports it created are mirrored, so a client never
  * sees a mapped port it cannot connect to yet. Everything else streams
@@ -81,7 +82,6 @@ export async function startRelay({
   api,
   publishHost,
   publishIp,
-  beforeFirstRequest,
   onWarning = () => {},
 }) {
   const sockets = new Set();
@@ -191,7 +191,7 @@ export async function startRelay({
   let apiReady;
   const prepareApi = () => {
     apiReady ??= (async () => {
-      await beforeFirstRequest();
+      await waitForDocker(dockerSocket);
       await syncing?.catch(() => {});
       await sync();
     })().catch((error) => {
