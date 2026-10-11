@@ -9,9 +9,7 @@ proxyが要求を拒否しています。本文が`blocked: no credentials`の�
 ホストで取り込んだリポジトリのルートで次のコマンドを実行してください。
 
 ```sh
-project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' \
-  "$(docker ps -q --filter "label=devcontainer.local_folder=$(pwd -P)" --filter "label=com.docker.compose.service=agent")")
-docker compose -p "$project" -f .devcontainer/compose.yaml logs proxy | tail
+.devcontainer/claude/scripts/compose.sh logs proxy | tail
 ```
 
 `request-denied POST api.anthropic.com/v1/messages (tool type web_search_20250305)`のように、拒否した要求のメソッド、ホスト、パスと、拒否した理由が出ます。理由の`route`は許可していないパス、`host`は許可していない接続先、`tool type …`や`field …`はAnthropicの要求本文の検査で拒否したことを示します。proxyはクエリをログに出しません。Claude Codeが設定やテレメトリの取得に使う`/api/...`の拒否は通常の動作で、Claudeはそれらなしで動きます。それ以外の拒否は、[許可される通信](network-policy.md#許可される通信)と照らし合わせてください。

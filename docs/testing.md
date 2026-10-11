@@ -100,7 +100,7 @@ CLIとComposeで同じ検証用環境を操作するため、開始時に`export
    ```sh
    devcontainer exec --workspace-folder . bash -ic 'hello --version'
    devcontainer exec --workspace-folder . sh -c '! docker info >/dev/null 2>&1 && test ! -e /run/dind-bridge/serve.log'
-   docker compose -f .devcontainer/compose.yaml ps --services --status running
+   .devcontainer/claude/scripts/compose.sh ps --services --status running
    ```
 
    起動中のサービスは`agent`と`proxy`だけになります。
@@ -111,7 +111,7 @@ CLIとComposeで同じ検証用環境を操作するため、開始時に`export
 6. `CLAUDE_DEVCONTAINER_NIX_REF`を有効なrefに戻してください。`flake.lock`がないコミットでも`up`し、作業ツリーへ`flake.lock`が作られていないことを確認してください。
 7. `CLAUDE_DEVCONTAINER_NIX=0`で再起動し、dev shellのツールが読み込まれないことを確認してください。
 
-設定を変えるときは、先に`docker compose -f .devcontainer/compose.yaml down`で検証用環境を停止してください。DinDを有効に戻す前には、検証用の存在しないイメージ名を`images.txt`から削除してください。
+設定を変えるときは、先に`.devcontainer/claude/scripts/compose.sh down`で検証用環境を停止してください。DinDを有効に戻す前には、検証用の存在しないイメージ名を`images.txt`から削除してください。
 
 ### 後片付け
 
