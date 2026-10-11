@@ -11,6 +11,10 @@
 #   inject: headers the proxy adds, replacing the agent's. ${NAME} is a secret
 #     assigned in ~/.config/claude-devcontainer/credentials on the host; only
 #     the ones named here are sent. "basic:" makes Basic authentication.
+#
+# Hosts that only some users need go in proxy.local.yaml beside this file, in
+# the same form and not committed. Its hosts are added, replacing the same
+# hosts here as a whole.
 hosts:
   # GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories
   # to share: REST for those repositories, GraphQL, and Git over HTTPS.

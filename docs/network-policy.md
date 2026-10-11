@@ -161,6 +161,23 @@ agentのNode.jsの`fetch`も、`NODE_USE_ENV_PROXY=1`によりproxyを通りま�
 
 `proxy.yaml`が不正な場合は、proxyのimageのビルドが失敗し、理由を表示します。
 
+### ホストだけの接続先を追加する
+
+Redmineなど、リポジトリを使う人のうち一部だけが使う接続先は、`.devcontainer/proxy.local.yaml`に書けます。形式は`proxy.yaml`と同じです。`.gitignore`に追加し、コミットしないでください。
+
+```yaml
+hosts:
+  redmine.my-company.com:
+    routes:
+      - GET /issues\.json
+    inject:
+      X-Redmine-API-Key: ${REDMINE_API_KEY}
+```
+
+`proxy.local.yaml`のホストは`proxy.yaml`のホストに追加されます。同じホストが両方にある場合は、`proxy.local.yaml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`は混ぜません。秘密は`proxy.yaml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
+
+`proxy.yaml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合はビルドが失敗し、`proxy.local.yaml:`で始まる理由を表示します。agentからは編集できませんが、読むことはできます。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
+
 ### 社内CAを信頼させる
 
 社内CAの証明書を使うホストへは、proxyが接続先の証明書を検証できず、502を返します。ホストにあるCA証明書（PEM、複数の証明書を連結したものも可）のパスを、`.devcontainer/claude.env`か`.devcontainer/.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`に書いてください。相対パスは`.devcontainer/claude/`が基準です。

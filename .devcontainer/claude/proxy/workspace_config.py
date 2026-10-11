@@ -6,8 +6,12 @@ whose values name secrets as ${NAME}. The secrets themselves stay on the host:
 inject-credentials.py sends the named ones, from the host's credentials file
 only, so the workspace decides where a secret goes but never sees it.
 
-The image build installs proxy.yaml with `install`, so only a host build changes
-it, and a bad file fails the build instead of the proxy. Anthropic's hosts stay
+proxy.local.yaml, beside it and not committed, is this host's addition in the
+same form, such as a tracker that only some users of the workspace use. Its
+hosts are added, and replace the same hosts of proxy.yaml as a whole.
+
+The image build installs both with `install`, so only a host build changes
+them, and a bad file fails the build instead of the proxy. Anthropic's hosts stay
 fixed in addon.py: their login is refreshed and their bodies are checked there.
 
 The CA (CLAUDE_DEVCONTAINER_PROXY_CA) is the host's file, such as an in-house
@@ -24,7 +28,8 @@ from cryptography import x509
 from ruamel.yaml import YAML, YAMLError
 
 DIR = Path('/opt/proxy/workspace')
-CONFIG = DIR / 'proxy.yaml'
+# The workspace's file, then this host's, which overrides it by host.
+FILES = ['proxy.yaml', 'proxy.local.yaml']
 CA = Path('/run/proxy-ca/ca.pem')
 # certifi's roots plus the host's CA, for upstream TLS.
 UPSTREAM_CA = Path('/tmp/proxy/upstream-ca.pem')
@@ -139,24 +144,44 @@ def parse(text, source='proxy.yaml'):
     return config
 
 
-def installed(path=CONFIG):
-    """The installed Config; empty without a proxy.yaml."""
-    try:
-        text = Path(path).read_text()
-    except FileNotFoundError:
-        return Config()
-    return parse(text)
+def merge(base, override):
+    """base with override's hosts added, each replacing the same host of base."""
+    merged = Config()
+    for config in [base, override]:
+        for host in config.routes:
+            for field in [merged.routes, merged.headers, merged.inject]:
+                field.pop(host, None)
+        merged.routes.update(config.routes)
+        merged.headers.update(config.headers)
+        merged.inject.update(config.inject)
+    return merged
+
+
+def load(directory):
+    """The Config of FILES in directory and their texts; files that are absent are skipped."""
+    config, texts = Config(), {}
+    for name in FILES:
+        try:
+            texts[name] = (Path(directory) / name).read_text()
+        except FileNotFoundError:
+            continue
+        config = merge(config, parse(texts[name], name))
+    return config, texts
+
+
+def installed(directory=DIR):
+    """The installed Config; empty without either file."""
+    return load(directory)[0]
 
 
 def install(source, target=DIR):
-    """Check source/proxy.yaml and install it in target."""
-    try:
-        text = (Path(source) / 'proxy.yaml').read_text()
-    except FileNotFoundError:
+    """Check FILES in source and install them in target."""
+    config, texts = load(source)
+    if not texts:
         return
-    config = parse(text)
     Path(target).mkdir(parents=True, exist_ok=True)
-    (Path(target) / CONFIG.name).write_text(text)
+    for name, text in texts.items():
+        (Path(target) / name).write_text(text)
     for host, entries in config.routes.items():
         for method, pattern in entries:
             print(f'workspace route: {method or "*"} {host} {pattern}')

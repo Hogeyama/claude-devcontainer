@@ -138,8 +138,8 @@ hosts:
         self.assertEqual(set(config.routes), {'api.github.com', 'github.com'})
         self.assertEqual(config.secrets(), ['GITHUB_TOKEN'])
 
-    def test_missing_file_is_empty(self):
-        self.assertEqual(workspace_config.installed('/nonexistent/proxy.yaml').routes, {})
+    def test_missing_files_are_empty(self):
+        self.assertEqual(workspace_config.installed('/nonexistent').routes, {})
 
 
 class InstallTest(unittest.TestCase):
@@ -155,8 +155,37 @@ class InstallTest(unittest.TestCase):
     def test_installed(self):
         (self.directory / 'proxy.yaml').write_text(host('example.com', 'routes:\n  - GET /'))
         workspace_config.install(self.directory, self.directory / 'installed')
-        self.assertEqual(workspace_config.installed(self.directory / 'installed/proxy.yaml').routes,
+        self.assertEqual(workspace_config.installed(self.directory / 'installed').routes,
                          {'example.com': [('GET', '/')]})
+
+    def test_local_only(self):
+        (self.directory / 'proxy.local.yaml').write_text(host('redmine.example.com', 'routes:\n  - GET /issues\\.json'))
+        workspace_config.install(self.directory, self.directory / 'installed')
+        self.assertEqual(workspace_config.installed(self.directory / 'installed').routes,
+                         {'redmine.example.com': [('GET', r'/issues\.json')]})
+
+    def test_local_adds_and_replaces_hosts(self):
+        (self.directory / 'proxy.yaml').write_text(
+            host('example.com', 'routes:\n  - GET /\nheaders:\n  - X-Shared\ninject:\n  X-Key: ${SHARED}')
+            + host('other.example.com', 'routes:\n  - GET /')[len('hosts:\n'):])
+        (self.directory / 'proxy.local.yaml').write_text(
+            host('example.com', 'routes:\n  - POST /api')
+            + host('redmine.example.com', 'routes:\n  - /\ninject:\n  X-Redmine-API-Key: ${REDMINE_API_KEY}')[len('hosts:\n'):])
+        workspace_config.install(self.directory, self.directory / 'installed')
+        config = workspace_config.installed(self.directory / 'installed')
+        self.assertEqual(config.routes, {'example.com': [('POST', '/api')], 'other.example.com': [('GET', '/')],
+                                         'redmine.example.com': [(None, '/')]})
+        # The local example.com replaces the shared one, headers and inject included.
+        self.assertEqual(config.headers, {})
+        self.assertEqual(list(config.inject), ['redmine.example.com'])
+        self.assertEqual(config.secrets(), ['REDMINE_API_KEY'])
+
+    def test_invalid_local_file_fails_and_is_named(self):
+        (self.directory / 'proxy.yaml').write_text(host('example.com', 'routes:\n  - GET /'))
+        (self.directory / 'proxy.local.yaml').write_text(host('api.anthropic.com', 'routes:\n  - /'))
+        with self.assertRaisesRegex(ValueError, '^proxy.local.yaml: '):
+            workspace_config.install(self.directory, self.directory / 'installed')
+        self.assertFalse((self.directory / 'installed').exists())
 
     def test_invalid_file_is_not_installed(self):
         (self.directory / 'proxy.yaml').write_text(host('api.anthropic.com', 'routes:\n  - /'))

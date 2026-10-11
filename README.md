@@ -137,6 +137,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 | VS Codeの拡張機能など | `.devcontainer/devcontainer.json` |
 | DinDで使うイメージ（Testcontainersなど） | `.devcontainer/images.txt`。[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照 |
 | proxyが通す接続先と付ける認証（GitHub、`fonts.googleapis.com`、トークンの要るAPIなど） | `.devcontainer/proxy.yaml`と、秘密はホストの`~/.config/claude-devcontainer/credentials`。[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照 |
+| 自分だけが使う接続先（Redmineなど） | `.devcontainer/proxy.local.yaml`。[ホストだけの接続先を追加する](docs/network-policy.md#ホストだけの接続先を追加する)を参照 |
 | 社内CAを使う接続先 | `.devcontainer/claude.env`か`.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`。[社内CAを信頼させる](docs/network-policy.md#社内caを信頼させる)を参照 |
 | claude.aiのコネクタ（Google Driveなど） | `.devcontainer/.env`の`CLAUDE_DEVCONTAINER_CONNECTORS`。[claude.aiのコネクタを使う](docs/network-policy.md#claudeaiのコネクタを使う)を参照 |
 
