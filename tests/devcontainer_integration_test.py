@@ -35,7 +35,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.directory = Path(tempfile.mkdtemp(prefix='cdc-integration-'))
         cls.addClassCleanup(shutil.rmtree, cls.directory)
         fixtures(cls.directory)
-        auth_variables = ('GITHUB_TOKEN', 'GH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY',
+        auth_variables = ('GITHUB_TOKEN', 'GH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE',
                           'ANTHROPIC_AUTH_TOKEN')
         # The sumi settings come from the workspace's files (start_environment).
         cls.env = {k: v for k, v in os.environ.items()
@@ -167,7 +167,16 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         config.mkdir(parents=True, exist_ok=True)
         (config / 'credentials').write_text('GITHUB_TOKEN=synthetic-managed-token\n')
         environment = dict(cls.env)
-        environment['CLAUDE_CODE_OAUTH_TOKEN' if mode == 'oauth' else 'ANTHROPIC_API_KEY'] = 'synthetic-managed-token'
+        if mode == 'oauth':
+            # A synthetic host login, far from expiring, so that it is not refreshed.
+            login = cls.directory / 'login.json'
+            login.write_text(json.dumps({'claudeAiOauth': {
+                'accessToken': 'synthetic-managed-token', 'refreshToken': 'synthetic-refresh',
+                'expiresAt': int(time.time() * 1000) + 24 * 3600 * 1000,
+                'scopes': ['user:profile', 'user:inference', 'user:mcp_servers']}}))
+            environment['CLAUDE_CREDENTIALS_FILE'] = str(login)
+        else:
+            environment['ANTHROPIC_API_KEY'] = 'synthetic-managed-token'
         result = subprocess.run([sys.executable, str(cls.workspace / '.devcontainer/claude/scripts/inject-credentials.py')],
                                 env=environment, capture_output=True, text=True, timeout=90)
         if result.returncode: raise AssertionError(result.stdout + result.stderr)

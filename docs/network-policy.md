@@ -177,7 +177,7 @@ proxyは起動時にこのファイルを読み取り専用でmountし、公開�
 
 Claude Codeは、claude.aiで接続したコネクタ（Google Driveなど）を`mcp-proxy.anthropic.com`経由で使います。Anthropicのサーバーが、接続済みのアカウントの権限でDriveなどを操作します。proxyは既定でこの接続を拒否し、`CLAUDE_DEVCONTAINER_CONNECTORS`に書いたコネクタだけを、claude.aiの認証値を付けて通します。
 
-コネクタには、ホストのClaude Codeのログインを共有する方式（[認証情報を更新する](usage.md#認証情報を更新する)の`CLAUDE_CREDENTIALS_FILE`）が必要です。`claude setup-token`のトークンは推論用のscope（`user:inference`）しか持たず、コネクタの一覧も取得できません。API keyでも使えません。
+コネクタは、ホストのClaude Codeのログイン（[ホストのClaude Codeのログイン](usage.md#ホストのclaude-codeのログイン)）で使えます。API keyでは使えません。
 
 コネクタのIDはアカウントごとに異なります。agentのシェルで一覧を表示してください。
 

@@ -173,7 +173,7 @@ class LoginTest(unittest.TestCase):
         self.assertEqual(inject_credentials.Login(self.path).settings(), {'env': {
             'CLAUDE_CODE_OAUTH_SCOPES': ' '.join(SCOPES), 'CLAUDE_CODE_SUBSCRIPTION_TYPE': 'max',
             'CLAUDE_CODE_RATE_LIMIT_TIER': 'tier'}})
-        self.assertIsNone(inject_credentials.StaticClaude('oauth', 'setup-token').settings())
+        self.assertIsNone(inject_credentials.ApiKey('key').settings())
 
     def test_lock_is_renewed_while_held(self):
         path = self.home / 'renewed.lock'
@@ -203,24 +203,31 @@ class ConfigTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {'PATH': os.environ['PATH'], **environment}, clear=True):
             return inject_credentials.config()
 
-    def test_exactly_one_claude_credential(self):
-        for claude, ok in [({}, False), ({'CLAUDE_CREDENTIALS_FILE': '~/.claude/.credentials.json'}, True),
-                           ({'CLAUDE_CODE_OAUTH_TOKEN': 't', 'CLAUDE_CREDENTIALS_FILE': 'f'}, False),
-                           ({'ANTHROPIC_API_KEY': 'k'}, True)]:
-            with self.subTest(claude=claude):
-                if ok:
-                    self.assertEqual(self.load(**claude)['secrets'], {})
-                else:
-                    with self.assertRaises(inject_credentials.Unavailable):
-                        self.load(**claude)
+    def test_one_claude_credential_defaulting_to_the_login(self):
+        self.assertEqual(self.load(HOME='/home/u')['CLAUDE_CREDENTIALS_FILE'], '/home/u/.claude/.credentials.json')
+        self.assertEqual(self.load(CLAUDE_CONFIG_DIR='/elsewhere')['CLAUDE_CREDENTIALS_FILE'], '/elsewhere/.credentials.json')
+        self.assertEqual(self.load(CLAUDE_CREDENTIALS_FILE='login')['CLAUDE_CREDENTIALS_FILE'], 'login')
+        values = self.load(ANTHROPIC_API_KEY='k')
+        self.assertEqual((values['ANTHROPIC_API_KEY'], values['CLAUDE_CREDENTIALS_FILE']), ('k', ''))
+        with self.assertRaises(inject_credentials.Unavailable):
+            self.load(ANTHROPIC_API_KEY='k', CLAUDE_CREDENTIALS_FILE='login')
 
     def test_environment_claude_credential_replaces_the_files(self):
-        values = self.load('CLAUDE_CODE_OAUTH_TOKEN=setup-token\nGITHUB_TOKEN=gh-file\n', CLAUDE_CREDENTIALS_FILE='login')
-        self.assertEqual((values['CLAUDE_CODE_OAUTH_TOKEN'], values['CLAUDE_CREDENTIALS_FILE']), ('', 'login'))
+        values = self.load('ANTHROPIC_API_KEY=file-key\nGITHUB_TOKEN=gh-file\n', CLAUDE_CREDENTIALS_FILE='login')
+        self.assertEqual((values['ANTHROPIC_API_KEY'], values['CLAUDE_CREDENTIALS_FILE']), ('', 'login'))
         self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh-file'})
 
+    def test_a_setup_token_is_ignored_with_a_warning(self):
+        with mock.patch('sys.stderr') as stderr:
+            values = self.load('CLAUDE_CODE_OAUTH_TOKEN=setup-token\nGITHUB_TOKEN=gh\n', HOME='/home/u')
+        self.assertEqual(values['CLAUDE_CREDENTIALS_FILE'], '/home/u/.claude/.credentials.json')
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh'})
+        written = ''.join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn('CLAUDE_CODE_OAUTH_TOKEN', written)
+        self.assertNotIn('setup-token\n', written)
+
     def test_secrets_are_only_what_the_file_assigns(self):
-        values = self.load('CLAUDE_CODE_OAUTH_TOKEN=t\n'
+        values = self.load('ANTHROPIC_API_KEY=k\n'
                            'GITHUB_TOKEN=$(echo pat-from-file)\n'
                            'NOTION_API_KEY="secret with spaces"\n'
                            'lowercase=ignored\n'
@@ -228,14 +235,14 @@ class ConfigTest(unittest.TestCase):
                            HOST_SECRET='from-the-environment', AWS_SECRET_ACCESS_KEY='not-assigned')
         self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'pat-from-file', 'NOTION_API_KEY': 'secret with spaces',
                                              'HOST_SECRET_COPY': 'from-the-environment'})
-        self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', values['secrets'], 'the Claude credential is never a secret')
+        self.assertNotIn('ANTHROPIC_API_KEY', values['secrets'], 'the Claude credential is never a secret')
 
     def test_snapshot_sends_only_the_requested_secrets(self):
-        values = self.load('CLAUDE_CODE_OAUTH_TOKEN=t\nGITHUB_TOKEN=pat\nNOTION_API_KEY=n\n')
-        source = inject_credentials.StaticClaude('oauth', 't')
+        values = self.load('ANTHROPIC_API_KEY=t\nGITHUB_TOKEN=pat\nNOTION_API_KEY=n\n')
+        source = inject_credentials.ApiKey('t')
         with mock.patch.object(inject_credentials, 'log') as log:
             snapshot = json.loads(inject_credentials.snapshot(values, source, ['GITHUB_TOKEN', 'REDMINE_API_KEY']))
-        self.assertEqual(snapshot, {'anthropic_token': 't', 'auth_mode': 'oauth', 'secrets': {'GITHUB_TOKEN': 'pat'}})
+        self.assertEqual(snapshot, {'anthropic_token': 't', 'auth_mode': 'api-key', 'secrets': {'GITHUB_TOKEN': 'pat'}})
         self.assertIn('REDMINE_API_KEY', str(log.call_args))
         self.assertNotIn('pat', str(log.call_args))
 

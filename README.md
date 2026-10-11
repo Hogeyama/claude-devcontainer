@@ -2,7 +2,7 @@
 
 Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinDなどの機能をエージェントに提供します。
 
-自分のリポジトリにgit subtreeで取り込んで使ってください。取り込んだ部分（コア）は編集せず、ツールの追加などのカスタマイズはコアの外に置いた自分のファイルで行ってください。上流の修正は`git subtree pull`で取り込めます。
+リポジトリにgit subtreeで取り込んで使うことを想定しています。
 
 ## ホストに必要なもの
 
@@ -18,7 +18,8 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 ## 利用上の制限
 
 * GitHubを使う場合は、共有するリポジトリだけを対象にしたfine-grained tokenを使う前提です。
-* package registry、GitHubのrelease assetやLFS、Anthropicのweb searchやMCP connectorなどは使えません。
+* agentが接続できるのは、Anthropicと、`.devcontainer/proxy.yaml`に書いた接続先（雛形ではGitHub）だけです。package registryなども、`proxy.yaml`に書かなければ使えません。
+* Anthropicのweb searchなど、Anthropicのサーバーから外部へ接続する機能は使えません。claude.aiのコネクタは、指定したものだけ使えます。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * agentはリポジトリのファイルを1つのUID（既定は1000）で読み書きします。リポジトリの所有者と異なる場合は[UIDとネットワークを変える](#uidとネットワークを変える)で合わせてください。
 * Gitリポジトリのルートで使ってください。`git worktree`の作業ツリーには対応していません。
@@ -40,41 +41,41 @@ git add .devcontainer && git commit -m "Add Claude Code dev container"
 
 ```
 .devcontainer/
-├── devcontainer.json   自分のファイル
-├── compose.yaml        自分のファイル。claude/compose.yamlをincludeする
-├── claude.env          自分のファイル。DinDなど、このリポジトリで使う機能の設定
-├── agent-setup.sh      自分のファイル。agentにツールを追加する
-├── images.txt          自分のファイル。DinDに読み込むイメージ
-├── proxy.yaml          自分のファイル。proxyが通す接続先と付ける認証（雛形はGitHub）
+├── devcontainer.json
+├── compose.yaml        claude/compose.yamlをincludeしつつ、リポジトリのマウント設定等を追加する
+├── claude.env          DinDなど、このリポジトリで使う機能の設定
+├── agent-setup.sh      agentの動くイメージにツールや設定を追加する
+├── proxy.yaml          proxyが許可する接続先や認証の設定を管理する
+├── images.txt          Docker in Docker sidecarに読み込むイメージの一覧（任意）
 └── claude/             取り込んだもの。編集しない
 ```
 
 ### 2. 認証情報を用意する
 
-#### GitHub
+#### Claude
+
+ホストのClaude Codeでログインしておいてください。agentのClaudeは、ホストのログインを使います（[ホストのClaude Codeのログイン](docs/usage.md#ホストのclaude-codeのログイン)）。トークンは期限が近づくと自動で更新されます。
+
+```sh
+claude /login
+```
+
+API keyを使う場合は、[Claude ConsoleのAPI keys](https://platform.claude.com/settings/keys)で発行したkeyを、3.で`ANTHROPIC_API_KEY`に設定してください。API keyではArtifactsとclaude.aiのコネクタは使えません。
+
+#### GitHub（任意）
 
 雛形の`proxy.yaml`は、GitHubへの要求に`GITHUB_TOKEN`を付けます。GitHubを使わない場合は、`proxy.yaml`からGitHubの設定を消してください。
 
 GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
 
-#### Claude
-
-Claudeのサブスクリプションを使う場合は、ホストのClaude Codeで[`setup-token`](https://code.claude.com/docs/en/cli-reference)を実行し、対話手順に従って長期トークンを発行してください。
-
-```sh
-claude setup-token
-```
-
-API keyを使う場合は、代わりに[Claude ConsoleのAPI keys](https://platform.claude.com/settings/keys)で発行したkeyを使ってください。
-
 ### 3. 認証情報の取り出し方を設定する
 
-ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`CLAUDE_CODE_OAUTH_TOKEN`か`ANTHROPIC_API_KEY`のどちらか一方と、`proxy.yaml`が参照する秘密（雛形では`GITHUB_TOKEN`）を設定してください。claude.aiのコネクタも使う場合は、代わりにホストのClaude Codeのログインを共有します（[ホストのClaude Codeのログインを共有する](docs/usage.md#ホストのclaude-codeのログインを共有する)）。取り出し方は手元の環境に合わせて選んでください。
+ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入を書いてください。`proxy.yaml`が参照する秘密（雛形では`GITHUB_TOKEN`）と、API keyを使う場合は`ANTHROPIC_API_KEY`を設定します。Claudeのログインを使うなら、Claudeの設定は要りません。取り出し方は手元の環境に合わせて選んでください。
 
 ```sh
 GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使う場合
-CLAUDE_CODE_OAUTH_TOKEN=$(secret-tool lookup service claude-code) # libsecretを使う場合
-# ANTHROPIC_API_KEY=$(op read op://Private/anthropic/credential)  # 1Password CLIを使う場合
+# GITHUB_TOKEN=$(secret-tool lookup service github)               # libsecretを使う場合
+# ANTHROPIC_API_KEY=$(op read op://Private/anthropic/credential)  # 1Password CLIを使う場合。API keyを使うときだけ
 # GITHUB_TOKEN=github_pat_...                                     # 値を直接書く場合。ファイルはchmod 600にしてください
 ```
 
@@ -139,7 +140,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 | 社内CAを使う接続先 | `.devcontainer/claude.env`か`.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`。[社内CAを信頼させる](docs/network-policy.md#社内caを信頼させる)を参照 |
 | claude.aiのコネクタ（Google Driveなど） | `.devcontainer/.env`の`CLAUDE_DEVCONTAINER_CONNECTORS`。[claude.aiのコネクタを使う](docs/network-policy.md#claudeaiのコネクタを使う)を参照 |
 
-`agent-setup.sh`はホストでのビルド時に実行されるので、package registryに接続できます。agentの実行時はproxyを通るため接続できません。
+`agent-setup.sh`はホストでのビルド時に実行されるので、package registryに接続できます。agentの実行時はproxyを通るため、`proxy.yaml`に書かない限り接続できません。
 
 `.devcontainer/compose.yaml`では`cap_add`、`privileged`、`networks`なども上書きできてしまいます。agentの隔離はこれらの設定に依存しているので、変更しないでください。
 
@@ -298,8 +299,7 @@ git subtree pull --prefix=.devcontainer/claude https://github.com/Hogeyama/claud
 devcontainer up --remove-existing-container
 ```
 
-`.devcontainer/claude/template/`が変わった場合は、自分の`devcontainer.json`などへ必要に応じて反映してください。
-`claude.env`を使うには、雛形から同ファイルをコピーし、`compose.yaml`の`include`も雛形と同じ形にしてください。この2つは一緒に変更してください。`include`の`env_file`には、起動処理が選んだネットワークの`.generated/networks.env`も含めます。
+`.devcontainer/claude/template/`が変わった場合は、`.devcontainer/`直下の自分のファイルへ必要に応じて反映してください。
 
 コアを直接編集した場合も、`git subtree pull`が上流の変更と3-way mergeするので、衝突しなければ手元の変更は残ります。ただし隔離にかかわる設定が上流の修正と混ざるため、できるだけ避けてください。
 

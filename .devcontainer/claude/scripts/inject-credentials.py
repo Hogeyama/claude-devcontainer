@@ -29,7 +29,12 @@ ROOT = Path(__file__).resolve().parents[3]
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/credentials'
 STATE = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer'
 LOG = STATE / 'inject.log'
-CLAUDE_KEYS = ('CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE')
+# The Claude credential: an API key, or else the host's own Claude Code login,
+# which needs nothing set when it is in the default place.
+CLAUDE_KEYS = ('ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE')
+# A setup-token, no longer used: it carries only user:inference, so claude.ai
+# connectors cannot work with it, and it is not refreshed.
+SETUP_TOKEN = 'CLAUDE_CODE_OAUTH_TOKEN'
 SECRET_NAME = re.compile(r'[A-Z_][A-Z0-9_]*')
 # What the shell itself changes while reading the file.
 SHELL_VARIABLES = {'PWD', 'OLDPWD', 'SHLVL', '_'}
@@ -39,8 +44,7 @@ POLL_SECONDS = 5
 RETRY = 'Run .devcontainer/claude/scripts/inject-credentials.py on the host once the container is up.'
 # The agent's Claude Code takes the dummy token's scopes from this drop-in, so
 # that it offers what the login allows (claude.ai connectors need
-# user:mcp_servers). With a setup-token it is removed: such a token has only
-# user:inference, which Claude Code assumes without it.
+# user:mcp_servers). With an API key it is removed.
 SCOPES_SETTINGS = '/etc/claude-code/managed-settings.d/60-claude-login.json'
 
 # Claude Code's login refresh, as Claude Code 2.1.295 does it.
@@ -86,19 +90,28 @@ def config():
         # A Claude credential in the environment replaces the file's, of any kind.
         if not any(values.values()):
             values = {key: loaded.get(key, '') if key in secrets else '' for key in CLAUDE_KEYS}
-    if sum(bool(value) for value in values.values()) != 1:
-        raise Unavailable('Set exactly one of CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS_FILE.')
-    for key in CLAUDE_KEYS:
+    if all(values.values()):
+        raise Unavailable('Set either ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS_FILE, not both.')
+    if not any(values.values()):
+        home = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+        values['CLAUDE_CREDENTIALS_FILE'] = str(home / '.credentials.json')
+    if os.environ.get(SETUP_TOKEN) or SETUP_TOKEN in secrets:
+        using = values['CLAUDE_CREDENTIALS_FILE'] or 'ANTHROPIC_API_KEY'
+        print(f'warning: {SETUP_TOKEN} (a setup-token) is no longer used, and Claude uses {using}; '
+              f'remove it from {CONFIG}.', file=sys.stderr)
+    for key in (*CLAUDE_KEYS, SETUP_TOKEN):
         secrets.pop(key, None)  # Never a secret to inject elsewhere.
     values['secrets'] = secrets
     return values
 
 
-class StaticClaude:
-    """A setup-token or an API key, which the host renews by hand."""
+class ApiKey:
+    """An API key, which the host renews by hand. Claude.ai features (Artifacts,
+    connectors) need a login instead."""
+    mode = 'api-key'
 
-    def __init__(self, mode, token):
-        self.mode, self.token = mode, token
+    def __init__(self, token):
+        self.token = token
 
     def current(self):
         return self.token
@@ -265,9 +278,7 @@ class Lock:
 def claude(values):
     if values['CLAUDE_CREDENTIALS_FILE']:
         return Login(values['CLAUDE_CREDENTIALS_FILE'])
-    if values['CLAUDE_CODE_OAUTH_TOKEN']:
-        return StaticClaude('oauth', values['CLAUDE_CODE_OAUTH_TOKEN'])
-    return StaticClaude('api-key', values['ANTHROPIC_API_KEY'])
+    return ApiKey(values['ANTHROPIC_API_KEY'])
 
 
 def requested_secrets(proxy):
