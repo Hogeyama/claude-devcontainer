@@ -97,7 +97,30 @@ VS Codeから使う場合には、エディタを通じたホスト認証の転�
 
 ## 通信ルールを変更する
 
-ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。proxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
+ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。リポジトリごとに認証の要らない接続先を足す場合は、下の`proxy-routes.json`を使ってください。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
+
+### 接続先を追加する
+
+`.devcontainer/proxy-routes.json`に、通す要求をmethod、host、pathの組で書きます。たとえば、ページの描画にGoogle Fontsが要る場合です。
+
+```json
+{
+  "routes": [
+    {"method": "GET", "host": "fonts.googleapis.com", "path": "/css2?"},
+    {"method": "GET", "host": "fonts.gstatic.com", "path": "/s/.+"}
+  ]
+}
+```
+
+- `path`はqueryを除いたURLのpath全体に一致させる正規表現です。`/.*`のように広く書くと、そのホストのどのAPIにも届きます。
+- `method`は`GET`などの大文字のmethodです。`"*"`はすべてのmethodを通します。
+- `host`は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。
+- 追加した接続先には、proxyは認証を付けません。agentが送るAuthorizationやCookieなども、既存の接続先と同じく除きます。認証の要る接続先には使えません。
+- proxyが認証を注入する`api.github.com`、`github.com`、`api.anthropic.com`は書けません。ここにルートを足すと、PATやAnthropicの認証値を付けた要求の範囲が広がるためです。
+
+要求のpathとqueryには、agentが任意のデータを載せられます。追加した接続先は、そのまま外部への送信経路になります。送信先を信頼できるか確かめてから追加してください。
+
+ファイルが不正な場合は、proxyのimageのビルドが失敗し、理由を表示します。
 
 追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、ホストで取り込んだリポジトリのルートで次を実行してください。
 

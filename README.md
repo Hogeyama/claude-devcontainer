@@ -45,6 +45,7 @@ git add .devcontainer && git commit -m "Add Claude Code dev container"
 ├── claude.env          自分のファイル。DinDなど、このリポジトリで使う機能の設定
 ├── agent-setup.sh      自分のファイル。agentにツールを追加する
 ├── images.txt          自分のファイル。DinDに読み込むイメージ
+├── proxy-routes.json   自分のファイル（任意）。proxyが通す接続先の追加
 └── claude/             取り込んだもの。編集しない
 ```
 
@@ -132,6 +133,7 @@ docker compose -p "$project" -f .devcontainer/compose.yaml down
 | 環境変数・volumeなどcomposeの設定 | `.devcontainer/compose.yaml`の`services:`。相対パスは`.devcontainer/`が基準 |
 | VS Codeの拡張機能など | `.devcontainer/devcontainer.json` |
 | DinDで使うイメージ（Testcontainersなど） | `.devcontainer/images.txt`。[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照 |
+| proxyが通す接続先（`fonts.googleapis.com`など） | `.devcontainer/proxy-routes.json`。[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照 |
 
 `agent-setup.sh`はホストでのビルド時に実行されるので、package registryに接続できます。agentの実行時はproxyを通るため接続できません。
 

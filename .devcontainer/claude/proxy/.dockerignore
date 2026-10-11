@@ -3,3 +3,4 @@
 !addon.py
 !entrypoint.py
 !credentials.py
+!workspace_routes.py

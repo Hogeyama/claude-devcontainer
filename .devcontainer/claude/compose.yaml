@@ -112,6 +112,9 @@ services:
   proxy:
     build:
       context: proxy
+      # The workspace's .devcontainer/, for its optional proxy-routes.json.
+      additional_contexts:
+        workspace-config: ..
     mem_limit: 512m
     cap_drop: [ALL]
     security_opt: [no-new-privileges=true]

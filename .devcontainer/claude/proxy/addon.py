@@ -7,6 +7,7 @@ from urllib.parse import unquote, urlsplit
 
 from mitmproxy import http
 from credentials import read_snapshot
+import workspace_routes
 
 # --- Policy -------------------------------------------------------------------
 
@@ -46,6 +47,9 @@ ROUTES = {
         (None, r'/api/artifacts/mcp(/upload/.+)?'),
     ],
 }
+# Only these get credentials. The workspace's routes go to other hosts.
+assert set(ROUTES) == workspace_routes.AUTHENTICATED_HOSTS
+ROUTES.update(workspace_routes.load())
 HOSTS = set(ROUTES)
 # Claude Code's startup connectivity check. It needs no credentials, so Claude
 # Code starts before they are injected.
@@ -155,7 +159,7 @@ class PolicyAddon:
         except Exception:
             self.deny(flow)
             path = None
-        if path is not None and (req.host, path) != HELLO:
+        if path is not None and req.host in workspace_routes.AUTHENTICATED_HOSTS and (req.host, path) != HELLO:
             try:
                 read_snapshot()
             except Exception:
@@ -182,7 +186,7 @@ class PolicyAddon:
                                     if name.decode('ascii').lower() in SAFE_HEADERS
                                     or name.decode('ascii').lower().startswith(SAFE_HEADER_PREFIXES)])
         req.headers['Host'] = req.host
-        if (req.host, path) == HELLO:
+        if req.host not in workspace_routes.AUTHENTICATED_HOSTS or (req.host, path) == HELLO:
             return
         try:
             github_token, anthropic_token, auth_mode = read_snapshot()
@@ -199,7 +203,7 @@ class PolicyAddon:
                     req.headers['anthropic-beta'] = ','.join(dict.fromkeys(betas + [OAUTH_BETA]))
             elif req.host == 'api.github.com':
                 req.headers['Authorization'] = 'Bearer ' + github_token
-            else:
+            elif req.host == 'github.com':
                 req.headers['Authorization'] = 'Basic ' + base64.b64encode(('x-access-token:' + github_token).encode()).decode()
         except Exception:
             self.deny(flow)

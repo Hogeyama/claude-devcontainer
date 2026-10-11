@@ -8,6 +8,7 @@ from unittest.mock import patch
 from mitmproxy import connection, http
 from mitmproxy.test import tflow
 
+import addon
 from addon import PolicyAddon
 
 CREDENTIALS = ('managed-pat', 'managed-anthropic', 'api-key')
@@ -207,6 +208,25 @@ class PolicyTest(unittest.TestCase):
             data = SimpleNamespace(server=connection.Server(address=address))
             self.addon.server_connect(data)
             self.assertEqual(data.server.error is None, allowed, address)
+
+    def test_workspace_routes_get_no_credentials(self):
+        routes = {'fonts.googleapis.com': [('GET', r'/css2?')]}
+        with patch.dict(addon.ROUTES, routes), patch('addon.HOSTS', {*addon.HOSTS, *routes}):
+            self.credentials = None  # Not needed for them.
+            attacker = [('Authorization', 'Bearer attacker'), ('Cookie', 'session=attacker')]
+            headers = self.allowed(flow('https://fonts.googleapis.com/css2?family=Roboto', 'GET', b'', attacker))
+            self.assertNotIn('Authorization', headers)
+            self.assertNotIn('Cookie', headers)
+            self.credentials = CREDENTIALS
+            headers = self.allowed(flow('https://fonts.googleapis.com/css', 'GET', b''))
+            self.assertNotIn('Authorization', headers)
+            self.denied(flow('https://fonts.googleapis.com/css2', 'POST'))
+            self.denied(flow('https://fonts.googleapis.com/icon', 'GET', b''))
+            self.denied(flow('https://fonts.gstatic.com/s/a.woff2', 'GET', b''))
+            f = flow()
+            f.request = http.Request.make('CONNECT', 'https://fonts.googleapis.com:443')
+            self.addon.http_connect(f)
+            self.assertIsNone(f.response)
 
 
 if __name__ == '__main__':
