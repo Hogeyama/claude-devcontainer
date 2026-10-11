@@ -33,7 +33,7 @@ GitHubの書込み制限を実サービスで検証するには、専用の許�
 
 すべてホストのターミナルで、このリポジトリのルートから実行してください。テストは既存のホストアカウントを読み取らず、合成した認証値を使います。
 
-テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。Dev Containersの全体試験は、proxyとDinDのsubnetに、既存のDockerネットワークと重ならない`10.231.x.0/24`を2つ選んで使います。`CLAUDE_DEVCONTAINER_PROXY_NET`と`CLAUDE_DEVCONTAINER_DIND_NET`を環境変数で指定した場合は、その値を使います。`CLAUDE_DEVCONTAINER_UID`と`CLAUDE_DEVCONTAINER_GID`も同様に指定でき、その場合は下のagent imageも同じ値の`--build-arg AGENT_UID=… --build-arg AGENT_GID=…`でビルドしてください。
+テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。proxyとDinDのsubnetは、通常の起動と同じく起動処理が空いている`10.231.x.0/24`を選びます。`CLAUDE_DEVCONTAINER_PROXY_NET`と`CLAUDE_DEVCONTAINER_DIND_NET`を環境変数で指定した場合は、その値を使います。`CLAUDE_DEVCONTAINER_UID`と`CLAUDE_DEVCONTAINER_GID`も同様に指定でき、その場合は下のagent imageも同じ値の`--build-arg AGENT_UID=… --build-arg AGENT_GID=…`でビルドしてください。
 
 `AGENT_TEST_IMAGE`、`PROXY_TEST_IMAGE`、`SUMI_TEST_IMAGE`でテスト用imageのタグを変更できます。全体試験には実際の`devcontainer`コマンドが必要です。別のCLI起動方法を使う場合は、`DEVCONTAINER_TEST_CLI`にコマンドを指定してください。テストは作業ツリーを一時領域へコピーし、CLIのuser-data-folderも専用領域に置きます。Dockerを使う試験を明示的に選んだのにdaemonが使えない場合はエラーになります。
 

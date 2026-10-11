@@ -282,12 +282,12 @@ sumiの起動とClaude Codeへのhookの設定は自動で行われます。ホ�
 ```sh
 CLAUDE_DEVCONTAINER_UID=1001             # agentのUID。既定は1000
 CLAUDE_DEVCONTAINER_GID=1001             # agentのGID。既定は1000
-CLAUDE_DEVCONTAINER_PROXY_NET=10.99.0    # agentとproxyの間のネットワーク。既定は10.231.70
-CLAUDE_DEVCONTAINER_DIND_NET=10.99.1     # agentとDinDの間のネットワーク。既定は10.231.71
+CLAUDE_DEVCONTAINER_PROXY_NET=10.99.0    # agentとproxyの間のネットワーク。既定は自動で選ぶ
+CLAUDE_DEVCONTAINER_DIND_NET=10.99.1     # agentとDinDの間のネットワーク。既定は自動で選ぶ
 ```
 
 - UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせてください。DinDのdockerdも同じUIDで動きます。UIDは0と、DinDが内部で使う100000〜165535は指定できません。
-- ネットワークは`/24`の先頭3オクテットを書いてください。proxyは`.10`、DinDは`.10`、agentは`.20`を使います。同じホストで複数のリポジトリを同時に起動するときは、リポジトリごとに別の値にしてください。
+- ネットワークは`/24`の先頭3オクテットを書いてください。proxyは`.10`、DinDは`.10`、agentは`.20`を使います。書かなければ、起動処理が既存のDockerネットワークと重ならない`10.231.x.0/24`を2つ選び、`.devcontainer/.generated/networks.env`に記録します。次の起動からも、空いている限り同じ値を使います。同じホストで複数のリポジトリを同時に起動すると、同じ値を選ぶことがあります。その場合は片方を起動し直すか、ここで値を指定してください。
 
 UIDを変えた場合は、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。先に[終了する](#6-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
 
@@ -299,7 +299,7 @@ devcontainer up --remove-existing-container
 ```
 
 `.devcontainer/claude/template/`が変わった場合は、自分の`devcontainer.json`などへ必要に応じて反映してください。
-`claude.env`を使うには、雛形から同ファイルをコピーし、`compose.yaml`の`include`も雛形と同じ形にしてください。この2つは一緒に変更してください。
+`claude.env`を使うには、雛形から同ファイルをコピーし、`compose.yaml`の`include`も雛形と同じ形にしてください。この2つは一緒に変更してください。`include`の`env_file`には、起動処理が選んだネットワークの`.generated/networks.env`も含めます。
 
 コアを直接編集した場合も、`git subtree pull`が上流の変更と3-way mergeするので、衝突しなければ手元の変更は残ります。ただし隔離にかかわる設定が上流の修正と混ざるため、できるだけ避けてください。
 

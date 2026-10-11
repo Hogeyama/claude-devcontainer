@@ -30,6 +30,11 @@ setting() {
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND 0)
 
+# compose.yaml reads the internal subnets from .generated/networks.env unless
+# they are set; a free pair is chosen once and kept.
+python3 "$(dirname "$0")/pick-networks.py" \
+    "$(setting CLAUDE_DEVCONTAINER_PROXY_NET '')" "$(setting CLAUDE_DEVCONTAINER_DIND_NET '')"
+
 # compose.yaml mounts the directory into the sumi service, which reads the file.
 if [ "$(setting CLAUDE_DEVCONTAINER_SUMI 0)" = 1 ]; then
     dir=$(setting CLAUDE_DEVCONTAINER_SUMI_DIR "$HOME/.claude/sumi")

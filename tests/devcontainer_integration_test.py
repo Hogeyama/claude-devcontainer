@@ -1,7 +1,6 @@
 """Whole-container, offline Docker, actual Claude Bash and SDK integration checks."""
 import base64
 import http.server
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -26,32 +25,6 @@ AGENT_UID = os.environ.get('CLAUDE_DEVCONTAINER_UID', '1000')
 AGENT_GID = os.environ.get('CLAUDE_DEVCONTAINER_GID', '1000')
 
 
-def free_networks():
-    """The first three octets of the proxy and DinD /24s: as set, else two free in 10.231.
-
-    Docker cannot pick them: the agent's firewall and proxy settings name the
-    proxy and DinD by fixed addresses in them. Another environment on this host
-    (this repository's own, or another project's) may hold the defaults.
-    """
-    names = ('CLAUDE_DEVCONTAINER_PROXY_NET', 'CLAUDE_DEVCONTAINER_DIND_NET')
-    chosen = [os.environ.get(name) for name in names]
-    used = [ipaddress.ip_network(net + '.0/24') for net in chosen if net]
-    networks = docker('network', 'ls', '-q').split()
-    if networks:
-        for subnet in docker('network', 'inspect', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{end}}', *networks).split():
-            network = ipaddress.ip_network(subnet, strict=False)
-            if network.version == 4:
-                used.append(network)
-    candidates = (f'10.231.{third}' for third in range(70, 256))
-    for index, net in enumerate(chosen):
-        if not net:
-            net = next(candidate for candidate in candidates
-                       if not any(ipaddress.ip_network(candidate + '.0/24').overlaps(other) for other in used))
-            used.append(ipaddress.ip_network(net + '.0/24'))
-            chosen[index] = net
-    return dict(zip(names, chosen))
-
-
 @unittest.skipUnless(os.environ.get('RUN_DOCKER_TESTS') == '1', 'Docker integration disabled; set RUN_DOCKER_TESTS=1')
 class DevcontainerIntegrationTest(unittest.TestCase):
     @classmethod
@@ -71,8 +44,6 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
         # Every test here but the credentials ones relies on Docker.
         cls.env.update(CLAUDE_DEVCONTAINER_DIND='1')
-        cls.env.update(free_networks())
-        cls.dind_net = cls.env['CLAUDE_DEVCONTAINER_DIND_NET']
         # The sumi service reads a secrets file outside the workspace, under a
         # name other than the default. Not in cls.directory, which the agent mounts.
         # start_environment() sets it up through claude.env and .env.
@@ -93,6 +64,11 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         extra.mkdir(parents=True)
         (extra / '.gitconfig').write_text('[user]\n\tname = fixture-user\n')
         cls.start_environment()
+        # initializeCommand chose free subnets unless they were set.
+        chosen = cls.workspace / '.devcontainer/.generated/networks.env'
+        cls.dind_net = cls.env.get('CLAUDE_DEVCONTAINER_DIND_NET') or dict(
+            line.split('=', 1) for line in chosen.read_text().splitlines() if '=' in line and not line.startswith('#')
+        )['CLAUDE_DEVCONTAINER_DIND_NET']
         denied = cls.exec('curl', '--max-time', '5', '-s', '-o', '/dev/null', '-w', '%{http_code}',
                           'https://api.github.com/user')
         assert denied.stdout == '403', denied.stdout + denied.stderr

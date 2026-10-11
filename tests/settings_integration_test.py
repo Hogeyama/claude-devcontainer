@@ -9,6 +9,13 @@ import unittest
 
 CORE = Path(__file__).resolve().parents[1] / '.devcontainer/claude'
 FLAG = 'CLAUDE_DEVCONTAINER_DIND'
+# The real pick-networks.py asks Docker (pick_networks_test.py covers it); this
+# writes what it would, the lowest of the settings.
+PICK_NETWORKS = '''from pathlib import Path
+out = Path('.devcontainer/.generated/networks.env')
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text('CLAUDE_DEVCONTAINER_PROXY_NET=10.231.90\\nCLAUDE_DEVCONTAINER_DIND_NET=10.231.91\\n')
+'''
 
 
 @unittest.skipUnless(shutil.which('docker'), 'Docker Compose CLI required')
@@ -33,16 +40,17 @@ class SettingsIntegrationTest(unittest.TestCase):
                 path = scripts / helper
                 path.write_text('#!/bin/sh\nexit 0\n')
                 path.chmod(0o755)
+            (scripts / 'pick-networks.py').write_text(PICK_NETWORKS)
             env = {k: v for k, v in os.environ.items()
                    if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
+            initialized = subprocess.run(['sh', str(scripts / 'initialize.sh')], cwd=root, env=env,
+                                         capture_output=True, text=True)
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
             compose = subprocess.run(['docker', 'compose', '-f', str(config / 'compose.yaml'),
                                       'config', '--format', 'json'], cwd=root, env=env,
                                      capture_output=True, text=True, check=True)
             mounts = json.loads(compose.stdout)['services']['sumi']['volumes']
             self.assertEqual(next(m['source'] for m in mounts if m['target'] == '/secrets'), str(secrets))
-            initialized = subprocess.run(['sh', str(scripts / 'initialize.sh')], cwd=root, env=env,
-                                         capture_output=True, text=True)
-            self.assertEqual(initialized.returncode, 0, initialized.stderr)
 
     def test_compose_and_initialize_use_the_same_precedence(self):
         cases = [
@@ -72,19 +80,42 @@ class SettingsIntegrationTest(unittest.TestCase):
                     path = scripts / helper
                     path.write_text('#!/bin/sh\n' + ('echo load-images\n' if helper == 'load-images.py' else 'exit 0\n'))
                     path.chmod(0o755)
+                (scripts / 'pick-networks.py').write_text(PICK_NETWORKS)
                 env = {k: v for k, v in os.environ.items()
                        if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
                 if environment is not None:
                     env[FLAG] = environment
+                initialized = subprocess.run(['sh', str(scripts / 'initialize.sh')], cwd=root, env=env,
+                                             capture_output=True, text=True, check=True)
+                self.assertEqual(initialized.stdout.strip(), 'load-images' if expected == '1' else '')
                 compose = subprocess.run(['docker', 'compose', '-f', str(config / 'compose.yaml'),
                                           'config', '--format', 'json'], cwd=root, env=env,
                                          capture_output=True, text=True, check=True)
                 services = json.loads(compose.stdout)['services']
                 self.assertEqual(services['agent']['environment'][FLAG], expected)
                 self.assertEqual(services['dind']['scale'], int(expected))
-                initialized = subprocess.run(['sh', str(scripts / 'initialize.sh')], cwd=root, env=env,
-                                             capture_output=True, text=True, check=True)
-                self.assertEqual(initialized.stdout.strip(), 'load-images' if expected == '1' else '')
+
+    def test_chosen_subnets_are_the_lowest_setting(self):
+        cases = [('chosen', None, None, '10.231.90'), ('workspace', '10.231.80', None, '10.231.80'),
+                 ('host', '10.231.80', '10.231.81', '10.231.81')]
+        for name, workspace, host, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='cdc-settings-') as directory:
+                config = Path(directory) / '.devcontainer'
+                (config / 'claude').mkdir(parents=True)
+                shutil.copy(CORE / 'compose.yaml', config / 'claude/compose.yaml')
+                shutil.copy(CORE / 'template/compose.yaml', config / 'compose.yaml')
+                subprocess.run(['python3', '-c', PICK_NETWORKS], cwd=directory, check=True)
+                (config / 'claude.env').write_text('' if workspace is None else f'CLAUDE_DEVCONTAINER_PROXY_NET={workspace}\n')
+                if host is not None:
+                    (config / '.env').write_text(f'CLAUDE_DEVCONTAINER_PROXY_NET={host}\n')
+                env = {k: v for k, v in os.environ.items()
+                       if not k.startswith(('CLAUDE_DEVCONTAINER_', 'COMPOSE_'))}
+                compose = subprocess.run(['docker', 'compose', '-f', str(config / 'compose.yaml'),
+                                          'config', '--format', 'json'], cwd=directory, env=env,
+                                         capture_output=True, text=True, check=True)
+                services = json.loads(compose.stdout)['services']
+                self.assertEqual(services['proxy']['networks']['proxy-internal']['ipv4_address'], expected + '.10')
+                self.assertEqual(services['dind']['networks']['dind-internal']['ipv4_address'], '10.231.91.10')
 
 
 if __name__ == '__main__':

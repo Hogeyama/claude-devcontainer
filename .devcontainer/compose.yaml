@@ -4,7 +4,8 @@
 include:
   - path: claude/compose.yaml
     # The workspace's settings. .env, if present, overrides them for this host.
-    env_file: [claude.env]
+    # Before them, the subnets that initializeCommand chose (they win over it).
+    env_file: [.generated/networks.env, claude.env]
 
 services:
   agent:

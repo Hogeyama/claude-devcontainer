@@ -7,7 +7,9 @@
 #   CLAUDE_DEVCONTAINER_UID, CLAUDE_DEVCONTAINER_GID  the agent's user; it must be
 #     able to write the workspace on the host. Default 1000.
 #   CLAUDE_DEVCONTAINER_PROXY_NET, CLAUDE_DEVCONTAINER_DIND_NET  the first three
-#     octets of the two internal /24 networks. Default 10.231.70 and 10.231.71.
+#     octets of the two internal /24 networks. Unset, initializeCommand picks
+#     a free pair in 10.231.x (scripts/pick-networks.py); 10.231.70 and .71
+#     without it.
 #   CLAUDE_DEVCONTAINER_DIND=1  run Docker in DinD for the agent. Default 0.
 #   CLAUDE_DEVCONTAINER_NIX=1  mount the host's /nix/store and load the dev shell
 #     that initializeCommand exports (see scripts/initialize.sh). Default 0.
