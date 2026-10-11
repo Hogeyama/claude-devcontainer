@@ -333,7 +333,7 @@ devcontainer up --remove-existing-container
 
 ## このリポジトリを開発する
 
-このリポジトリ自身も同じ構成で、`.devcontainer/claude`が利用者のリポジトリに取り込まれる部分、その外がこのリポジトリ用のファイルです。`claude.toml`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、Git、Docker CLI、OpenSSL、ShellCheckが入り、ホストでは`nix develop`、agentではBashから使えます。
+このリポジトリ自身も同じ構成で、`.devcontainer/claude`が利用者のリポジトリに取り込まれる部分、その外がこのリポジトリ用のファイルです。`claude.toml`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、Git、Docker CLI、OpenSSL、ShellCheck、playwright-cli（Chromium）が入り、ホストでは`nix develop`、agentではBashから使えます。
 
 sumiのデモ用の値を`.secrets/sumi/secrets.txt`にコミットしています。場所は`claude.toml`に相対パスで設定済みで、起動時に権限を0600にします。`.secrets/`はagent側では空の読み取り専用領域で隠され、一覧はsumiコンテナだけに共有されます。
 
