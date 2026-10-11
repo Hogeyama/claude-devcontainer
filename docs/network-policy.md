@@ -4,16 +4,16 @@
 
 ## 許可される通信
 
-Anthropicへの通信は[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。それ以外は、リポジトリの`.devcontainer/proxy.yaml`に書いたものだけを通します（[接続先を追加する](#接続先を追加する)）。表のGitHubの行は、雛形の[`template/proxy.yaml`](../.devcontainer/claude/template/proxy.yaml)の内容です。
+Anthropicへの通信は[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。それ以外は、リポジトリの`.devcontainer/claude.toml`の`proxy.hosts`に書いたものだけを通します（[接続先を追加する](#接続先を追加する)）。表のGitHubの行は、テンプレートの[`template/claude.toml`](../.devcontainer/claude/template/claude.toml)の内容です。
 
 | 接続先 | 許可する用途 |
 |---|---|
-| `api.github.com` | 雛形の`proxy.yaml`。リポジトリ向けREST API、GraphQL、`GET /user` |
-| `github.com` | 雛形の`proxy.yaml`。Git smart HTTPによるclone、fetch、push |
+| `api.github.com` | テンプレートの`proxy.hosts`。リポジトリ向けREST API、GraphQL、`GET /user` |
+| `github.com` | テンプレートの`proxy.hosts`。Git smart HTTPによるclone、fetch、push |
 | `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`）、remote managed settingsの取得、Artifacts（公開・読取り・一覧などの`/api/frame/`以下。ただし共有範囲を変える`/api/frame/perm/`は除く。MCPサーバー`/api/artifacts/mcp`、その利用に必要なclaude.ai MCPサーバー一覧、組織のポリシー、アカウント情報の取得） |
-| `mcp-proxy.anthropic.com` | `CLAUDE_DEVCONTAINER_CONNECTORS`で指定したclaude.aiのコネクタだけ。既定では許可しない。[claude.aiのコネクタを使う](#claudeaiのコネクタを使う)を参照 |
+| `mcp-proxy.anthropic.com` | `[proxy]`の`connectors`で指定したclaude.aiのコネクタだけ。既定では許可しない。[claude.aiのコネクタを使う](#claudeaiのコネクタを使う)を参照 |
 
-雛形の`proxy.yaml`では、proxyはGitHubへの要求の認証を、ホストの`GITHUB_TOKEN`（fine-grained PAT）によるBasic認証で上書きします。proxyはGraphQLの本文を解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。
+テンプレートの`proxy.hosts`では、proxyはGitHubへの要求の認証を、ホストの`GITHUB_TOKEN`（fine-grained PAT）によるBasic認証で上書きします。proxyはGraphQLの本文を解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。
 
 GitHubのarchive、LFS、release assetや、package registryには対応していません。proxyはWebSocket、SOCKS、raw TCP、平文HTTPによる外部接続も拒否します。
 
@@ -23,7 +23,7 @@ proxyは拒否した要求に通常HTTP 403を返します。本文付きの要�
 
 ## 認証とCA
 
-本物の秘密（`proxy.yaml`が参照するGitHubのPATなど）とAnthropic認証値、HTTPSの検査に使うCA秘密鍵はproxyだけが持ちます。ホストの注入スクリプトは、起動済みのproxy内の認証保存コマンドへ標準入力で認証値を渡します。proxy内の認証保存コマンドが、proxy専用tmpfsの0400ファイルに保存します。Dockerの作成設定やimageには含めません。proxyは認証値がない場合やファイルが不正な場合に要求を拒否し、以前の値には戻りません。Composeの設定では、agentの環境変数にダミーのOAuthトークンを指定しています。proxyが外部へ接続する際に、本物の値へ置き換えます。API keyではなくOAuthトークンにしているのは、Claude CodeがAPI keyで動いているとclaude.aiにログインしていないと判断し、Artifactsを使わせないためです。proxyにAPI keyを注入した場合も推論は使えますが、Artifactsは使えません。
+本物の秘密（`proxy.hosts`が参照するGitHubのPATなど）とAnthropic認証値、HTTPSの検査に使うCA秘密鍵はproxyだけが持ちます。ホストの注入スクリプトは、起動済みのproxy内の認証保存コマンドへ標準入力で認証値を渡します。proxy内の認証保存コマンドが、proxy専用tmpfsの0400ファイルに保存します。Dockerの作成設定やimageには含めません。proxyは認証値がない場合やファイルが不正な場合に要求を拒否し、以前の値には戻りません。Composeの設定では、agentの環境変数にダミーのOAuthトークンを指定しています。proxyが外部へ接続する際に、本物の値へ置き換えます。API keyではなくOAuthトークンにしているのは、Claude CodeがAPI keyで動いているとclaude.aiにログインしていないと判断し、Artifactsを使わせないためです。proxyにAPI keyを注入した場合も推論は使えますが、Artifactsは使えません。
 
 proxyはCA秘密鍵を専用volumeに保存し、agentには公開CAだけを渡します。agentの起動処理が公開CAをsystem trustに追加します。agentのDockerfileには、Node.js、Git、curlがこのCAを使うための環境変数を設定しています。独自のtruststoreを使うツールでは、公開CAを別途追加してください。TLS検証を無効化しないでください。
 
@@ -100,37 +100,34 @@ VS Codeから使う場合には、エディタを通じたホスト認証の転�
 
 ## 通信ルールを変更する
 
-Anthropicへのルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。それ以外の接続先は、リポジトリの`.devcontainer/proxy.yaml`に書きます。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
+Anthropicへのルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。それ以外の接続先は、リポジトリの`.devcontainer/claude.toml`の`proxy.hosts`に書きます。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
 
 追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、`devcontainer up`で起動し直してください。proxyのimageは起動のたびにビルドし直されます。変更がなければキャッシュが使われます。`devcontainer build`がビルドするのはagentのimageだけなので、proxyの変更には使えません。
 
 ### 接続先を追加する
 
-`.devcontainer/proxy.yaml`に、接続先のホストごとに、通す要求と、proxyが付ける認証を書きます。雛形は[`template/proxy.yaml`](../.devcontainer/claude/template/proxy.yaml)にあり、GitHubの設定が入っています。
+`.devcontainer/claude.toml`に、接続先のホストごとに`[proxy.hosts."ホスト名"]`のテーブルを作り、通す要求と、proxyが付ける認証を書きます。ホスト名には`.`が含まれるので、引用符で囲んでください。テンプレートは[`template/claude.toml`](../.devcontainer/claude/template/claude.toml)にあり、GitHubの設定が入っています。
 
-```yaml
-hosts:
-  fonts.googleapis.com:          # 認証の要らない公開ホスト
-    routes:
-      - GET /css2?
-  api.notion.com:                # トークンの要るAPI
-    routes:
-      - /v1/.+                   # methodを省くとすべてのmethod
-    headers:
-      - Notion-Version
-    inject:
-      Authorization: Bearer ${NOTION_API_KEY}
-  redmine.my-company.com:
-    routes:
-      - GET /issues\.json
-    inject:
-      X-Redmine-API-Key: ${REDMINE_API_KEY}
+```toml
+[proxy.hosts."fonts.googleapis.com"]           # 認証の要らない公開ホスト
+routes = ["GET /css2?"]
+
+[proxy.hosts."api.notion.com"]                 # トークンの要るAPI
+routes = ["/v1/.+"]                            # methodを省くとすべてのmethod
+headers = ["Notion-Version"]
+inject = { Authorization = "Bearer ${NOTION_API_KEY}" }
+env = ["NOTION_API_KEY"]
+
+[proxy.hosts."redmine.my-company.com"]
+routes = ['GET /issues\.json']                 # 単一引用符の文字列は\をそのまま書ける
+inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 ```
 
 - `routes`には、通す要求を`GET /path`か、pathだけ（すべてのmethod）で書きます。pathはqueryを除いたURLのpath全体に一致させる正規表現です。`/.*`のように広く書くと、そのホストのどのAPIにも届きます。
 - ホスト名は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。
 - `headers`には、agentが送ってよいheaderを書きます。`Accept`や`Content-Type`などの一般的なものは書かなくても通ります。`Authorization`や`Cookie`などの認証は書けません。agentが付けた認証は常に除きます。
-- `inject`には、proxyが付けるheaderを書きます。agentが付けた同名のheaderは置き換えます。`${NAME}`は秘密の参照です。`basic:`の下に`user:password`を書くとBasic認証になります（雛形のGitHubの設定を参照）。
+- `inject`には、proxyが付けるheaderを書きます。agentが付けた同名のheaderは置き換えます。`${NAME}`は秘密の参照です。値を`{ basic = "user:password" }`にするとBasic認証になります（テンプレートのGitHubの設定を参照）。`{ … }`のインラインテーブルは1行に書く必要があります。headerが多い場合は、`[proxy.hosts."api.notion.com".inject]`のテーブルに分けて書けます。
+- `env`には、agentにダミー値`managed-by-proxy`で渡す環境変数の名前を書きます（下記）。
 - `api.anthropic.com`と`mcp-proxy.anthropic.com`は書けません。proxyがAnthropicの認証値を付ける接続先で、ルールは`addon.py`に固定しています。
 
 秘密の値は、ホストの`~/.config/claude-devcontainer/credentials`に、他の認証情報と同じくシェルの代入で書きます。
@@ -140,50 +137,41 @@ NOTION_API_KEY=$(secret-tool lookup service notion)
 REDMINE_API_KEY=$(pass work/redmine)
 ```
 
-注入スクリプトは、起動したproxyに`proxy.yaml`が参照する秘密の名前を問い合わせ、このファイルで代入された変数のうち、その名前のものだけを渡します。ホストの環境にもともとある変数は渡しません。`proxy.yaml`が参照する秘密がこのファイルにない場合、proxyはその接続先への要求を、足りない秘密の名前を示して拒否します。
+注入スクリプトは、起動したproxyに`proxy.hosts`が参照する秘密の名前を問い合わせ、このファイルで代入された変数のうち、その名前のものだけを渡します。ホストの環境にもともとある変数は渡しません。`proxy.hosts`が参照する秘密がこのファイルにない場合、proxyはその接続先への要求を、足りない秘密の名前を示して拒否します。
 
-アプリケーションが自分でトークンを付ける場合は、agentにダミー値を渡してください。proxyが本物に置き換えます。リポジトリの`.devcontainer/compose.yaml`に書きます。
-
-```yaml
-services:
-  agent:
-    environment:
-      NOTION_API_KEY: managed-by-proxy
-```
+アプリケーションは、トークンが環境変数にないと要求を送らないことがあります。その場合は、ホストの`env`にアプリケーションが読む環境変数の名前を書いてください。agentにはダミー値`managed-by-proxy`が渡り、proxyが本物に置き換えます。テンプレートのGitHubの設定では、`gh`が読む`GH_TOKEN`を渡しています。秘密の名前（`GITHUB_TOKEN`）とアプリケーションが読む名前は違ってもかまいません。`HTTP_PROXY`や`DOCKER_HOST`など、Composeがagentに設定する名前は書けません。
 
 agentのNode.jsの`fetch`も、`NODE_USE_ENV_PROXY=1`によりproxyを通ります。Node.js 22では実験的機能として警告が1行出ます。
 
 #### 送信先を決めるのはリポジトリ
 
-どの秘密をどの接続先へ付けるかは、リポジトリの`proxy.yaml`が決めます。`.devcontainer/`を変えるコミットを取り込むと、ホストの秘密が別の接続先へ送られえます。`agent-setup.sh`がホストでrootで実行されるのと同じく、`.devcontainer/`の変更はレビューしてから取り込んでください（[人間が気付く必要があるもの](#人間が気付く必要があるもの)）。認証情報のファイルには、agentに使わせてよい秘密だけを置いてください。
+どの秘密をどの接続先へ付けるかは、リポジトリの`claude.toml`が決めます。`.devcontainer/`を変えるコミットを取り込むと、ホストの秘密が別の接続先へ送られえます。`agent-setup.sh`がホストでrootで実行されるのと同じく、`.devcontainer/`の変更はレビューしてから取り込んでください（[人間が気付く必要があるもの](#人間が気付く必要があるもの)）。認証情報のファイルには、agentに使わせてよい秘密だけを置いてください。
 
 要求のpathとqueryには、agentが任意のデータを載せられます。追加した接続先は、そのまま外部への送信経路になります。認証を付けた接続先では、agentはそのトークンの権限でできることをすべてできます。トークンの権限は必要な範囲に絞ってください。
 
-`proxy.yaml`が不正な場合は、proxyのimageのビルドが失敗し、理由を表示します。
+`proxy.hosts`が不正な場合は、`devcontainer up`の起動処理が、ファイルと項目を示して失敗します。
 
 ### ホストだけの接続先を追加する
 
-Redmineなど、リポジトリを使う人のうち一部だけが使う接続先は、`.devcontainer/proxy.local.yaml`に書けます。形式は`proxy.yaml`と同じです。`.gitignore`に追加し、コミットしないでください。
+Redmineなど、リポジトリを使う人のうち一部だけが使う接続先は、`.devcontainer/claude.local.toml`に書けます。書き方は`claude.toml`と同じです。テンプレートの`.gitignore`で除外しているので、コミットされません。
 
-```yaml
-hosts:
-  redmine.my-company.com:
-    routes:
-      - GET /issues\.json
-    inject:
-      X-Redmine-API-Key: ${REDMINE_API_KEY}
+```toml
+[proxy.hosts."redmine.my-company.com"]
+routes = ['GET /issues\.json']
+inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 ```
 
-`proxy.local.yaml`のホストは`proxy.yaml`のホストに追加されます。同じホストが両方にある場合は、`proxy.local.yaml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`は混ぜません。秘密は`proxy.yaml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
+`claude.local.toml`のホストは`claude.toml`のホストに追加されます。同じホストが両方にある場合は、`claude.local.toml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`、`env`は混ぜません。秘密は`claude.toml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
 
-`proxy.yaml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合はビルドが失敗し、`proxy.local.yaml:`で始まる理由を表示します。agentからは編集できませんが、読むことはできます。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
+`claude.toml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合は起動処理が失敗し、`claude.local.toml:`で始まる理由を表示します。agentからは編集できませんが、読むことはできます。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
 
 ### 社内CAを信頼させる
 
-社内CAの証明書を使うホストへは、proxyが接続先の証明書を検証できず、502を返します。ホストにあるCA証明書（PEM、複数の証明書を連結したものも可）のパスを、`.devcontainer/claude.env`か`.devcontainer/.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`に書いてください。相対パスは`.devcontainer/claude/`が基準です。
+社内CAの証明書を使うホストへは、proxyが接続先の証明書を検証できず、502を返します。ホストにあるCA証明書（PEM、複数の証明書を連結したものも可）のパスを、`claude.toml`か`claude.local.toml`の`[proxy]`の`ca`に書いてください。相対パスは`.devcontainer/`が基準です。
 
-```sh
-CLAUDE_DEVCONTAINER_PROXY_CA=/etc/ssl/certs/company-root.pem
+```toml
+[proxy]
+ca = "/etc/ssl/certs/company-root.pem"
 ```
 
 proxyは起動時にこのファイルを読み取り専用でmountし、公開のルート証明書に加えて信頼します。CA証明書でないものが含まれていると、proxyは理由を表示して起動しません。imageには組み込まないので、再ビルドは要りません。ファイルを変えたら、環境を停止して`devcontainer up`で起動し直してください。
@@ -192,7 +180,7 @@ proxyは起動時にこのファイルを読み取り専用でmountし、公開�
 
 ### claude.aiのコネクタを使う
 
-Claude Codeは、claude.aiで接続したコネクタ（Google Driveなど）を`mcp-proxy.anthropic.com`経由で使います。Anthropicのサーバーが、接続済みのアカウントの権限でDriveなどを操作します。proxyは既定でこの接続を拒否し、`CLAUDE_DEVCONTAINER_CONNECTORS`に書いたコネクタだけを、claude.aiの認証値を付けて通します。
+Claude Codeは、claude.aiで接続したコネクタ（Google Driveなど）を`mcp-proxy.anthropic.com`経由で使います。Anthropicのサーバーが、接続済みのアカウントの権限でDriveなどを操作します。proxyは既定でこの接続を拒否し、`[proxy]`の`connectors`に書いたコネクタだけを、claude.aiの認証値を付けて通します。
 
 コネクタは、ホストのClaude Codeのログイン（[ホストのClaude Codeのログイン](usage.md#ホストのclaude-codeのログイン)）で使えます。API keyでは使えません。
 
@@ -203,10 +191,11 @@ curl -s 'https://api.anthropic.com/v1/mcp_servers?limit=1000' -H 'anthropic-beta
   | jq -r '.data[] | "\(.id)\t\(.display_name)"'
 ```
 
-使うIDを、カンマか空白で区切って`.devcontainer/.env`に書き、READMEの停止手順で環境を停止してから`devcontainer up`で起動し直してください。imageの再ビルドは要りません。起動時に認証値も注入し直されます。IDの形式が不正な場合は、proxyが理由を表示して起動しません。
+使うIDを`.devcontainer/claude.local.toml`の`[proxy]`の`connectors`に書き、READMEの停止手順で環境を停止してから`devcontainer up`で起動し直してください。imageの再ビルドは要りません。起動時に認証値も注入し直されます。IDの形式が不正な場合は、起動処理が理由を表示して失敗します。
 
-```sh
-CLAUDE_DEVCONTAINER_CONNECTORS=mcpsrv_01AbCdEf
+```toml
+[proxy]
+connectors = ["mcpsrv_01AbCdEf"]
 ```
 
 指定していないコネクタはproxyが拒否するので、Claude Codeでは接続失敗と表示されます。

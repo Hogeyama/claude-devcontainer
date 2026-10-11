@@ -1,6 +1,6 @@
 # Claude Code用Dev Containerのコア
 
-このディレクトリはgit subtreeで取り込まれたものです。編集せず、カスタマイズは`.devcontainer/`直下の`devcontainer.json`、`compose.yaml`、`claude.env`、`agent-setup.sh`、`images.txt`、`proxy.yaml`、`proxy.local.yaml`（ホストだけの接続先、コミットしない）で行ってください。`template/`はそれらの雛形です。
+このディレクトリはgit subtreeで取り込まれたものです。編集せず、カスタマイズは`.devcontainer/`直下の`claude.toml`、`claude.local.toml`（ホストだけの設定、コミットしない）、`devcontainer.json`、`compose.yaml`、`agent-setup.sh`で行ってください。`template/`はそれらのテンプレートです。
 
 上流の修正は次のコマンドで取り込みます。使い方の詳細は[上流](./UPSTREAM)のREADMEを参照してください。
 

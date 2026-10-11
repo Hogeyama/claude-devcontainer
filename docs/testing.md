@@ -17,7 +17,7 @@
 | Git向け応答 | 9 MiBの応答を逐次配送 |
 | ネットワーク隔離 | agentとDinDからの外部IP・DNS・IPv6・ホストへの接続拒否。DinD内ではbridgeとhost networkの両方を確認 |
 | proxy停止時 | 外部へ直接接続せず、通信が失敗すること |
-| オフラインDocker | `images.txt`に書いたイメージの読み込み、build、実行 |
+| オフラインDocker | `[docker]`の`images`に書いたイメージの読み込み、build、実行 |
 | Docker APIと公開TCPポート | agentのシェル、agent再起動後、実Claude Code 2.1.295のBash toolからの接続 |
 | Testcontainers 12.1.0 | 起動、HTTP wait、mapped port、exec、Ryukによる残存コンテナの削除 |
 
@@ -33,15 +33,19 @@ GitHubの書込み制限を実サービスで検証するには、専用の許�
 
 すべてホストのターミナルで、このリポジトリのルートから実行してください。テストは既存のホストアカウントを読み取らず、合成した認証値を使います。
 
-テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。proxyとDinDのsubnetは、通常の起動と同じく起動処理が空いている`10.231.x.0/24`を選びます。`CLAUDE_DEVCONTAINER_PROXY_NET`と`CLAUDE_DEVCONTAINER_DIND_NET`を環境変数で指定した場合は、その値を使います。`CLAUDE_DEVCONTAINER_UID`と`CLAUDE_DEVCONTAINER_GID`も同様に指定でき、その場合は下のagent imageも同じ値の`--build-arg AGENT_UID=… --build-arg AGENT_GID=…`でビルドしてください。
+テストはランダムなComposeプロジェクト名でDockerリソースを作り、終了時にそのプロジェクトだけを削除します。proxyとDinDのsubnetは、通常の起動と同じく起動処理が空いている`10.231.x.0/24`を選びます。`CLAUDE_DEVCONTAINER_PROXY_NET`と`CLAUDE_DEVCONTAINER_DIND_NET`を環境変数で指定した場合は、テストがその値を試験用ワークスペースの`claude.local.toml`の`[subnets]`に書きます。`CLAUDE_DEVCONTAINER_UID`と`CLAUDE_DEVCONTAINER_GID`も同様に`[agent]`に書きます。その場合は下のagent imageも同じ値の`--build-arg AGENT_UID=… --build-arg AGENT_GID=…`でビルドしてください。テストは、起動処理に渡す環境から`CLAUDE_DEVCONTAINER_`で始まる変数を除きます。起動処理はこれらの変数を設定として受け付けず、agentの中ではComposeが一部を設定しているためです。
 
 `AGENT_TEST_IMAGE`、`PROXY_TEST_IMAGE`、`SUMI_TEST_IMAGE`でテスト用imageのタグを変更できます。全体試験には実際の`devcontainer`コマンドが必要です。別のCLI起動方法を使う場合は、`DEVCONTAINER_TEST_CLI`にコマンドを指定してください。テストは作業ツリーを一時領域へコピーし、CLIのuser-data-folderも専用領域に置きます。Dockerを使う試験を明示的に選んだのにdaemonが使えない場合はエラーになります。
 
 ### 準備
 
 ```sh
-# GitHub の経路と注入は雛形の proxy.yaml から入る
-docker build -t claude-devcontainer-proxy:task1 --build-context workspace-config=.devcontainer/claude/template \
+# GitHub の経路と注入はテンプレートの claude.toml の proxy.hosts から入る
+proxy_dir=$(mktemp -d /tmp/cdc-proxy.XXXXXX)
+mkdir "$proxy_dir/.generated"
+python3 .devcontainer/claude/scripts/settings.py proxy-json .devcontainer/claude/template/claude.toml \
+  > "$proxy_dir/.generated/proxy.json"
+docker build -t claude-devcontainer-proxy:task1 --build-context workspace-config="$proxy_dir" \
   .devcontainer/claude/proxy
 docker build -t claude-devcontainer-agent:task2 --build-context workspace-config=.devcontainer \
   -f .devcontainer/claude/agent/Dockerfile .devcontainer/claude
@@ -73,7 +77,7 @@ git diff --check
 特定の試験だけを実行する場合は、全カテゴリのコマンドに代えて、必要なものを選んで実行してください。
 
 ```sh
-# 設定ファイルの優先順位: Compose CLIのみ使用、daemon不要
+# claude.tomlとclaude.local.tomlの値をComposeと起動処理が同じく使うこと: Compose CLIのみ使用、daemon不要
 python3 -m unittest discover -s tests -p settings_integration_test.py -v
 # 実 mitmproxy／模擬 TLS upstream
 RUN_DOCKER_TESTS=1 python3 -m unittest discover -s tests -p proxy_integration_test.py -v
@@ -84,17 +88,17 @@ RUN_DOCKER_TESTS=1 TESTCONTAINERS_NODE_MODULES="$sdk_dir/node_modules" \
 
 ### DinDとnixのフラグを検証する
 
-Dev Containersの全体試験は、試験スクリプトがDinDとsumiを有効にして実行します。実行時は`CLAUDE_DEVCONTAINER_NIX=0`にしてください。Bashの起動試験は、nix有効・無効の両方で、非対話・対話・login shellと、VS Codeと同じくユーザーの`.bashrc`だけを読む経路を確認します。
+Dev Containersの全体試験は、試験スクリプトがDinDとsumiを有効にし、nixを無効にして実行します。Bashの起動試験は、nix有効・無効の両方で、非対話・対話・login shellと、VS Codeと同じくユーザーの`.bashrc`だけを読む経路を確認します。
 
 実際のnixのdev shellとフラグの切替えは、以下の手順で手動確認してください。ホストにnixが必要です。
 
-検証用のリポジトリを用意してください。コアをコピーするときは`cp -a`などでsymlinkを保持してください。`features/nix-1`のリンク先をコピーすると、ホストの`/nix/store`全体がコピーされてしまいます。
+検証用のリポジトリを用意してください。`.devcontainer/claude`をコピーするときは`cp -a`などでsymlinkを保持してください。`features/nix-1`のリンク先をコピーすると、ホストの`/nix/store`全体がコピーされてしまいます。
 
-検証用リポジトリには、`hello`を含むdefault dev shellと、別のツールを含む名前付きdev shellを用意し、`flake.nix`と`flake.lock`をコミットしてください。設定値は`.devcontainer/claude.env`に書いてください。同名の環境変数や`.devcontainer/.env`の値があるとそちらが優先されるので、先に解除してください。
+検証用リポジトリには、`hello`を含むdefault dev shellと、別のツールを含む名前付きdev shellを用意し、`flake.nix`と`flake.lock`をコミットしてください。設定値は`.devcontainer/claude.toml`に書いてください。agentの中で実行する場合は、Composeが設定している`CLAUDE_DEVCONTAINER_DIND`、`CLAUDE_DEVCONTAINER_NIX`、`CLAUDE_DEVCONTAINER_SUMI`を`env -u`などで外してください。残っていると起動処理がエラーにします。
 
-CLIとComposeで同じ検証用環境を操作するため、開始時に`export COMPOSE_PROJECT_NAME="cdc-flags-$(date +%s)"`も実行してください。ネットワークの範囲は、他の環境と重ならない値に設定してください。
+CLIとComposeで同じ検証用環境を操作するため、開始時に`export COMPOSE_PROJECT_NAME="cdc-flags-$(date +%s)"`も実行してください。ネットワークの範囲は、他の環境と重ならない値を`[subnets]`に設定してください。
 
-1. `CLAUDE_DEVCONTAINER_DIND=0`、`CLAUDE_DEVCONTAINER_NIX=1`で`devcontainer up`を実行してください。`images.txt`には存在しないイメージ名を入れ、DinDが無効な場合に読み込みを待たず起動できることも確認してください。
+1. `[docker]`の`enabled = false`、`[nix]`の`enabled = true`で`devcontainer up`を実行してください。`[docker]`の`images`には存在しないイメージ名を入れ、DinDが無効な場合に読み込みを待たず起動できることも確認してください。
 2. 次のコマンドで、dev shellのツールが使え、Dockerには接続できず、dind-bridgeが起動していないことを確認してください。
 
    ```sh
@@ -106,19 +110,19 @@ CLIとComposeで同じ検証用環境を操作するため、開始時に`export
    起動中のサービスは`agent`と`proxy`だけになります。
 
 3. `flake.nix`のツールを変更し、コミットせずにもう一度`up`してください。コミット済みのdev shellが使われ、未コミットの変更が反映されないことを確認してください。
-4. `CLAUDE_DEVCONTAINER_NIX_SHELL`に名前付きdev shellのattribute（例: `devShells.x86_64-linux.foo`）を指定して`up`し、そのshellのツールが使えることを確認してください。
-5. `CLAUDE_DEVCONTAINER_NIX_REF`に存在しないrefを指定して`up`してください。警告が出て、`.devcontainer/.nix-env/env.rc`が更新されないことを確認してください。
-6. `CLAUDE_DEVCONTAINER_NIX_REF`を有効なrefに戻してください。`flake.lock`がないコミットでも`up`し、作業ツリーへ`flake.lock`が作られていないことを確認してください。
-7. `CLAUDE_DEVCONTAINER_NIX=0`で再起動し、dev shellのツールが読み込まれないことを確認してください。
+4. `[nix]`の`shell`に名前付きdev shellのattribute（例: `devShells.x86_64-linux.foo`）を指定して`up`し、そのshellのツールが使えることを確認してください。
+5. `[nix]`の`ref`に存在しないrefを指定して`up`してください。警告が出て、`.devcontainer/.nix-env/env.rc`が更新されないことを確認してください。
+6. `[nix]`の`ref`を有効なrefに戻してください。`flake.lock`がないコミットでも`up`し、作業ツリーへ`flake.lock`が作られていないことを確認してください。
+7. `[nix]`の`enabled = false`で再起動し、dev shellのツールが読み込まれないことを確認してください。
 
-設定を変えるときは、先に`.devcontainer/claude/scripts/compose.sh down`で検証用環境を停止してください。DinDを有効に戻す前には、検証用の存在しないイメージ名を`images.txt`から削除してください。
+設定を変えるときは、先に`.devcontainer/claude/scripts/compose.sh down`で検証用環境を停止してください。DinDを有効に戻す前には、検証用の存在しないイメージ名を`images`から削除してください。
 
 ### 後片付け
 
 検証が終わったら、準備に使ったホストのターミナルで一時ディレクトリを削除してください。
 
 ```sh
-rm -rf "$sdk_dir"
+rm -rf "$sdk_dir" "$proxy_dir"
 ```
 
 ## 検証結果の読み方
