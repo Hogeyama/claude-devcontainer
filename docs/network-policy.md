@@ -97,30 +97,39 @@ VS Codeから使う場合には、エディタを通じたホスト認証の転�
 
 ## 通信ルールを変更する
 
-ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。リポジトリごとに認証の要らない接続先を足す場合は、下の`proxy-routes.json`を使ってください。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
+ルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。リポジトリごとに認証の要らない接続先を足す場合は、下の`proxy.yaml`を使ってください。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
 
 ### 接続先を追加する
 
-`.devcontainer/proxy-routes.json`に、通す要求をmethod、host、pathの組で書きます。たとえば、ページの描画にGoogle Fontsが要る場合です。
+`.devcontainer/proxy.yaml`の`routes`に、通す要求をmethod、host、pathの組で書きます。たとえば、ページの描画にGoogle Fontsが要る場合です。雛形は[`template/proxy.yaml`](../.devcontainer/claude/template/proxy.yaml)にあります。
 
-```json
-{
-  "routes": [
-    {"method": "GET", "host": "fonts.googleapis.com", "path": "/css2?"},
-    {"method": "GET", "host": "fonts.gstatic.com", "path": "/s/.+"}
-  ]
-}
+```yaml
+routes:
+  - {method: GET, host: fonts.googleapis.com, path: /css2?}
+  - {method: GET, host: fonts.gstatic.com, path: /s/.+}   # フォント本体
 ```
 
 - `path`はqueryを除いたURLのpath全体に一致させる正規表現です。`/.*`のように広く書くと、そのホストのどのAPIにも届きます。
-- `method`は`GET`などの大文字のmethodです。`"*"`はすべてのmethodを通します。
+- `method`は`GET`などの大文字のmethodです。`"*"`はすべてのmethodを通します。YAMLでは`*`が別の意味を持つので、引用符で囲んでください。
 - `host`は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。
 - 追加した接続先には、proxyは認証を付けません。agentが送るAuthorizationやCookieなども、既存の接続先と同じく除きます。認証の要る接続先には使えません。
 - proxyが認証を注入する`api.github.com`、`github.com`、`api.anthropic.com`は書けません。ここにルートを足すと、PATやAnthropicの認証値を付けた要求の範囲が広がるためです。
 
 要求のpathとqueryには、agentが任意のデータを載せられます。追加した接続先は、そのまま外部への送信経路になります。送信先を信頼できるか確かめてから追加してください。
 
-ファイルが不正な場合は、proxyのimageのビルドが失敗し、理由を表示します。
+`proxy.yaml`が不正な場合は、proxyのimageのビルドが失敗し、理由を表示します。
+
+### 社内CAを信頼させる
+
+社内CAの証明書を使うホストへは、proxyが接続先の証明書を検証できず、502を返します。ホストにあるCA証明書（PEM、複数の証明書を連結したものも可）のパスを、`.devcontainer/claude.env`か`.devcontainer/.env`の`CLAUDE_DEVCONTAINER_PROXY_CA`に書いてください。相対パスは`.devcontainer/claude/`が基準です。
+
+```sh
+CLAUDE_DEVCONTAINER_PROXY_CA=/etc/ssl/certs/company-root.pem
+```
+
+proxyは起動時にこのファイルを読み取り専用でmountし、公開のルート証明書に加えて信頼します。CA証明書でないものが含まれていると、proxyは理由を表示して起動しません。imageには組み込まないので、ファイルを変えたらproxyを再起動するだけで反映されます。
+
+信頼はホストごとに分けられず、すべての接続先に及びます。このCAの秘密鍵を持つ者は`api.github.com`などの証明書も偽造でき、proxyとの間で認証値を盗み見られます。信頼できる組織のCAだけを指定してください。
 
 追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、ホストで取り込んだリポジトリのルートで次を実行してください。
 

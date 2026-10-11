@@ -17,6 +17,9 @@
 #     directory holding the secrets file, and its name in it. Default
 #     ~/.claude/sumi and secrets.txt. Relative directories are based here,
 #     at .devcontainer/claude/.
+#   CLAUDE_DEVCONTAINER_PROXY_CA  a host PEM file of CA certificates, such as an
+#     in-house root under /etc, that the proxy trusts for upstream TLS besides
+#     the public roots. Default none.
 # Features are 0 or 1: compose can neither add a service nor a mount
 # conditionally, so the values select a scale and a path instead.
 services:
@@ -112,7 +115,7 @@ services:
   proxy:
     build:
       context: proxy
-      # The workspace's .devcontainer/, for its optional proxy-routes.json.
+      # The workspace's .devcontainer/, for its optional proxy.yaml.
       additional_contexts:
         workspace-config: ..
     mem_limit: 512m
@@ -126,6 +129,12 @@ services:
     volumes:
       - proxy-private-ca:/home/mitmproxy/.mitmproxy
       - public-ca:/public-ca
+      # features/no-proxy-ca.pem is empty.
+      - type: bind
+        source: ${CLAUDE_DEVCONTAINER_PROXY_CA:-./features/no-proxy-ca.pem}
+        target: /run/proxy-ca/ca.pem
+        read_only: true
+        bind: {create_host_path: false}
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.10

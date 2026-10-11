@@ -1,8 +1,11 @@
 """Publish the CA certificate (never its key) for the agent, then run mitmdump."""
 import os
 from pathlib import Path
+import sys
 
 from mitmproxy import certs
+
+import workspace_config
 
 CONFDIR = Path('/home/mitmproxy/.mitmproxy')
 PUBLIC_CA = Path('/public-ca/mitmproxy-ca-cert.pem')
@@ -25,4 +28,11 @@ def publish_ca():
 
 if __name__ == '__main__':
     publish_ca()
+    try:
+        bundle = workspace_config.upstream_ca()
+    except ValueError as error:
+        sys.exit(f'error: {error}')
+    if bundle:
+        # It replaces certifi's roots, so the bundle carries them too.
+        COMMAND += ['--set', f'ssl_verify_upstream_trusted_ca={bundle}']
     os.execvp(COMMAND[0], COMMAND)

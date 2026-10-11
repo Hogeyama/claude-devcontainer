@@ -42,6 +42,14 @@ if [ "$(setting CLAUDE_DEVCONTAINER_SUMI 0)" = 1 ]; then
     fi
 fi
 
+# compose.yaml mounts it into the proxy, which checks its content.
+ca=$(setting CLAUDE_DEVCONTAINER_PROXY_CA '')
+case "$ca" in ''|/*) ;; *) ca=".devcontainer/claude/$ca" ;; esac
+if [ -n "$ca" ] && [ ! -f "$ca" ]; then
+    echo "error: CLAUDE_DEVCONTAINER_PROXY_CA names $ca, which is not a file." >&2
+    exit 1
+fi
+
 # Export the flake's dev shell for the agent's bash to load from the read-only
 # .devcontainer/. Evaluate a commit rather than the working tree, which the
 # agent writes: evaluating fetches inputs and builds on the host, outside the

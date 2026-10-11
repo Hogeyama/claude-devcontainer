@@ -1,0 +1,12 @@
+# Owned by this workspace: what the proxy lets through besides its fixed policy.
+# The host bakes it into the proxy image, so rebuild after changing it. See
+# "接続先を追加する" in docs/network-policy.md of claude-devcontainer.
+#
+# routes: requests to public hosts, which get no credentials. path is a regular
+# expression for the whole URL path, without the query. Quote "*" (any method).
+# routes:
+#   - {method: GET, host: fonts.googleapis.com, path: /css2?}
+#   - {method: GET, host: fonts.gstatic.com, path: /s/.+}
+#
+# A host with an in-house CA also needs CLAUDE_DEVCONTAINER_PROXY_CA in
+# claude.env or .env.

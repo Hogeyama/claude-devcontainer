@@ -51,7 +51,7 @@ Nothing can be installed from a package registry while you run. The host provide
 |---|---|
 | A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built |
 | An image for DinD | `.devcontainer/images.txt` |
-| A public host that needs no credentials, such as `fonts.googleapis.com` | `.devcontainer/proxy-routes.json`: `{"routes": [{"method": "GET", "host": "...", "path": "<regex of the path>"}]}`. The proxy adds no credentials to these requests, so propose it only for public endpoints, and name the narrowest path |
+| A public host that needs no credentials, such as `fonts.googleapis.com` | `routes:` in `.devcontainer/proxy.yaml`: `- {method: GET, host: ..., path: <regex of the path>}`. The proxy adds no credentials to these requests, so propose it only for public endpoints, and name the narrowest path |
 | The nix dev shell of the repository's flake | `CLAUDE_DEVCONTAINER_NIX=1` in `.devcontainer/claude.env` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
 | Environment variables or volumes | `.devcontainer/compose.yaml` |
 
