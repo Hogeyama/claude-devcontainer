@@ -25,19 +25,6 @@
             name = "playwright-cli";
             runtimeInputs = [ pkgs.nodejs_22 ];
             text = ''
-              # In Claude Code's Bash sandbox HOME is read-only and TMPDIR may be
-              # relative. Chromium needs a writable config dir for crashpad, and
-              # playwright-cli keeps its daemon state in the cache dir.
-              if [ ! -w "$HOME" ]; then
-                case "''${TMPDIR:-}" in
-                  /*) ;;
-                  "") TMPDIR=/tmp ;;
-                  *) TMPDIR="$PWD/$TMPDIR" ;;
-                esac
-                export TMPDIR
-                export XDG_CACHE_HOME="$TMPDIR/playwright-cli/cache"
-                export XDG_CONFIG_HOME="$TMPDIR/playwright-cli/config"
-              fi
               exec node ${playwright-cli-js} "$@"
             '';
           };
