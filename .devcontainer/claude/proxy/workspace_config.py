@@ -54,12 +54,12 @@ class Config:
 
     def secrets(self):
         """The names of the secrets that inject refers to."""
-        return sorted({name for entries in self.inject.values() for _, (_, parts) in entries
-                       for kind, name in parts if kind == 'secret'})
+        return sorted({name for entries in self.inject.values() for _, (_, value) in entries
+                       for name in SECRET.findall(value)})
 
 
 def parse_template(value, where):
-    """Parse "... ${NAME} ..." or a mapping basic: "user:${NAME}" into (basic, [(literal|secret, text)])."""
+    """Validate "... ${NAME} ..." or basic: "user:${NAME}" and return (basic, text)."""
     basic = isinstance(value, dict)
     if basic:
         if set(value) != {'basic'}:
@@ -67,23 +67,17 @@ def parse_template(value, where):
         value = value['basic']
     if not isinstance(value, str) or not value:
         raise ValueError(f'{where}: expected a non-empty string')
-    parts, end = [], 0
-    for match in SECRET.finditer(value):
-        parts += [('literal', value[end:match.start()]), ('secret', match.group(1))]
-        end = match.end()
-    parts.append(('literal', value[end:]))
-    parts = [(kind, text) for kind, text in parts if text]
-    if any(kind == 'literal' and '$' in text for kind, text in parts):
+    if '$' in SECRET.sub('', value):
         raise ValueError(f'{where}: "$" is only allowed in ${{NAME}}, NAME in capitals, digits and _')
-    if any(kind == 'literal' and re.search(r'[\x00-\x1f\x7f]', text) for kind, text in parts):
+    if re.search(r'[\x00-\x1f\x7f]', value):
         raise ValueError(f'{where}: control characters are not allowed')
-    return basic, parts
+    return basic, value
 
 
 def render(template, secrets):
     """The header value; KeyError names a secret the host has not sent."""
-    basic, parts = template
-    value = ''.join(secrets[text] if kind == 'secret' else text for kind, text in parts)
+    basic, text = template
+    value = SECRET.sub(lambda match: secrets[match.group(1)], text)
     return 'Basic ' + base64.b64encode(value.encode()).decode() if basic else value
 
 

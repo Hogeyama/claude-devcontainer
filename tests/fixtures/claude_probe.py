@@ -2,7 +2,6 @@
 import http.server
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import threading

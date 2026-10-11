@@ -79,6 +79,18 @@ hosts:
         with self.assertRaises(KeyError):
             workspace_config.render(config.inject['github.com'][0][1], {})
 
+    def test_secret_values_are_not_reinterpreted_as_templates_or_escapes(self):
+        for value in ['${OTHER}', r'\1', r'\g<1>', '$\\']:
+            with self.subTest(value=value):
+                template = workspace_config.parse_template('prefix:${TOKEN}${TOKEN}:suffix', 'test')
+                self.assertEqual(workspace_config.render(template, {'TOKEN': value}),
+                                 'prefix:' + value + value + ':suffix')
+
+    def test_template_rejects_invalid_placeholders_and_control_characters(self):
+        for value in ['$TOKEN', '${TOKEN', '${lower}', '$${TOKEN}', '${TOKEN}\n', '\x00${TOKEN}', '\x7f']:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                workspace_config.parse_template(value, 'test')
+
     def test_invalid(self):
         for text in ['hosts: [', '[]', 'routes: []', 'hosts: []', 'hosts:\n  a.example.com:\n',
                      'hosts:\n  a.example.com:\n    routes:\n      - /\n  a.example.com:\n    routes:\n      - /\n',

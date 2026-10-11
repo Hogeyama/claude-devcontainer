@@ -3,11 +3,11 @@
 
 The copy goes one way only: nothing in the agent's home reaches the host, where
 an agent-written hook or memory would run or be read outside the container.
-Copied are the entries of ~/.claude in ENTRIES, the files under ~/.claude that
-statusLine and hooks commands name, and then everything in EXTRA, mirrored onto
-the home directory (e.g. EXTRA/.gitconfig becomes ~/.gitconfig). Symbolic links
-are followed on the host, so they may point anywhere the host can read (e.g.
-/nix/store).
+Copied are settings.json, the entries of ~/.claude in ENTRIES, and the files
+under ~/.claude that statusLine and hooks commands name. Everything in EXTRA
+is then mirrored onto the home directory (e.g. EXTRA/.gitconfig becomes
+~/.gitconfig). Symbolic links are followed on the host, so they may point
+anywhere the host can read (e.g. /nix/store).
 
 The agent must not be able to drop the host's hooks or change what they run, so
 settings.json becomes a managed settings file, and the rest of ~/.claude is
@@ -36,7 +36,8 @@ EXTRA = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'cl
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/copy-config.log'
 # Configuration, not state. An allowlist, because ~/.claude also holds
 # credentials and history, and new kinds of state appear with new versions.
-ENTRIES = ('settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
+# settings.json is handled separately as a managed settings file.
+ENTRIES = ('CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
 # Never copied, nor anything under them, even when a command names it or EXTRA
 # links to all of ~/.claude. sumi/ is where sumi's README keeps secrets.txt; the
 # secrets files actually in use are found by secrets_files().
@@ -152,7 +153,7 @@ def without_sumi(settings):
 
 def archive(source=SOURCE, extra=EXTRA):
     """Return a tar of the configuration to extract into the agent's home."""
-    names = [Path(name) for name in ENTRIES if name != 'settings.json']
+    names = [Path(name) for name in ENTRIES]
     excluded = secrets_files({})
     try:
         settings = json.loads((source / 'settings.json').read_text())
@@ -257,8 +258,7 @@ chown node:node {MARKER}
 
 
 def copy(agent, data):
-    entries = [name for name in ENTRIES if name != 'settings.json']
-    docker('exec', '-i', '--user', '0', agent, 'sh', '-c', COPY_SCRIPT, 'sh', *entries, data=data)
+    docker('exec', '-i', '--user', '0', agent, 'sh', '-c', COPY_SCRIPT, 'sh', *ENTRIES, data=data)
 
 
 def wait_and_copy(data):

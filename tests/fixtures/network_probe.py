@@ -1,5 +1,4 @@
 """Connect directly, so that no proxy env can hide an escape."""
-import json
 import os
 import socket
 import sys
