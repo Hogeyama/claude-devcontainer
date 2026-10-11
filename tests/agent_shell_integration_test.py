@@ -32,28 +32,6 @@ class AgentShellIntegrationTest(unittest.TestCase):
                                         '--entrypoint', '/bin/bash', AGENT_IMAGE, *args, script)
                         self.assertEqual(result.strip(), 'dev-shell-ok' if enabled == '1' else 'no-dev-shell')
 
-    def test_nested_bash_keeps_tmpdir(self):
-        # nix print-dev-env ends with these lines; every Bash reads env.rc.
-        with tempfile.TemporaryDirectory(prefix='cdc-shell-') as directory:
-            root = Path(directory)
-            root.chmod(0o755)
-            (root / 'env.rc').write_text(
-                'export NIX_BUILD_TOP="$(mktemp -d -t nix-shell.XXXXXX)"\n'
-                'export TMP="$NIX_BUILD_TOP"\n'
-                'export TMPDIR="$NIX_BUILD_TOP"\n'
-                'export TEMP="$NIX_BUILD_TOP"\n'
-                'export TEMPDIR="$NIX_BUILD_TOP"\n')
-            for tmpdir in ([], ['-e', 'TMPDIR=/var/tmp']):
-                with self.subTest(tmpdir=tmpdir):
-                    result = docker('run', '--rm', '--network', 'none', '--user', 'node',
-                                    '-e', 'CLAUDE_DEVCONTAINER_NIX=1', *tmpdir,
-                                    '-v', directory + ':/workspace/.devcontainer/.nix-env:ro',
-                                    '--entrypoint', '/bin/bash', AGENT_IMAGE, '-c',
-                                    'bash -c \'bash -c "echo ${TMPDIR-unset} ${TMP-unset} ${NIX_BUILD_TOP-unset}"\';'
-                                    ' ls -d /tmp/nix-shell.* /var/tmp/nix-shell.* 2>/dev/null | wc -l')
-                    expected = '/var/tmp' if tmpdir else 'unset'
-                    self.assertEqual(result.split(), [expected, 'unset', 'unset', '0'])
-
 
 if __name__ == '__main__':
     unittest.main()

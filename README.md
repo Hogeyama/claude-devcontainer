@@ -261,7 +261,7 @@ ref = "HEAD"                            # 評価するコミットやref。既�
 shell = "devShells.x86_64-linux.foo"    # 名前付きdev shell。省略するとdefault
 ```
 
-`devcontainer up`のたびにホストで`nix print-dev-env`を実行し、その結果をagentのBashで読み込みます。ホストの`/nix/store`は読み取り専用で使います。
+`devcontainer up`のたびにホストで`nix print-dev-env`を実行し、その結果をagentのBashで読み込みます。読み込むのは環境変数だけです。`TZ`や`SOURCE_DATE_EPOCH`のようにビルドにしか使わない変数、bashの関数、`shellHook`は除きます。agentのBashは、コマンドのたびにこの結果を読み込むためです。ホストの`/nix/store`は読み取り専用で使います。
 
 > [!WARNING]
 > * flakeの評価、inputの取得、ビルドはホストで実行するので、proxyの通信制限を受けません。評価するのはコミット済みのflakeですが、agentもコミットやrefを変えられます。`up`の前にflakeの変更を確認してください。
