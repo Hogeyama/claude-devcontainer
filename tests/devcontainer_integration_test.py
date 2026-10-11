@@ -1,6 +1,7 @@
 """Whole-container, offline Docker, actual Claude Bash and SDK integration checks."""
 import base64
 import http.server
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -23,7 +24,32 @@ SECRET = 'Tr0ub4dor-fixture'
 # The same settings as .devcontainer/.env or claude.env; AGENT_IMAGE must be built with this UID/GID.
 AGENT_UID = os.environ.get('CLAUDE_DEVCONTAINER_UID', '1000')
 AGENT_GID = os.environ.get('CLAUDE_DEVCONTAINER_GID', '1000')
-DIND_NET = os.environ.get('CLAUDE_DEVCONTAINER_DIND_NET', '10.231.71')
+
+
+def free_networks():
+    """The first three octets of the proxy and DinD /24s: as set, else two free in 10.231.
+
+    Docker cannot pick them: the agent's firewall and proxy settings name the
+    proxy and DinD by fixed addresses in them. Another environment on this host
+    (this repository's own, or another project's) may hold the defaults.
+    """
+    names = ('CLAUDE_DEVCONTAINER_PROXY_NET', 'CLAUDE_DEVCONTAINER_DIND_NET')
+    chosen = [os.environ.get(name) for name in names]
+    used = [ipaddress.ip_network(net + '.0/24') for net in chosen if net]
+    networks = docker('network', 'ls', '-q').split()
+    if networks:
+        for subnet in docker('network', 'inspect', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{end}}', *networks).split():
+            network = ipaddress.ip_network(subnet, strict=False)
+            if network.version == 4:
+                used.append(network)
+    candidates = (f'10.231.{third}' for third in range(70, 256))
+    for index, net in enumerate(chosen):
+        if not net:
+            net = next(candidate for candidate in candidates
+                       if not any(ipaddress.ip_network(candidate + '.0/24').overlaps(other) for other in used))
+            used.append(ipaddress.ip_network(net + '.0/24'))
+            chosen[index] = net
+    return dict(zip(names, chosen))
 
 
 @unittest.skipUnless(os.environ.get('RUN_DOCKER_TESTS') == '1', 'Docker integration disabled; set RUN_DOCKER_TESTS=1')
@@ -45,6 +71,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         cls.env.update(XDG_CONFIG_HOME=str(cls.directory / 'config'), XDG_STATE_HOME=str(cls.directory / 'state'))
         # Every test here but the credentials ones relies on Docker.
         cls.env.update(CLAUDE_DEVCONTAINER_DIND='1')
+        cls.env.update(free_networks())
+        cls.dind_net = cls.env['CLAUDE_DEVCONTAINER_DIND_NET']
         # The sumi service reads a secrets file outside the workspace, under a
         # name other than the default. Not in cls.directory, which the agent mounts.
         # start_environment() sets it up through claude.env and .env.
@@ -271,7 +299,7 @@ if timeout 3 nslookup example.com 127.0.0.11; then echo dns-escaped; exit 1; fi
 if timeout 3 nslookup example.com 8.8.8.8; then echo dns-escaped; exit 1; fi
 if timeout 2 sh -c 'echo | nc -w 1 2001:4860:4860::8888 443'; then echo ipv6-escaped; exit 1; fi
 echo nested-network-blocked
-'''.replace('HOSTPORT', str(self.host_server.server_port)).replace('HOSTIP', self.host_ip).replace('DINDNET', DIND_NET)
+'''.replace('HOSTPORT', str(self.host_server.server_port)).replace('HOSTIP', self.host_ip).replace('DINDNET', self.dind_net)
                 result = self.exec('docker', 'run', '--rm', '--network', mode, 'busybox:1.37', 'sh', '-c', probe)
                 self.assertIn('nested-network-blocked', result.stdout)
 
