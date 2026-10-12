@@ -6,21 +6,15 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import time
-from urllib.parse import urlsplit
 from workspace_mounts import dependency_mounts
 
 
 def inputs(path):
     data = json.loads(Path(path).read_text())
-    if not isinstance(data, dict) or set(data) != {'url', 'commit'} or not all(isinstance(v, str) for v in data.values()):
+    if not isinstance(data, dict) or set(data) != {'commit', 'seed'} or not all(isinstance(v, str) for v in data.values()):
         raise ValueError('Invalid workspace clone metadata.')
-    url = urlsplit(data['url'])
-    if (url.scheme != 'https' or not url.hostname or url.username is not None
-            or url.password is not None or not url.path.strip('/')
-            or '?' in data['url'] or '#' in data['url']
-            or any(c.isspace() or ord(c) < 32 for c in data['url'])
-            or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', data['commit'])):
+    if (not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', data['commit'])
+            or data['seed'] != f"workspace-{data['commit']}.git"):
         raise ValueError('Invalid workspace clone metadata.')
     return data
 
@@ -64,21 +58,15 @@ def clone(source, workspace):
         marker.write_text(json.dumps(data) + '\n')
 
     git('init', '--object-format=' + ('sha256' if len(data['commit']) == 64 else 'sha1'))
-    if git('remote', 'get-url', 'origin', check=False).returncode:
-        git('remote', 'add', 'origin', data['url'])
-    elif git('config', '--get', 'remote.origin.url').stdout.strip() != data['url']:
-        raise ValueError('Origin changed during initialization; inspect /workspace before retrying.')
-    for attempt in range(3):
-        try:
-            git('fetch', '--no-tags', 'origin')
-            break
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            if attempt == 2:
-                raise ValueError('Could not fetch origin. Check proxy policy and credentials, '
-                                 'then run wait-ready.sh as node again.') from None
-            time.sleep(2)
+    seed = Path(source).absolute().parent / data['seed']
+    try:
+        git('-c', f'safe.directory={seed}', 'fetch', '--no-tags', '--no-recurse-submodules', '--update-shallow',
+            str(seed), 'refs/heads/bootstrap', timeout=300)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        raise ValueError('Could not import the local Git snapshot. Run workspace-source.py on the host, '
+                         'then run wait-ready.sh as node again.') from None
     if git('cat-file', '-e', data['commit'] + '^{commit}', check=False).returncode:
-        raise ValueError('Push the starting commit to a remote branch, then run wait-ready.sh again.')
+        raise ValueError('The local Git snapshot lacks the starting commit; inspect the host snapshot.')
     tracked = git('ls-tree', '-rz', '--name-only', data['commit']).stdout.split('\0')
     for name in filter(None, tracked):
         path = workspace / name

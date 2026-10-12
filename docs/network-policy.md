@@ -45,6 +45,8 @@ agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの
 
 agentは専用のDocker volumeにある独立cloneで作業します。ホストの作業ツリー、index、refs、Git設定、hooksをmountしません。agentが自分のindexに`assume-unchanged`を付けても、ホストのレビューには影響しません。
 
+初回起動用のGitコピーは、ホストのローカルHEADと到達可能な履歴だけを独立したbare repositoryへ取り出します。ホストのGit設定、hooks、index、未コミット・未追跡ファイル、共有ハードリンクやalternatesは渡しません。初回取得にpushやネットワーク接続は不要です。
+
 ホストの生成物は`/run/host/generated`、Nixの環境は`/run/host/nix-env`にread-onlyで渡します。コンテナの管理スクリプトはこれらを読み、clone内の`.devcontainer/`を管理用入力として使いません。Gitの初期化・取得は権限を落としたnodeで行います。ホストからGitを実行する場合も`docker exec --user node`を使ってください。
 
 Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはなく、agentの変更はupperへ残ります。Gradleの既存CoWも維持します。利用中にホストのlowerを変更しないでください。[依存の共有と更新](usage.md#依存の共有と更新)を参照してください。
@@ -53,7 +55,7 @@ Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはな�
 
 ### コミットをレビューして取り込む
 
-共通リモートのブランチはagentも更新できます。pushされたことを承認済みとは扱いません。ホストでfetch後、信頼するベースと候補のコミットIDを固定して比較し、レビューしたIDだけを`git merge --ff-only`で取り込みます。[具体的な手順](usage.md#ホストでレビューして取り込む)を参照してください。
+起動時に、ホストの`agent`リモートをコンテナ内リポジトリへ自動接続します。Gitの`ext`転送とDocker execを使い、Gitプロセスはコンテナ内のnodeで実行します。GitHub・proxy・SSHサーバーを経由しません。コンテナのブランチはagentが更新できますが、その内容を承認済みとは扱いません。ホストでfetch後、信頼するベースと候補のコミットIDを固定して比較し、レビューしたIDだけを`git merge --ff-only`で取り込みます。[具体的な手順](usage.md#ホストでレビューして取り込む)を参照してください。
 
 `.devcontainer/`、`package.json`、`.envrc`、ビルドスクリプトなど、ホストでコードが実行される変更を確認します。IDEで開く、別worktreeへcheckoutする、ホストでテストする場合も先にレビューします。リモートのrefが後から変わっても、レビュー対象のコミットIDは変えません。
 

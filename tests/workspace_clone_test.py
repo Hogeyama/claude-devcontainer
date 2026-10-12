@@ -29,11 +29,10 @@ class WorkspaceCloneTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.host, self.remote, self.agent = [self.root / n for n in ('host', 'remote.git', 'agent')]
+        self.host, self.agent = [self.root / n for n in ('host', 'agent')]
         config = self.root / 'gitconfig'
         config.write_text('[user]\n name = fixture\n email = fixture@example.com\n'
-                          '[maintenance]\n auto = false\n'
-                          f'[url "{self.remote}"]\n insteadOf = https://github.com/example/repo.git\n')
+                          '[maintenance]\n auto = false\n')
         environment = patch.dict(os.environ, {
             'GIT_CONFIG_GLOBAL': str(config), 'GIT_CONFIG_NOSYSTEM': '1',
             'GIT_TERMINAL_PROMPT': '0',
@@ -42,11 +41,8 @@ class WorkspaceCloneTest(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.host.mkdir()
         self.git(self.host, 'init', '-b', 'main')
-        self.git(self.host, 'init', '--bare', str(self.remote))
         (self.host / 'package.json').write_text('{"scripts":{"test":"echo safe"}}\n')
         self.commit('initial')
-        self.git(self.host, 'remote', 'add', 'origin', 'https://github.com/example/repo.git')
-        self.git(self.host, 'push', 'origin', 'main')
         self.start = self.git(self.host, 'rev-parse', 'HEAD')
         self.metadata = self.host / '.devcontainer/.generated/workspace.json'
         source.write(self.host)
@@ -59,46 +55,29 @@ class WorkspaceCloneTest(unittest.TestCase):
         self.git(self.host, 'add', 'package.json')
         self.git(self.host, 'commit', '-m', message)
 
-    def test_url_normalization(self):
-        for value in ('https://user:secret@github.com/example/repo.git',
-                      'git@github.com:example/repo.git',
-                      'ssh://git@github.com/example/repo.git'):
-            self.assertEqual(source.https_origin(value), 'https://github.com/example/repo.git')
-        for value in ('/tmp/repo', 'file:///tmp/repo', 'ssh://git@example.com/repo',
-                      'https://github.com/repo?token=secret', 'https://github.com/repo#secret'):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                source.https_origin(value)
-
     def test_first_start_uses_exact_host_commit(self):
         (self.host / 'package.json').write_text('later\n')
         self.commit('remote advances after metadata was written')
-        self.git(self.host, 'push', 'origin', 'main')
         clone.clone(self.metadata, self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), self.start)
-        self.assertEqual(self.git(self.agent, 'config', '--get', 'remote.origin.url'),
-                         'https://github.com/example/repo.git')
+        self.assertEqual(self.git(self.agent, 'remote'), '')
         self.assertFalse((self.agent / '.git/claude-bootstrap.json').exists())
 
-    def test_completed_clone_survives_new_metadata_and_unavailable_remote(self):
+    def test_completed_clone_survives_new_metadata(self):
         clone.clone(self.metadata, self.agent)
         self.git(self.agent, 'switch', '-c', 'agent/task')
         (self.agent / 'package.json').write_text('unfinished\n')
         (self.agent / 'untracked').write_text('keep\n')
         self.metadata.write_text('{}')  # Must not be read on an ordinary restart.
-        self.remote.rename(self.root / 'offline.git')
         clone.clone(self.metadata, self.agent)
         self.assertEqual(self.git(self.agent, 'branch', '--show-current'), 'agent/task')
         self.assertEqual((self.agent / 'package.json').read_text(), 'unfinished\n')
         self.assertEqual((self.agent / 'untracked').read_text(), 'keep\n')
 
-    def test_unpublished_commit_can_resume_after_push(self):
+    def test_unpublished_commit_clones_without_remote(self):
         (self.host / 'package.json').write_text('not yet pushed\n')
         self.commit('local only')
         source.write(self.host)
-        with self.assertRaisesRegex(ValueError, 'Push'):
-            clone.clone(self.metadata, self.agent)
-        self.assertTrue((self.agent / '.git/claude-bootstrap.json').exists())
-        self.git(self.host, 'push', 'origin', 'main')
         clone.clone(self.metadata, self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'),
                          self.git(self.host, 'rev-parse', 'HEAD'))
@@ -119,16 +98,14 @@ class WorkspaceCloneTest(unittest.TestCase):
         self.git(self.agent, 'update-index', '--assume-unchanged', 'package.json')
         (self.agent / 'package.json').write_text('concealed uncommitted change\n')
         self.assertEqual(self.git(self.agent, 'diff'), '')
-        self.git(self.agent, 'push', 'origin', 'HEAD:refs/heads/agent/task')
-        self.git(self.host, 'fetch', '--no-tags', 'origin', 'refs/heads/agent/task')
+        self.git(self.host, 'fetch', '--no-tags', str(self.agent), 'refs/heads/agent/task')
         candidate = self.git(self.host, 'rev-parse', 'FETCH_HEAD')
         self.assertIn('+changed', self.git(self.host, 'diff', self.start, candidate))
         self.assertTrue(self.git(self.host, 'ls-files', '-v', 'package.json').startswith('H '))
         self.git(self.agent, 'update-index', '--no-assume-unchanged', 'package.json')
         self.git(self.agent, 'add', 'package.json')
         self.git(self.agent, 'commit', '-m', 'later')
-        self.git(self.agent, 'push', 'origin', 'HEAD:refs/heads/agent/task')
-        self.git(self.host, 'fetch', 'origin')
+        self.git(self.host, 'fetch', str(self.agent), 'refs/heads/agent/task')
         self.git(self.host, 'merge', '--ff-only', candidate)
         self.assertEqual(self.git(self.host, 'rev-parse', 'HEAD'), candidate)
         self.assertEqual((self.host / 'package.json').read_text(), 'changed\n')
@@ -169,7 +146,6 @@ class WorkspaceCloneTest(unittest.TestCase):
                     path.write_text('tracked')
                 self.git(self.host, 'add', 'packages')
                 self.git(self.host, 'commit', '-m', 'conflict')
-                self.git(self.host, 'push', '--force', 'origin', 'main')
                 source.write(self.host)
                 agent = self.root / ('agent-' + str(len(tracked)))
                 mount = agent / 'packages/app/node_modules'
@@ -179,17 +155,61 @@ class WorkspaceCloneTest(unittest.TestCase):
                         clone.clone(self.metadata, agent)
                 self.assertTrue(mount.is_dir())
 
-    def test_fetch_failure_retries_and_retains_original_inputs(self):
-        remote = self.root / 'offline.git'
-        self.remote.rename(remote)
-        with patch.object(clone.time, 'sleep') as sleep:
-            with self.assertRaisesRegex(ValueError, 'fetch'):
-                clone.clone(self.metadata, self.agent)
-        self.assertEqual(sleep.call_count, 2)
+    def test_missing_seed_can_resume_with_original_inputs(self):
+        data = json.loads(self.metadata.read_text())
+        seed = self.metadata.parent / data['seed']
+        saved = seed.with_suffix('.saved')
+        seed.rename(saved)
+        with self.assertRaisesRegex(ValueError, 'local Git snapshot'):
+            clone.clone(self.metadata, self.agent)
         self.metadata.write_text('{}')
-        remote.rename(self.remote)
+        saved.rename(seed)
         clone.clone(self.metadata, self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), self.start)
+
+    def test_local_snapshot_is_independent_and_excludes_host_git_settings(self):
+        self.git(self.host, 'config', 'credential.helper', 'secret-helper')
+        self.git(self.host, 'config', 'core.hooksPath', '/host/private-hooks')
+        self.git(self.host, 'update-index', '--assume-unchanged', 'package.json')
+        (self.host / '.git/hooks/post-checkout').write_text('private-hook')
+        # Regenerate at a different committed HEAD, with dirty files kept local.
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'not pushed')
+        (self.host / 'package.json').write_text('dirty host work')
+        (self.host / 'untracked').write_text('private host file')
+        data = source.write(self.host)
+        seed = self.metadata.parent / data['seed']
+        self.assertFalse((seed / 'objects/info/alternates').exists())
+        self.assertNotIn('secret-helper', (seed / 'config').read_text())
+        self.assertNotIn('/host/', (seed / 'config').read_text())
+        self.assertFalse((seed / 'hooks/post-checkout').exists())
+        seed_inodes = {(p.stat().st_dev, p.stat().st_ino) for p in (seed / 'objects').rglob('*') if p.is_file()}
+        host_inodes = {(p.stat().st_dev, p.stat().st_ino) for p in (self.host / '.git/objects').rglob('*') if p.is_file()}
+        self.assertFalse(seed_inodes & host_inodes)
+        (self.host / '.git').rename(self.host / 'git-unavailable')
+        clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), data['commit'])
+        self.assertEqual((self.agent / 'package.json').read_text(), '{"scripts":{"test":"echo safe"}}\n')
+        self.assertFalse((self.agent / 'untracked').exists())
+        self.assertTrue(self.git(self.agent, 'ls-files', '-v', 'package.json').startswith('H '))
+        self.assertFalse((self.agent / '.git/objects/info/alternates').exists())
+
+    def test_linked_worktree_with_unpublished_detached_head(self):
+        worktree = self.root / 'worktree'
+        self.git(self.host, 'worktree', 'add', '--detach', str(worktree), 'HEAD')
+        self.git(worktree, 'commit', '--allow-empty', '-m', 'worktree only')
+        data = source.write(worktree)
+        clone.clone(worktree / '.devcontainer/.generated/workspace.json', self.agent)
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), data['commit'])
+
+    def test_shallow_host_clone_can_initialize_without_remote(self):
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'second commit')
+        shallow = self.root / 'shallow'
+        self.git(self.host, 'clone', '--depth=1', self.host.as_uri(), str(shallow))
+        self.assertEqual(self.git(shallow, 'rev-parse', '--is-shallow-repository'), 'true')
+        data = source.write(shallow)
+        clone.clone(shallow / '.devcontainer/.generated/workspace.json', self.agent)
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), data['commit'])
+        self.git(self.agent, 'fsck', '--no-dangling')
 
     def test_interrupted_init_and_checkout_conflict_preserve_files(self):
         marker = self.agent / '.git/claude-bootstrap.json'
@@ -210,30 +230,42 @@ class WorkspaceCloneTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Incomplete'):
             clone.clone(self.metadata, self.agent)
 
-    def test_metadata_removes_credentials_and_rejects_invalid_values(self):
-        self.git(self.host, 'remote', 'set-url', 'origin', 'https://user:secret@github.com/example/repo.git')
+    def test_metadata_excludes_remotes_and_rejects_invalid_values(self):
+        self.git(self.host, 'remote', 'add', 'origin', 'https://user:secret@github.com/example/repo.git')
         source.write(self.host)
         self.assertNotIn('secret', self.metadata.read_text())
-        for data in ({}, {'url': 'file:///tmp/repo', 'commit': self.start},
-                     {'url': 'https://u:p@github.com/o/r', 'commit': self.start},
-                     {'url': 'https://github.com/o/r', 'commit': 'HEAD'}):
+        for data in ({}, {'commit': 'HEAD', 'seed': 'bad'},
+                     {'commit': self.start, 'seed': 'workspace-' + self.start + '.git', 'url': 'https://github.com/o/r'}):
             self.metadata.write_text(json.dumps(data))
             with self.subTest(data=data), self.assertRaises((ValueError, KeyError)):
                 clone.clone(self.metadata, self.agent)
         self.assertFalse((self.agent / '.git').exists())
 
-    def test_missing_origin_and_unborn_head_do_not_publish_metadata(self):
-        self.metadata.unlink()
-        self.git(self.host, 'remote', 'remove', 'origin')
-        with self.assertRaises(ValueError):
-            source.write(self.host)
-        self.assertFalse(self.metadata.exists())
+    def test_seed_path_cannot_escape_generated_directory(self):
+        data = json.loads(self.metadata.read_text())
+        for seed in ('../host/.git', '/tmp/repo.git', 'workspace-wrong.git'):
+            data['seed'] = seed
+            self.metadata.write_text(json.dumps(data))
+            with self.subTest(seed=seed), self.assertRaises(ValueError):
+                clone.clone(self.metadata, self.agent)
+        self.assertFalse((self.agent / '.git').exists())
+
+    def test_host_remotes_do_not_cross_into_container(self):
+        self.git(self.host, 'remote', 'add', 'origin', 'https://github.com/upstream/project.git')
+        self.git(self.host, 'remote', 'add', 'agent', 'ext::host-only-transport')
+        source.write(self.host)
+        clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'remote'), '')
+        self.assertEqual(self.git(self.host, 'config', '--get', 'remote.origin.url'),
+                         'https://github.com/upstream/project.git')
+
+    def test_unborn_head_does_not_publish_metadata(self):
         empty = self.root / 'empty'
         empty.mkdir()
         self.git(empty, 'init')
-        self.git(empty, 'remote', 'add', 'origin', 'https://github.com/o/r')
         with self.assertRaises(ValueError):
             source.write(empty)
+        self.assertFalse((empty / '.devcontainer/.generated/workspace.json').exists())
 
     def test_mountinfo_decoding(self):
         info = self.root / 'mountinfo'
@@ -246,22 +278,12 @@ class WorkspaceCloneTest(unittest.TestCase):
     def test_sha256_repository_uses_matching_object_format(self):
         host = self.root / 'sha256-host'
         host.mkdir()
-        remote = self.root / 'sha256-remote.git'
         self.git(host, 'init', '--object-format=sha256')
-        self.git(host, 'init', '--bare', '--object-format=sha256', str(remote))
         self.git(host, 'commit', '--allow-empty', '-m', 'sha256')
-        self.git(host, 'remote', 'add', 'origin', 'https://github.com/example/sha256.git')
-        self.git(host, 'config', '--global', f'url.{remote}.insteadOf', 'https://github.com/example/sha256.git')
-        self.git(host, 'push', 'origin', 'HEAD:refs/heads/main')
         data = source.write(host)
         self.assertEqual(len(data['commit']), 64)
         clone.clone(host / '.devcontainer/.generated/workspace.json', self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), data['commit'])
-
-    def test_empty_query_fragment_and_controls_are_rejected(self):
-        for value in ('https://github.com/o/r?', 'https://github.com/o/r#', 'https://github.com/o/\x00r'):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                source.https_origin(value)
 
     def test_prepare_refuses_symlink_ancestors(self):
         self.agent.mkdir()

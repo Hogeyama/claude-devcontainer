@@ -4,22 +4,27 @@
 
 ## 初回起動
 
-ホストで開始コミットを push し、VS Code の「Reopen in Container」か `devcontainer up` で起動する。空の workspace volume は起動処理が自動で初期化し、ホストが指定したコミットを detached HEAD で checkout する。人間がコンテナ内で clone する操作は不要である。
+VS Code の「Reopen in Container」か `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空の workspace volume に detached HEAD で checkout する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
-エージェントは作業を始めるときにブランチを作る。
+## 受け渡し用リモート
+
+起動処理がホストに`agent`リモートを自動登録する。接続先は起動中のコンテナ内の`/workspace`であり、GitHubなどの外部リポジトリは介在しない。既存の`origin`は変更しない。同名の`agent`が別用途で存在する場合は上書きせず停止するので、既存のリモートを別名にしてから起動する。
+
+Git標準の`ext`転送とホスト側の`git-agent.py`を使い、Dockerの標準入出力をコンテナ内の`git-upload-pack` / `git-receive-pack`につなぐ。どちらも`node`で実行する。SSHサーバーや公開ポートは不要で、接続時にGitを実行したworktreeとそのコンテナを見つけ直すため、複数worktreeや再作成にも追従する。このホストリポジトリだけに`protocol.ext.allow=always`を設定する。接続にはコンテナが起動している必要がある。
+
+エージェントはコンテナ内で作業ブランチにコミットし、ブランチ名とコミットIDを人間に伝える。pushは不要。
 
 ```sh
 git switch -c agent/task-name
 # 編集、テスト、commit
-git push -u origin agent/task-name
 ```
 
-作業ブランチ名はタスクごとに選ぶ。複数の作業で同じブランチを使い回さない。
+コンテナにはホストへ書き戻すためのリモートやホストのDocker socketを渡さない。受け渡しの操作はホストから行う。
 
 ## ホストでレビューして取り込む
 
 ```sh
-git fetch --no-tags origin refs/heads/agent/task-name
+git fetch --no-tags agent refs/heads/agent/task-name
 agent_commit=$(git rev-parse --verify 'FETCH_HEAD^{commit}')
 base_commit=$(git rev-parse --verify 'HEAD^{commit}')
 git log --oneline "$base_commit..$agent_commit"
@@ -34,7 +39,7 @@ git diff "$base_commit" "$agent_commit"
 test "$(git rev-parse HEAD)" = "$base_commit" && git merge --ff-only "$agent_commit"
 ```
 
-レビュー中にエージェントが追加で push したり、IDE が background fetch したりしても、変数に保存したIDは変わらない。ホストの HEAD が変わった場合は差分を確認し直す。ff できなければホストの変更を push し、エージェントに rebase を依頼して、更新後のコミットを再びレビューする。
+レビュー中にエージェントが追加でcommitしたり、IDE が background fetch したりしても、変数に保存したIDは変わらない。ホストの HEAD が変わった場合は差分を確認し直す。ff できなければホストの変更を push し、エージェントに rebase を依頼して、更新後のコミットを再びレビューする。
 
 ホストでテストするために別 worktree へ取り出す場合も、レビュー済みのIDを指定する。
 
@@ -46,7 +51,13 @@ git worktree add --detach ../repo.agent "$agent_commit"
 
 ## ホストの変更を渡す
 
-ホストでコミットして `git push origin main` する。エージェントは `git fetch origin` のあと、必要に応じて `origin/main` に rebase / merge する。通常の Git 操作なので、ホスト側の専用コマンドは要らない。
+ホストから、コンテナの受け取り用ブランチへpushする。
+
+```sh
+git push agent HEAD:refs/heads/host/main
+```
+
+エージェントはコンテナ内で`git merge host/main`または`git rebase host/main`を実行する。コンテナでcheckout中のブランチへのpushはGitが拒否するので、`host/main`など別のブランチへ送る。コンテナの未コミットの作業を自動で上書きしない。
 
 ## 依存の共有と更新
 

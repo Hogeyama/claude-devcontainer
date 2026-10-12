@@ -6,6 +6,7 @@ set -eu
 # the proxy build and the scripts below read to .devcontainer/.generated/.
 python3 "$(dirname "$0")/settings.py" generate
 python3 "$(dirname "$0")/workspace-source.py"
+python3 "$(dirname "$0")/git-agent.py" register
 python3 "$(dirname "$0")/settings.py" prepare-dependencies
 mkdir -p .devcontainer/.nix-env
 

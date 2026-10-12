@@ -2,13 +2,20 @@
 
 ## 初回cloneが失敗する
 
-`Could not fetch origin`ならproxyの通信ルールと認証を確認してください。fetchは30秒で打ち切り、2秒間隔で最大3回試します。`Push the starting commit`ならホストの開始コミットをリモートのブランチへpushしてください。解消後、次のコマンドで再試行できます。
+`Could not import the local Git snapshot`なら、ホストの`.devcontainer/.generated/`に初期化用Gitコピーが存在し、コンテナのnodeユーザーから読めるか確認してください。初回cloneにネットワーク接続やpushは不要です。コピーを再生成して再試行できます。
 
 ```sh
+python3 .devcontainer/claude/scripts/workspace-source.py
 .devcontainer/claude/scripts/compose.sh exec --user node agent wait-ready.sh
 ```
 
-初期化途中は`.git/claude-bootstrap.json`に記録したURLとコミットを使い続けます。勝手に最新HEADへ切り替えたり、既存ファイルを消したりしません。既存ファイルや依存マウントとの衝突が報告されたら、volumeの内容を確認してください。未完了のリポジトリを自動削除する処理はありません。
+初期化途中は`.git/claude-bootstrap.json`に記録したコミット・コピー名を使い続けます。開始時のコピーは再試行のため保持するので、完了するまでは`.generated/workspace-*.git`を削除しないでください。ホストのHEADが進んでも、再試行は元のコミットを使います。既存ファイルや依存マウントとの衝突が報告されたら、volumeの内容を確認してください。未完了のリポジトリを自動削除する処理はありません。
+
+## git fetch agentが失敗する
+
+コンテナが起動していることを確認してください。`Expected exactly one running agent container`なら、このホスト作業ディレクトリに対応するagentが起動していないか、複数存在します。再作成後は自動で新しいコンテナへ接続するので、IPやURLの設定変更は不要です。
+
+`Remote agent already points elsewhere`なら、既存の`agent`を別名にしてから起動してください。起動処理は別用途のリモートを上書きしません。`origin`の変更は不要です。
 
 ## HTTP 403が返る
 

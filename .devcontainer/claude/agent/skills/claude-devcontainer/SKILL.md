@@ -24,10 +24,11 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
-- `/workspace` is your own persistent clone, initialized automatically at the host's published commit in detached HEAD. Start a task with `git switch -c agent/task-name`.
+- `/workspace` is your own persistent clone, initialized automatically from a local copy of the host's committed HEAD (including unpublished commits) in detached HEAD. Start a task with `git switch -c agent/task-name`.
 - The host's worktree and `.git` are not mounted. Your `.devcontainer/`, Git configuration and hooks are writable; host startup uses the host's copies until the human reviews and integrates your commit.
-- Commit and `git push -u origin agent/task-name` to hand work to the human. Give the exact commit ID and explain the changes. Push does not imply approval to execute on the host. The human fetches, reviews fixed commit IDs, then integrates that ID.
-- To receive host changes, ask the human to push, then fetch and merge/rebase. Uncommitted host files are not copied. For host-only tests or scripts, push the code and ask for review before execution; receive results in chat.
+- Commit work on a task branch and tell the human its name and exact commit ID. No push is required: the host automatically has an `agent` remote pointing directly to this container and fetches your commits with ordinary Git. GitHub is not involved in this exchange.
+- You have no automatic remote that can write back to the host. The human fetches, reviews fixed commit IDs, then integrates that ID.
+- To receive host changes, ask the human to run `git push agent HEAD:refs/heads/host/main` on the host, then merge/rebase the local `host/main` branch here. For host-only tests, commit the code and ask for review before execution; receive results in chat.
 - Restarts and container recreation preserve your clone, dirty files and dependency changes. They do not automatically fetch/reset. Never recommend deleting workspace volumes as routine recovery.
 - `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Run Git as node, never root.
 - If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte. This is deliberate. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.

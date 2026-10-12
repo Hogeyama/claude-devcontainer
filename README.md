@@ -20,8 +20,8 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 * agentが接続できるのは、Anthropicと、`.devcontainer/claude.toml`の`proxy.hosts`に書いた接続先だけです。package registryなども、`proxy.hosts`に書かなければ使えません。
 * Anthropicのweb searchなど、Anthropicのサーバーから外部へ接続する機能は使えません。claude.aiのコネクタは、指定したものだけ使えます。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
-* ホストとagentが読み書きできる共通のGitリモートが必要です。初回起動前にホストのHEADをリモートのブランチへpushしてください。未コミット・未追跡ファイルはagentへ渡りません。
-* agentは専用volumeのcloneで作業します。ホストの作業ツリーと`.git`は共有しません。成果はpush/fetchで受け渡し、[コミットIDを固定してレビュー・取り込み](docs/usage.md#ホストでレビューして取り込む)ます。
+* 起動時に、コンテナ内リポジトリを指す`agent`リモートをホストへ自動登録します。受け渡しはホストから直接fetch/pushし、GitHubなどの外部リポジトリは介在しません。初回起動はホストのローカルHEADからコピーするため、未pushでも起動できます。未コミット・未追跡ファイルはagentへ渡りません。
+* agentは専用volumeのcloneで作業します。ホストの作業ツリーと`.git`は共有しません。成果はホストの`git fetch agent`で受け取り、[コミットIDを固定してレビュー・取り込み](docs/usage.md#ホストでレビューして取り込む)ます。
 
 ## クイックスタート
 
@@ -60,9 +60,9 @@ claude /login
 
 API keyを使う場合は、[Claude ConsoleのAPI keys](https://platform.claude.com/settings/keys)で発行したkeyを、3.で`ANTHROPIC_API_KEY`に設定してください。ただし、API keyではArtifactsやclaude.aiのコネクタなどは使えません。
 
-#### Gitリモートの認証（GitHubの場合）
+#### GitHub機能の認証（利用する場合）
 
-GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
+ホストとコンテナ間の受け渡しには認証設定は不要です。GitHubのリポジトリやAPIへアクセスする場合は、GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
 
 ### 3. 認証情報の取り出し方を設定する
 
@@ -84,12 +84,11 @@ GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使�
 
 ### 4. 起動する
 
-初回は、開始点となるコミットを共通リモートへpushしてから起動してください。`origin`はHTTPS、またはGitHubのSSH形式に対応します。GitHub以外では、そのホストの通信ルールと認証を`proxy.hosts`に設定します。
+初回は、ホストのローカルHEADを専用volumeへ自動でコピーします。事前のpushは不要です。受け渡し用リモート`agent`の手動設定も不要です。[利用手順](docs/usage.md#受け渡し用リモート)を参照してください。既存の`origin`は変更しません。
 
 #### CLIとして実行する場合
 
 ```sh
-git push origin HEAD
 devcontainer up
 devcontainer exec claude
 ```
@@ -123,7 +122,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 
 `compose.sh`は、このリポジトリのDev Containerを見つけて`docker compose`に引数を渡します。`logs proxy`のように`down`以外のサブコマンドも使えます。
 
-作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。`down --volumes`は未pushのコミット・未コミットの作業も消します。通常の停止や依存更新には使わないでください。Node・GradleのCoWのupperはホストの状態ディレクトリに残ります。依存の更新方法は[依存の共有と更新](docs/usage.md#依存の共有と更新)を参照してください。
+作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。`down --volumes`はホストへ未取得のコミット・未コミットの作業も消します。通常の停止や依存更新には使わないでください。Node・GradleのCoWのupperはホストの状態ディレクトリに残ります。依存の更新方法は[依存の共有と更新](docs/usage.md#依存の共有と更新)を参照してください。
 
 ## カスタマイズする
 
@@ -322,7 +321,7 @@ dind = "10.99.1"       # agentとDinDの間のネットワーク。既定は自�
 - UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせてください。DinDのdockerdも同じUIDで動きます。0と、DinDが内部で使う100000〜165535は指定できません。
 - ネットワークは`/24`の先頭3オクテットで書きます。proxyとDinDは`.10`、agentは`.20`を使います。書かなければ、既存のDockerネットワークと重ならない`10.231.x.0/24`を2つ選び、空いている限り次の起動でも同じ値を使います。同じホストで複数のリポジトリを同時に起動すると、同じ値を選ぶことがあります。その場合は、片方を起動し直すか、ここで値を指定してください。
 
-UIDを変えると、workspace、DinD、Claudeの履歴、依存のupperに古い所有者が残ります。先に未pushのコミットと未コミットの作業を退避し、停止後に対象データの所有者を移行してください。`down --volumes`で消す場合は、workspaceの作業も失われます。
+UIDを変えると、workspace、DinD、Claudeの履歴、依存のupperに古い所有者が残ります。先にホストへ未取得のコミットと未コミットの作業を退避し、停止後に対象データの所有者を移行してください。`down --volumes`で消す場合は、workspaceの作業も失われます。
 
 ## 更新する
 

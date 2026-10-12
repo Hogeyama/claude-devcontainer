@@ -14,18 +14,18 @@ Git の状態を書き換えられると、read-only にしたファイルにも
 人間が変更を確認してから実行するという方針を成立させるため、エージェントがホストの作業ツリーやレビューに使う Git の状態を直接書き換えられない構成にする。
 
 - エージェントは専用の clone（Docker volume）で作業する。ホストの作業ツリーも `.git` もマウントしない。
-- ホストとエージェントは共通の Git リモートを使い、通常の `git push` / `git fetch` でコミットを受け渡す。専用の転送コマンドや bundle は作らない。
+- ホストの`agent`リモートをコンテナ内リポジトリへ直接接続し、通常の`git fetch agent` / `git push agent`で受け渡す。GitHubなどの外部リポジトリや専用の利用者向け転送コマンドは使わない。
 - 人間はホストでコミット間の差分をレビューし、承認したコミットIDを指定して取り込む。承認した変更は信頼済みとして扱い、ホストでテストしたり、IntelliJ や Eclipse で開いたりできる。
 
 Git の push / fetch では、エージェント側の index や `assume-unchanged` の状態は転送されない。ホスト側で信頼済みのコミットと受け取ったコミットを比較するので、エージェントが自分の index を操作しても、レビューする差分を隠せない。
 
 ## 前提
 
-共通リモートへの読み書きができることを利用条件にする。初回起動前に、エージェントの作業開始点となるホストの HEAD を、リモートのブランチへ push しておく。未コミットの変更、未追跡ファイル、ホストにしかないコミットは clone に入らない。
+初回起動はホストのローカルHEADとその履歴をコピーする。外部リモートや事前のpushは不要で、未pushのコミットも使える。未コミットの変更と未追跡ファイルはcloneに入らない。
 
-コンテナからは Git over HTTPS を使う。既存の proxy が Git smart HTTP の clone / fetch / push を許可し、認証情報をリクエストに注入する。認証情報を clone URL やコンテナのファイルに保存しない。GitHub 以外のホストでは、そのリモートの通信ルールと認証設定を `proxy.hosts` に用意する。
+起動時にホストの`agent`リモートを自動登録する。Git標準の`ext`転送を使い、Docker execの標準入出力をコンテナ内の`git-upload-pack` / `git-receive-pack`につなぐ。コンテナは接続ごとにworkspaceとserviceのlabelで特定し、必ずnodeでGitを実行する。SSHサーバーや公開ポートは作らない。既存の`origin`は保持し、別用途の`agent`リモートが存在すれば上書きせず停止する。`protocol.ext.allow=always`はホストの当該リポジトリにのみ設定する。
 
-リモートのブランチはエージェントが更新できるため、ホストで信頼する状態とは区別する。エージェントは作業用ブランチ（例：`agent/task-name`）へ push し、人間は取得したコミットをレビューする。リモートへの push を承認済みという意味にはしない。
+エージェントは作業用ブランチ（例：`agent/task-name`）にコミットし、人間がホストで取得・レビューする。コンテナからホストへ接続するリモートやホストDocker socketは渡さない。
 
 ## シナリオ
 
@@ -33,35 +33,40 @@ Git の push / fetch では、エージェント側の index や `assume-unchang
 | --- | --- | --- |
 | 1 | Java の `./gradlew --offline jar test` | 既存の `~/.gradle` の CoW マウントを維持し、ホストで取得済みの配布物と依存を使う。Testcontainers は DinD で動かす |
 | 2 | Node のビルド・テスト | ホストで用意した依存を利用する。`./node_modules` の CoW マウントを使う |
-| 3 | コンテナでは動かないテストをホストで流す | エージェントがコミットを push し、チャットで依頼する。人間がレビュー後、そのコミットを別 worktree に取り出してテストし、結果をチャットで返す |
-| 4 | コンテナではできない作業をホストに頼む | エージェントがスクリプトをコミットに含めて push する。人間がレビュー後に実行し、結果をチャットで返す |
+| 3 | コンテナでは動かないテストをホストで流す | エージェントがコミットし、チャットで依頼する。人間がレビュー後、そのコミットを別 worktree に取り出してテストし、結果をチャットで返す |
+| 4 | コンテナではできない作業をホストに頼む | エージェントがスクリプトをコミットに含める。人間がレビュー後に実行し、結果をチャットで返す |
 | 5 | エージェントの成果を取り込む | ホストで `git fetch` → コミットIDを固定 → レビュー → そのIDを merge |
-| 6 | ホストの変更をエージェントに渡す | ホストで `git push`、エージェントで `git fetch` して merge / rebase |
+| 6 | ホストの変更をエージェントに渡す | ホストで`git push agent HEAD:refs/heads/host/main`、エージェントがローカルの`host/main`をmerge / rebase |
 | 7 | 作業中の様子を見る | VS Code でコンテナの clone を見る |
 | 8 | コンテナを作り直しても作業が残る | clone と依存のキャッシュは volume に残す。`claude --resume` も今のまま使える |
 
 ## 使い方
 
-以下の `origin` は共通リモート、`main` はホストの作業ブランチの例である。
+`agent`はホストからコンテナへ直接接続するリモート名である。
 
 ### 初回起動
 
-ホストで開始コミットを push し、VS Code の「Reopen in Container」か `devcontainer up` で起動する。空の workspace volume は起動処理が自動で初期化し、ホストが指定したコミットを detached HEAD で checkout する。人間がコンテナ内で clone する操作は不要である。
+VS Code の「Reopen in Container」か `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空の workspace volume に detached HEAD で checkout する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
-エージェントは作業を始めるときにブランチを作る。
+### 受け渡し用リモート
+
+起動処理がホストに`agent`リモートを自動登録する。接続先は起動中のコンテナ内の`/workspace`であり、GitHubなどの外部リポジトリは介在しない。既存の`origin`は変更しない。同名の`agent`が別用途で存在する場合は上書きせず停止するので、既存のリモートを別名にしてから起動する。
+
+Git標準の`ext`転送とホスト側の`git-agent.py`を使い、Dockerの標準入出力をコンテナ内の`git-upload-pack` / `git-receive-pack`につなぐ。どちらも`node`で実行する。SSHサーバーや公開ポートは不要で、接続時にコンテナを見つけ直すため再作成にも追従する。このホストリポジトリだけに`protocol.ext.allow=always`を設定する。接続にはコンテナが起動している必要がある。
+
+エージェントはコンテナ内で作業ブランチにコミットし、ブランチ名とコミットIDを人間に伝える。pushは不要。
 
 ```sh
 git switch -c agent/task-name
 # 編集、テスト、commit
-git push -u origin agent/task-name
 ```
 
-作業ブランチ名はタスクごとに選ぶ。複数の作業で同じブランチを使い回さない。
+コンテナにはホストへ書き戻すためのリモートやホストのDocker socketを渡さない。受け渡しの操作はホストから行う。
 
 ### ホストでレビューして取り込む
 
 ```sh
-git fetch --no-tags origin refs/heads/agent/task-name
+git fetch --no-tags agent refs/heads/agent/task-name
 agent_commit=$(git rev-parse --verify 'FETCH_HEAD^{commit}')
 base_commit=$(git rev-parse --verify 'HEAD^{commit}')
 git log --oneline "$base_commit..$agent_commit"
@@ -76,7 +81,7 @@ git diff "$base_commit" "$agent_commit"
 test "$(git rev-parse HEAD)" = "$base_commit" && git merge --ff-only "$agent_commit"
 ```
 
-レビュー中にエージェントが追加で push したり、IDE が background fetch したりしても、変数に保存したIDは変わらない。ホストの HEAD が変わった場合は差分を確認し直す。ff できなければホストの変更を push し、エージェントに rebase を依頼して、更新後のコミットを再びレビューする。
+レビュー中にエージェントが追加でcommitしたり、IDE が background fetch したりしても、変数に保存したIDは変わらない。ホストの HEAD が変わった場合は差分を確認し直す。ff できなければホストの変更を push し、エージェントに rebase を依頼して、更新後のコミットを再びレビューする。
 
 ホストでテストするために別 worktree へ取り出す場合も、レビュー済みのIDを指定する。
 
@@ -88,15 +93,22 @@ git worktree add --detach ../repo.agent "$agent_commit"
 
 ### ホストの変更を渡す
 
-ホストでコミットして `git push origin main` する。エージェントは `git fetch origin` のあと、必要に応じて `origin/main` に rebase / merge する。通常の Git 操作なので、ホスト側の専用コマンドは要らない。
+ホストから、コンテナの受け取り用ブランチへpushする。
+
+```sh
+git push agent HEAD:refs/heads/host/main
+```
+
+エージェントはコンテナ内で`git merge host/main`または`git rebase host/main`を実行する。コンテナでcheckout中のブランチへのpushはGitが拒否するので、`host/main`など別のブランチへ送る。コンテナの未コミットの作業を自動で上書きしない。
+
 
 ## 構成
 
 ```text
 ホストのリポジトリ                        agent コンテナ
   作業ツリーと .git                         /workspace  専用 volume の clone
-       │ push / fetch                           │ push / fetch（proxy経由）
-       └──────── 共通 Git リモート ─────────────┘
+       └──── Git ext + Docker exec（node）──────▶ │
+       （ホストから fetch / push、外部Gitサーバー不要）
 
   .devcontainer/.generated/ ── ro ──▶ /run/host/generated
   .devcontainer/.nix-env/   ── ro ──▶ /run/host/nix-env
@@ -110,9 +122,9 @@ Compose の `workspace` volume はプロジェクトごとに作る。依存の�
 
 ### ホストの生成物
 
-`initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、認証情報を除いたリモートURL（`url`）と、ホストの HEAD の完全なコミットID（`commit`）だけである。ホストの `.git/config` や hook はコピーしない。
+`initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、ホストのHEADの完全なコミットID（`commit`）と、初期化用bare repositoryの名前（`seed`）である。ホスト側でローカルGit転送を使い、指定コミットと履歴を`.generated/workspace-<commit>.git`へ独立してコピーする。ホストの`.git/config`、hooks、index、alternatesやハードリンクは引き継がない。linked worktreeとdetached HEADにも対応する。コピーの完了後にmetadataをatomicに公開する。同一コミットのコピーは再利用し、過去のコピーは中断した初期化の再試行のため保持する。
 
-URL はホストの `origin` から得る。HTTPS URL は userinfo を除き、query / fragment 付きのURLは拒否する。GitHub の `git@github.com:owner/repo.git` と `ssh://git@github.com/owner/repo.git` は HTTPS に変換する。それ以外の SSH URL やローカルパスは、HTTPS の `origin` を設定するよう案内して停止する。origin 未設定やコミットのないリポジトリでも、初期化に必要な条件を示して停止する。
+metadataにはリモートURLを含めない。コミットのないリポジトリは停止する。
 
 `.generated/` と `.nix-env/` はホストで作成し、専用のパスに read-only でマウントする。`wait-ready.sh` は `/run/host/generated/images.txt` を、`bash-env.sh` は `/run/host/nix-env/env.rc` を読む。コンテナ内の管理スクリプトは、エージェントが編集できる clone 内の `.devcontainer/` から設定を読まない。
 
@@ -121,11 +133,11 @@ URL はホストの `origin` から得る。HTTPS URL は userinfo を除き、q
 Git を実行する初期化処理は `postStartCommand` の `wait-ready.sh` から node ユーザーで呼ぶ。entrypoint は従来どおり CA と firewall を設定して権限を落とす。`waitFor: postStartCommand` により、自動 clone が完了するまで起動完了として扱わない。
 
 1. 正常な clone が既にあれば、そのまま使う。自動 fetch、checkout、reset はしない。ホストの HEAD が進んでも、未コミットの変更やエージェントのブランチを維持する。
-2. Git リポジトリがなく、依存のマウントポイント以外にファイルがない workspace では Git リポジトリを初期化し、`workspace.json` の URL を `origin` に設定する。初期化途中であることと、開始時の URL / コミットIDを `.git/claude-bootstrap.json` に記録する。
-3. proxy 経由で `git fetch --no-tags origin` を実行する。起動時の認証注入との競合に備えて、各試行は30秒で打ち切り、2秒間隔で最大3回試す。取得できなければ起動を失敗させ、proxy の通信ルール・認証を確認して再試行する手順を示す。
-4. 指定コミットが取得できたことを確認し、detached HEAD で checkout する。未 push のコミットなら、ホストでそのコミットをリモートのブランチへ push してから再試行するよう案内する。成功後に初期化途中の印を消す。
+2. Git リポジトリがなく、依存のマウントポイント以外にファイルがない workspace では Git リポジトリを初期化し、コンテナ側のリモートは登録しない。初期化途中であることと、開始時のコミットID / コピー名を `.git/claude-bootstrap.json` に記録する。
+3. `/run/host/generated/`内の指定bare repositoryからGitのローカル転送でオブジェクトを取り込む。共有ハードリンクやalternatesは作らない。リモートへの接続や認証は不要である。コピーが読めない場合は停止し、ホストでコピーを確認してから再試行する。
+4. 指定コミットが取得できたことを確認し、detached HEADでcheckoutする。成功後に初期化途中の印を消す。
 
-途中で失敗した場合は、記録した URL / コミットIDで初期化を再試行できる。既存のファイルを削除したり、強制 checkout したりはしない。初期化途中の印がない不完全なリポジトリや、Git リポジトリでないファイルが既にある場合は停止し、人間に確認を求める。通常の起動に、既存 volume を消す処理は含めない。
+途中で失敗した場合は、記録したコミットID / コピー名で初期化を再試行できる。既存のファイルを削除したり、強制 checkout したりはしない。初期化途中の印がない不完全なリポジトリや、Git リポジトリでないファイルが既にある場合は停止し、人間に確認を求める。通常の起動に、既存 volume を消す処理は含めない。
 
 ホストからコンテナ内の Git を操作する場合も、`docker exec --user node` を使う。エージェントが設定できる hook や `core.fsmonitor` を、コンテナの root 権限で実行させないためである。
 
@@ -145,18 +157,19 @@ sumi の一覧は引き続きホストから sumi サービスにだけ共有す
 
 ## 検証すること
 
-- 初回起動が proxy 経由で指定コミットを自動取得し、完了後に `/workspace` を使える。
-- 認証注入の遅延、リモートにないコミット、取得失敗、初期化の中断を処理できる。
-- 再起動・再作成しても、clone のブランチ、未コミットの変更、依存のキャッシュが残る。
+- 初回起動がローカルコピーから未pushの指定コミットを自動取得し、完了後に`/workspace`を使える。
+- リモートが利用不能でも初期化でき、ローカルコピーの読み込み失敗・初期化の中断から再試行できる。
+- 自動登録した`agent`で、proxy停止中でもホストからfetch/pushできる。
+- 再起動・再作成しても、cloneのブランチ、未コミットの変更、依存のキャッシュが残り、リモート接続が新しいコンテナへ追従する。
 - エージェントが `.devcontainer/`、Git の設定、index、refs を変更しても、ホスト側は変わらない。
-- エージェントの `assume-unchanged` がホストへ渡らず、push / fetch したコミットの差分をホストで確認できる。
+- エージェントの`assume-unchanged`がホストへ渡らず、直接fetchしたコミットの差分をホストで確認できる。
 - レビュー後にリモートが進んでも、指定したコミットIDだけを取り込める。
 - nix の環境と DinD の image 一覧を、ホストの生成物から引き続き読める。
 - Gradle、npm、Testcontainers のシナリオを新しい volume 構成で実行できる。
 
 ## 対象外
 
-- 共通リモートを使えない環境向けの独自転送、bundle、`cdc` コマンド
+- 外部Gitリポジトリを経由する受け渡し、bundle、`cdc`コマンド
 - 未コミット・未追跡ファイル（`.env` など）の自動転送
 - ホストへの作業依頼と結果返却の自動化
 - 複数エージェント間での依存キャッシュの共有
