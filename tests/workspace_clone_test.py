@@ -57,11 +57,31 @@ class WorkspaceCloneTest(unittest.TestCase):
 
     def test_first_start_uses_exact_host_commit(self):
         (self.host / 'package.json').write_text('later\n')
-        self.commit('remote advances after metadata was written')
+        self.commit('host advances after metadata was written')
+        self.git(self.host, 'switch', '-c', 'later-host-branch')
         clone.clone(self.metadata, self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), self.start)
+        self.assertEqual(self.git(self.agent, 'branch', '--show-current'), 'main')
         self.assertEqual(self.git(self.agent, 'remote'), '')
         self.assertFalse((self.agent / '.git/claude-bootstrap.json').exists())
+
+    def test_first_start_copies_host_branch_name(self):
+        self.git(self.host, 'switch', '-c', 'feature/local-work')
+        self.git(self.host, 'tag', 'feature/local-work')
+        source.write(self.host)
+        clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'branch', '--show-current'), 'feature/local-work')
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), self.start)
+
+    def test_retry_does_not_reset_an_advanced_starting_branch(self):
+        clone.clone(self.metadata, self.agent)
+        marker = self.agent / '.git/claude-bootstrap.json'
+        marker.write_text(self.metadata.read_text())
+        self.git(self.agent, 'commit', '--allow-empty', '-m', 'agent work')
+        agent_commit = self.git(self.agent, 'rev-parse', 'HEAD')
+        with self.assertRaisesRegex(ValueError, 'branch changed'):
+            clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), agent_commit)
 
     def test_completed_clone_survives_new_metadata(self):
         clone.clone(self.metadata, self.agent)
@@ -200,6 +220,29 @@ class WorkspaceCloneTest(unittest.TestCase):
         data = source.write(worktree)
         clone.clone(worktree / '.devcontainer/.generated/workspace.json', self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), data['commit'])
+        self.assertEqual(self.git(self.agent, 'branch', '--show-current'), '')
+
+    def test_retry_after_branch_checkout_preserves_uncommitted_work(self):
+        clone.clone(self.metadata, self.agent)
+        self.git(self.agent, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+        self.git(self.agent, 'update-ref', 'refs/heads/main', self.start)
+        # Simulate a crash after checkout but before removing the marker.
+        marker = self.agent / '.git/claude-bootstrap.json'
+        marker.write_text(self.metadata.read_text())
+        (self.agent / 'package.json').write_text('unfinished work')
+        clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'branch', '--show-current'), 'main')
+        self.assertEqual((self.agent / 'package.json').read_text(), 'unfinished work')
+        self.assertFalse(marker.exists())
+
+    def test_invalid_branch_metadata_is_rejected_before_initialization(self):
+        data = json.loads(self.metadata.read_text())
+        for branch in ('--detach', '@{-1}', 'bad..name', 'HEAD', 'refs/../bad'):
+            data['branch'] = branch
+            self.metadata.write_text(json.dumps(data))
+            with self.subTest(branch=branch), self.assertRaises(ValueError):
+                clone.clone(self.metadata, self.agent)
+        self.assertFalse((self.agent / '.git').exists())
 
     def test_shallow_host_clone_can_initialize_without_remote(self):
         self.git(self.host, 'commit', '--allow-empty', '-m', 'second commit')

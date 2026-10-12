@@ -9,7 +9,7 @@ python3 .devcontainer/claude/scripts/workspace-source.py
 .devcontainer/claude/scripts/compose.sh exec --user node agent wait-ready.sh
 ```
 
-初期化途中は`.git/claude-bootstrap.json`に記録したコミット・コピー名を使い続けます。開始時のコピーは再試行のため保持するので、完了するまでは`.generated/workspace-*.git`を削除しないでください。ホストのHEADが進んでも、再試行は元のコミットを使います。既存ファイルや依存マウントとの衝突が報告されたら、volumeの内容を確認してください。未完了のリポジトリを自動削除する処理はありません。
+初期化途中は`.git/claude-bootstrap.json`に記録したコミット・ブランチ名・コピー名を使い続けます。開始時のコピーは再試行のため保持するので、完了するまでは`.generated/workspace-*.git`を削除しないでください。ホストのHEADが進んでも、再試行は元のコミットを使います。既存ファイルや依存マウントとの衝突が報告されたら、volumeの内容を確認してください。未完了のリポジトリを自動削除する処理はありません。
 
 ## git fetch agentが失敗する
 

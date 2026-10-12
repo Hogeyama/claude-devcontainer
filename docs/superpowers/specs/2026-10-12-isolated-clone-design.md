@@ -46,7 +46,7 @@ Git の push / fetch では、エージェント側の index や `assume-unchang
 
 ### 初回起動
 
-VS Code の「Reopen in Container」か `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空の workspace volume に detached HEAD で checkout する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
+VS Code の「Reopen in Container」か `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空のworkspace volumeにホストと同じブランチ名でcheckoutする。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
 ### 受け渡し用リモート
 
@@ -54,7 +54,7 @@ VS Code の「Reopen in Container」か `devcontainer up` で起動する。ホ�
 
 Git標準の`ext`転送とホスト側の`git-agent.py`を使い、Dockerの標準入出力をコンテナ内の`git-upload-pack` / `git-receive-pack`につなぐ。どちらも`node`で実行する。SSHサーバーや公開ポートは不要で、接続時にコンテナを見つけ直すため再作成にも追従する。このホストリポジトリだけに`protocol.ext.allow=always`を設定する。接続にはコンテナが起動している必要がある。
 
-エージェントはコンテナ内で作業ブランチにコミットし、ブランチ名とコミットIDを人間に伝える。pushは不要。
+エージェントは引き継いだブランチで作業できる。必要なら次のように別の作業ブランチを作る。コミット後はブランチ名とコミットIDを人間に伝える。pushは不要。
 
 ```sh
 git switch -c agent/task-name
@@ -122,7 +122,7 @@ Compose の `workspace` volume はプロジェクトごとに作る。依存の�
 
 ### ホストの生成物
 
-`initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、ホストのHEADの完全なコミットID（`commit`）と、初期化用bare repositoryの名前（`seed`）である。ホスト側でローカルGit転送を使い、指定コミットと履歴を`.generated/workspace-<commit>.git`へ独立してコピーする。ホストの`.git/config`、hooks、index、alternatesやハードリンクは引き継がない。linked worktreeとdetached HEADにも対応する。コピーの完了後にmetadataをatomicに公開する。同一コミットのコピーは再利用し、過去のコピーは中断した初期化の再試行のため保持する。
+`initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、ホストのHEADの完全なコミットID（`commit`）、ブランチ名（`branch`、detached HEADなら空文字）、初期化用bare repositoryの名前（`seed`）である。ホスト側でローカルGit転送を使い、指定コミットと履歴を`.generated/workspace-<commit>.git`へ独立してコピーする。ホストの`.git/config`、hooks、index、alternatesやハードリンクは引き継がない。linked worktreeとdetached HEADにも対応する。コピーの完了後にmetadataをatomicに公開する。同一コミットのコピーは再利用し、過去のコピーは中断した初期化の再試行のため保持する。
 
 metadataにはリモートURLを含めない。コミットのないリポジトリは停止する。
 
@@ -133,11 +133,11 @@ metadataにはリモートURLを含めない。コミットのないリポジト
 Git を実行する初期化処理は `postStartCommand` の `wait-ready.sh` から node ユーザーで呼ぶ。entrypoint は従来どおり CA と firewall を設定して権限を落とす。`waitFor: postStartCommand` により、自動 clone が完了するまで起動完了として扱わない。
 
 1. 正常な clone が既にあれば、そのまま使う。自動 fetch、checkout、reset はしない。ホストの HEAD が進んでも、未コミットの変更やエージェントのブランチを維持する。
-2. Git リポジトリがなく、依存のマウントポイント以外にファイルがない workspace では Git リポジトリを初期化し、コンテナ側のリモートは登録しない。初期化途中であることと、開始時のコミットID / コピー名を `.git/claude-bootstrap.json` に記録する。
+2. Git リポジトリがなく、依存のマウントポイント以外にファイルがない workspace では Git リポジトリを初期化し、コンテナ側のリモートは登録しない。初期化途中であることと、開始時のコミットID / ブランチ名 / コピー名を `.git/claude-bootstrap.json` に記録する。
 3. `/run/host/generated/`内の指定bare repositoryからGitのローカル転送でオブジェクトを取り込む。共有ハードリンクやalternatesは作らない。リモートへの接続や認証は不要である。コピーが読めない場合は停止し、ホストでコピーを確認してから再試行する。
-4. 指定コミットが取得できたことを確認し、detached HEADでcheckoutする。成功後に初期化途中の印を消す。
+4. 指定コミットが取得できたことを確認し、記録したブランチ名を作ってcheckoutする。ブランチ名が空ならdetached HEADにする。中断後の再試行でブランチが既にあれば、同じコミットであることを確認して再利用し、進んでいる場合は上書きせず停止する。成功後に初期化途中の印を消す。
 
-途中で失敗した場合は、記録したコミットID / コピー名で初期化を再試行できる。既存のファイルを削除したり、強制 checkout したりはしない。初期化途中の印がない不完全なリポジトリや、Git リポジトリでないファイルが既にある場合は停止し、人間に確認を求める。通常の起動に、既存 volume を消す処理は含めない。
+途中で失敗した場合は、記録したコミットID / ブランチ名 / コピー名で初期化を再試行できる。既存のファイルを削除したり、強制 checkout したりはしない。初期化途中の印がない不完全なリポジトリや、Git リポジトリでないファイルが既にある場合は停止し、人間に確認を求める。通常の起動に、既存 volume を消す処理は含めない。
 
 ホストからコンテナ内の Git を操作する場合も、`docker exec --user node` を使う。エージェントが設定できる hook や `core.fsmonitor` を、コンテナの root 権限で実行させないためである。
 

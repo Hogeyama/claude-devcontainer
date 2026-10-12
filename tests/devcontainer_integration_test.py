@@ -131,6 +131,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
             shutil.copytree(dependency_source, cls.workspace / 'node_modules', symlinks=True)
         # Delay the production entrypoint so that `up` must wait for postStartCommand.
         cls.initial_commit = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
+        cls.initial_branch = subprocess.check_output([*git, 'branch', '--show-current'], text=True).strip()
         startup_dir = cls.directory / 'startup'
         startup_dir.mkdir()
         startup = startup_dir / 'entrypoint.sh'
@@ -289,12 +290,13 @@ class DevcontainerIntegrationTest(unittest.TestCase):
                         'refs/heads/agent/isolation'], env=self.env, check=True, capture_output=True)
         self.assertEqual(subprocess.check_output(['git', '-C', str(self.workspace), 'rev-parse', 'FETCH_HEAD'], text=True),
                          self.exec('git', 'rev-parse', 'HEAD').stdout)
-        self.exec('git', 'switch', '--detach', self.initial_commit)
+        self.exec('git', 'switch', self.initial_branch)
 
     def test_initial_clone_and_readonly_host_inputs(self):
         self.assertEqual(self.exec('cat', 'packages/app/package.json').stdout, '{"private":true}\n')
         self.exec('sh', '-ec', 'echo writable > packages/app/node_modules/probe')
         self.assertEqual(self.exec('git', 'rev-parse', 'HEAD').stdout.strip(), self.initial_commit)
+        self.assertEqual(self.exec('git', 'branch', '--show-current').stdout.strip(), self.initial_branch)
         self.assertEqual(self.exec('git', 'remote').stdout.strip(), '')
         remote = subprocess.check_output(['git', '-C', str(self.workspace), 'remote', 'get-url', 'agent'], text=True)
         self.assertTrue(remote.startswith('ext::'))
@@ -338,7 +340,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
                            env=self.env, check=True, capture_output=True)
         finally:
             self.exec('rm', '-f', 'package-fixture', 'node_modules/preserved')
-            self.exec('git', 'switch', '--detach', self.initial_commit)
+            self.exec('git', 'switch', self.initial_branch)
 
     def test_host_push_and_fetch_work_with_proxy_stopped(self):
         self.compose_run('stop', 'proxy')

@@ -22,7 +22,15 @@ def write(root=ROOT):
         raise ValueError('A committed HEAD is required.') from None
     if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', commit):
         raise ValueError('HEAD did not resolve to a full commit ID.')
-    data = {'commit': commit, 'seed': f'workspace-{commit}.git'}
+    branch = subprocess.run(['git', '-C', str(root), 'symbolic-ref', '--quiet', 'HEAD'],
+                            capture_output=True, text=True)
+    if branch.returncode not in (0, 1):
+        raise ValueError('Could not read the host branch.')
+    reference = branch.stdout.strip()
+    if branch.returncode == 0 and not reference.startswith('refs/heads/'):
+        raise ValueError('Host HEAD does not reference a branch.')
+    data = {'commit': commit, 'seed': f'workspace-{commit}.git',
+            'branch': reference.removeprefix('refs/heads/') if branch.returncode == 0 else ''}
     directory = root / '.devcontainer/.generated'
     directory.mkdir(parents=True, exist_ok=True)
     seed = directory / data['seed']

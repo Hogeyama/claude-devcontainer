@@ -11,11 +11,16 @@ from workspace_mounts import dependency_mounts
 
 def inputs(path):
     data = json.loads(Path(path).read_text())
-    if not isinstance(data, dict) or set(data) != {'commit', 'seed'} or not all(isinstance(v, str) for v in data.values()):
+    if (not isinstance(data, dict) or set(data) not in ({'commit', 'seed'}, {'commit', 'seed', 'branch'})
+            or not all(isinstance(v, str) for v in data.values())):
         raise ValueError('Invalid workspace clone metadata.')
     if (not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', data['commit'])
             or data['seed'] != f"workspace-{data['commit']}.git"):
         raise ValueError('Invalid workspace clone metadata.')
+    branch = data.get('branch', '')
+    if branch and (branch.startswith('-') or branch == 'HEAD' or subprocess.run(
+            ['git', 'check-ref-format', 'refs/heads/' + branch], capture_output=True).returncode):
+        raise ValueError('Invalid workspace branch metadata.')
     return data
 
 
@@ -72,7 +77,18 @@ def clone(source, workspace):
         path = workspace / name
         if any(path == mount or path.is_relative_to(mount) or mount.is_relative_to(path) for mount in mounts):
             raise ValueError(f'Tracked path {name!r} conflicts with a dependency mount; inspect the starting commit.')
-    git('checkout', '--detach', data['commit'])
+    branch = data.get('branch', '')
+    if branch:
+        existing = git('show-ref', '--verify', '--hash', 'refs/heads/' + branch, check=False)
+        if existing.returncode == 0:
+            if existing.stdout.strip() != data['commit']:
+                raise ValueError('Starting branch changed during initialization; inspect /workspace before retrying.')
+            # A prior checkout may have succeeded before the marker was removed.
+            git('checkout', branch, '--')
+        else:
+            git('checkout', '-b', branch, data['commit'])
+    else:
+        git('checkout', '--detach', data['commit'])
     marker.unlink()
 
 

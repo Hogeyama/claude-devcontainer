@@ -22,3 +22,9 @@
 - `git diff --check` passed. The host repository's `agent` remote was registered using the same production command; its existing origin was preserved.
 - Code review covered direct transport, node execution and local bootstrap; its linked-worktree finding was reproduced and fixed.
 - No real user container, external Git remote, or production credential was used by test fixtures.
+
+## Initial branch amendment
+
+At the user's request, newly created workspaces use the host branch name captured alongside the starting commit. Read the full symbolic HEAD ref to avoid ambiguity with same-named tags. Detached hosts stay detached. Completed workspaces are never switched on later starts. Retry reuses an existing starting branch only if it still points at the original commit, without resetting work. Legacy metadata without a branch remains readable. Tests cover branch copying, a same-named tag, fixed startup inputs, detached worktrees, interrupted checkout and preservation on recreation.
+
+Branch amendment validation: ordinary suite 127 tests (101 passed, 26 opt-in skips); 4 real Docker checks passed for initial host-branch checkout, recreation preservation, direct fetch and push. `git diff --check` passed.
