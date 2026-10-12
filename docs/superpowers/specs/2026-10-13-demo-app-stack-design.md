@@ -9,17 +9,17 @@
 - DinD内のコンテナはagentの`/workspace`をbind mountできない。アプリのイメージは`docker compose build`で作る(build contextはsocket経由でdaemonに送られるため、オフラインで動く)
 - dind-bridgeは、`0.0.0.0`にpublishされたポートをagentの`127.0.0.1`の同じポートに中継する
 - aptのGradleは4.4.1で実用にならない。Gradleはwrapper経由で、配布物はホストの`~/.gradle`から供給する
-- pnpm workspaceは`pnpm-workspace.yaml`の`nodeLinker: hoisted`で依存がルートの`node_modules`にフラット配置される(検証済み)。これにより既存の`/workspace/node_modules` overlayだけでworkspace全体を賄える。`.npmrc`の`node-linker`はpnpm 11では効かないので`pnpm-workspace.yaml`に書く
+- ルートの`node_modules` overlayはコアが`/workspace/node_modules`に固定している。サブディレクトリの`node_modules`を共有するには、`.devcontainer/compose.yaml`に同じ方式のoverlay volumeを追加する(docs/usage.md「依存の共有と更新」)。lowerdirはリポジトリ内の絶対パスが必要なので、`initializeCommand`が`.devcontainer/.env`に書き出してcomposeの補間に使う
+- `pnpm-workspace.yaml`はpnpm v10以降のプロジェクト設定ファイルで、`.npmrc`は認証・registryしか読まない。`verifyDepsBeforeRun: warn`(agent内で`pnpm install`を試みないため)と`allowBuilds`(dockerodeの不要なネイティブ依存)をここに書く
 
 ## 構成
 
 すべてコミット対象で、agentのcloneにも入る。
 
 ```
-package.json            # private root(workspaceの置き場のみ)
-pnpm-workspace.yaml     # packages: [frontend], nodeLinker: hoisted
-frontend/               # React + Viteのpnpmパッケージ
+frontend/               # React + Viteのpnpmパッケージ(単独プロジェクト、workspaceではない)
   package.json          #   react, react-dom / vite, @vitejs/plugin-react, vitest, testcontainers
+  pnpm-workspace.yaml   #   verifyDepsBeforeRun: warn, allowBuilds
   vite.config.js, index.html, src/…
   test/containers.test.js   # vitest + testcontainers: busybox httpdを起動しfetchで検証
   Dockerfile            # FROM nginx:alpine, COPY dist + nginx.conf
@@ -32,6 +32,10 @@ backend/                # JavalinのGradleプロジェクト(application plugin 
   src/test/resources/testcontainers.properties  # ryukを0.14.0に固定
   Dockerfile            # FROM eclipse-temurin:17-jre-alpine, COPY build/install/backend
 compose.yaml            # DinD側のアプリスタック(db + backend + frontend)
+.devcontainer/
+  prepare-deps.sh       # overlay用ディレクトリ作成と.envへのlowerdir書き出し
+  compose.yaml          # frontend/node_modules用の第2 overlay volumeを追加
+  devcontainer.json     # initializeCommandがprepare-deps.shを呼ぶ
 ```
 
 ### ルートcompose.yaml
@@ -68,7 +72,7 @@ README「このリポジトリを開発する」節に、デモの構成とseed�
 
 ## ワークフロー
 
-1. ホスト: `pnpm install` → ルート`node_modules`に集約(overlayのlower)
+1. ホスト: `pnpm -C frontend install` → `frontend/node_modules`(overlayのlower)
 2. ホスト: `cd backend && ./gradlew build` → `~/.gradle`に配布物と依存(overlayのlower)
 3. agent: `pnpm -C frontend test` → vitestがDinD上にbusyboxを起動してfetch
 4. agent: `cd backend && ./gradlew --offline test` → TestcontainersがDinD上にpostgresを起動
@@ -77,7 +81,8 @@ README「このリポジトリを開発する」節に、デモの構成とseed�
 
 ## 捨てた選択肢
 
-- frontendをnode/vite previewコンテナで動かす: hoisted `node_modules`が`frontend/`の外にあるためbuild contextとして扱いにくい。nginx静的配信+proxyのほうが標準的でシンプル
+- frontendをnode/vite previewコンテナで動かす: `node_modules`はoverlay越しなのでbuild contextに混ぜたくなく、nginx静的配信+proxyのほうが標準的でシンプル
+- ルートpackage.json + pnpm workspaceの`nodeLinker: hoisted`: ルート`node_modules`の既存overlayだけで済むが、リポジトリ直下にnode_modulesとJS関連ファイルが露出する。`frontend/`に閉じた単独パッケージ+第2 overlayを選んだ
 - Spring Boot: 依存ツリーが大きくseedが重い。Javalin + Jackson + JDBCで依存のデモとしては十分
 - apt Gradleの維持: 4.4.1ではwrapper配布物も含めビルドできない
 

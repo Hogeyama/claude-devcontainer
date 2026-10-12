@@ -344,7 +344,7 @@ sumiのデモ用の公開値を`.secrets/sumi/secrets.txt`にコミットして�
 
 依存の共有とDinDのデモとして、ルートに小さなアプリを置いています。
 
-- `frontend/`: pnpmで管理するReact+Viteのフロントエンド。`pnpm-workspace.yaml`の`nodeLinker: hoisted`で依存がルートの`node_modules`だけに集まるため、agentへは既存のoverlayだけで共有できます。vitestとtestcontainersのテストがあり、DinD上にbusyboxを起動してHTTPを検証します
+- `frontend/`: pnpmで管理するReact+Viteのフロントエンド。`frontend/node_modules`は`compose.yaml`が追加する2番目のoverlayでホストとCoW共有します（lowerdirは`prepare-deps.sh`が`.devcontainer/.env`に書き出す絶対パス）。vitestとtestcontainersのテストがあり、DinD上にbusyboxを起動してHTTPを検証します
 - `backend/`: Javalinのバックエンド。Gradleはwrapper経由で、配布物と依存はホストの`~/.gradle`から供給します。`/api/message`がPostgresの値を返します。JUnitとTestcontainersのテストがあり、DinD上に`postgres:16-alpine`を起動します
 - `compose.yaml`: 上の2つとPostgresを協調して起動するアプリ用のスタック。agentの中ではDinDで動き、`3000:80`のpublishがdind-bridgeでagentの`127.0.0.1:3000`に中継されます。ホストでもそのまま起動できます
 
@@ -352,7 +352,7 @@ sumiのデモ用の公開値を`.secrets/sumi/secrets.txt`にコミットして�
 
 ```sh
 # ホスト（nix developの中）
-pnpm install
+pnpm -C frontend install
 cd backend && ./gradlew build
 ```
 
