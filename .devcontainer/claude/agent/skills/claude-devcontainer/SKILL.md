@@ -31,6 +31,7 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 - To receive host changes, ask the human to run `git push agent HEAD:refs/heads/host/main` on the host, then merge/rebase the local `host/main` branch here. For host-only tests, commit the code and ask for review before execution; receive results in chat.
 - Restarts and container recreation preserve your clone, dirty files and dependency changes. They do not automatically fetch/reset. Never recommend deleting workspace volumes as routine recovery.
 - `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Run Git as node, never root.
+- If `$CLAUDE_DEVCONTAINER_NIX` is `1`, Bash reads what the nix dev shell exported when the container started, after its shellHook ran in `/workspace`. When a dev shell tool or variable is missing, the shellHook's output is in `/run/claude-devcontainer/nix-env.log`.
 - If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte. This is deliberate. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
 
 ## Docker (DinD)

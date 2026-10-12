@@ -264,7 +264,9 @@ ref = "HEAD"                            # 評価するコミットやref。既�
 shell = "devShells.x86_64-linux.foo"    # 名前付きdev shell。省略するとdefault
 ```
 
-`devcontainer up`のたびにホストで`nix print-dev-env`を実行し、その結果をagentのBashで読み込みます。読み込むのは環境変数だけです。`TZ`や`SOURCE_DATE_EPOCH`のようにビルドにしか使わない変数、bashの関数、`shellHook`は除きます。agentのBashは、コマンドのたびにこの結果を読み込むためです。ホストの`/nix/store`は読み取り専用で使います。
+`devcontainer up`のたびに、ホストで`nix print-dev-env`を実行し、`nix develop`が読み込むスクリプトを書き出します。agentは起動時に1回だけ、このスクリプトを`shellHook`まで`/workspace`で実行し、その後でexportされている環境変数をBashで読み込みます。`nix develop -c claude`で起動したclaudeが受け取る環境と同じものです。ただし、`TZ`や`SOURCE_DATE_EPOCH`のようにビルドにしか使わない変数は除きます。bashの関数とエイリアスは引き継ぎません。ホストの`/nix/store`は読み取り専用で使います。
+
+`shellHook`はagentの中でnodeとして実行するので、通信はproxyの制限を受けます。出力はagentの`/run/claude-devcontainer/nix-env.log`に残ります。`shellHook`が120秒以内に終わらない場合、agentのBashはdev shellの環境なしで動きます。コンテナが動いている間は、`devcontainer up`を実行し直しても`shellHook`は再実行されません。flakeの変更を反映するには、`devcontainer up --remove-existing-container`でコンテナを作り直してください。
 
 > [!WARNING]
 > * flakeの評価、inputの取得、ビルドはホストで実行するので、proxyの通信制限を受けません。ホストのコミットを評価し、agentのcloneのrefは使いません。flakeの変更もホストへ取り込む前にレビューしてください。
