@@ -38,3 +38,9 @@ fi
 
 # Git runs only after the entrypoint dropped privileges, as remoteUser node.
 python3 /usr/local/bin/clone-workspace.py
+# Like `nix develop -c claude`: run the dev shell, shellHook included, in the
+# workspace now in place, for every Bash to read what it exports.
+if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /run/host/nix-env/dev-env.sh ]; then
+    python3 /usr/local/bin/nix-env.py ||
+        echo "warning: the nix dev shell could not be loaded; Bash runs without it." >&2
+fi

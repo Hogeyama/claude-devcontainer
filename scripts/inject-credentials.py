@@ -38,7 +38,10 @@ SETUP_TOKEN = 'CLAUDE_CODE_OAUTH_TOKEN'
 SECRET_NAME = re.compile(r'[A-Z_][A-Z0-9_]*')
 # What the shell itself changes while reading the file.
 SHELL_VARIABLES = {'PWD', 'OLDPWD', 'SHLVL', '_'}
-# How long the watcher waits for the environment to (re)appear before exiting.
+# How long the watcher waits for the environment to appear: `up` builds the
+# images after initializeCommand starts it, which takes minutes the first time.
+START_SECONDS = 600
+# How long it waits for the environment to reappear once it has run.
 WAIT_SECONDS = 60
 POLL_SECONDS = 5
 RETRY = 'Run .devcontainer/claude/scripts/inject-credentials.py on the host once the container is up.'
@@ -330,12 +333,12 @@ def watch(values):
     take_over()
     source = claude(values)
     injected, names = None, []
-    last_seen = time.monotonic()
-    while time.monotonic() - last_seen < WAIT_SECONDS:
+    last_seen, patience = time.monotonic(), START_SECONDS
+    while time.monotonic() - last_seen < patience:
         try:
             agent, proxy = find_environment()
             if proxy:
-                last_seen = time.monotonic()
+                last_seen, patience = time.monotonic(), WAIT_SECONDS
                 if injected is None or injected[1] != proxy:
                     names = requested_secrets(proxy)
                 state = (agent, proxy, snapshot(values, source, names), json.dumps(source.settings()))
@@ -349,7 +352,7 @@ def watch(values):
             pass  # Not ready yet.
         time.sleep(POLL_SECONDS)
     if injected is None:
-        log(f'no proxy started within {WAIT_SECONDS}s.', RETRY)
+        log(f'no proxy started within {START_SECONDS}s.', RETRY)
     else:
         log('the environment stopped.')
 

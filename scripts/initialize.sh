@@ -22,7 +22,9 @@ python3 "$(dirname "$0")/pick-networks.py" \
     "$(setting CLAUDE_DEVCONTAINER_PROXY_NET)" "$(setting CLAUDE_DEVCONTAINER_DIND_NET)"
 
 # Export the trusted host commit's dev shell to a read-only management mount.
-# The agent's independent refs and worktree cannot change this input.
+# The agent's independent refs and worktree cannot change this input. It is the
+# script `nix develop` reads; the agent runs it, shellHook included, once it
+# starts (agent/nix-env.py).
 if [ "$(setting CLAUDE_DEVCONTAINER_NIX)" = 1 ]; then
     out=.devcontainer/.nix-env
     ref=$(setting CLAUDE_DEVCONTAINER_NIX_REF)
@@ -32,13 +34,11 @@ if [ "$(setting CLAUDE_DEVCONTAINER_NIX)" = 1 ]; then
     if ! rev=$(git rev-parse --verify --quiet "$ref^{commit}"); then
         echo "warning: nix.ref = $ref is not a commit; the dev shell is not updated." >&2
     # --profile makes a GC root, so that the host's garbage collection keeps it.
-    elif nix --extra-experimental-features 'nix-command flakes' print-dev-env --json --no-write-lock-file \
-            --profile "$out/profile" "git+file://$(pwd -P)?rev=$rev${shell:+#$shell}" >"$out/env.json.tmp" &&
-        "$(dirname "$0")/nix-env.py" <"$out/env.json.tmp" >"$out/env.rc.tmp"; then
-        mv "$out/env.rc.tmp" "$out/env.rc"
-        rm -f "$out/env.json.tmp"
+    elif nix --extra-experimental-features 'nix-command flakes' print-dev-env --no-write-lock-file \
+            --profile "$out/profile" "git+file://$(pwd -P)?rev=$rev${shell:+#$shell}" >"$out/dev-env.sh.tmp"; then
+        mv "$out/dev-env.sh.tmp" "$out/dev-env.sh"
     else
-        rm -f "$out/env.json.tmp" "$out/env.rc.tmp"
+        rm -f "$out/dev-env.sh.tmp"
         echo "warning: nix print-dev-env failed; the dev shell is not updated." >&2
     fi
 fi
