@@ -1,9 +1,5 @@
-packages:
-  - frontend
-# Hoist everything into the root node_modules: the agent shares exactly that
-# directory with the host copy-on-write. A per-package node_modules would need
-# its own overlay volume.
-nodeLinker: hoisted
+# This file is pnpm's per-project configuration (packages may be omitted for a
+# single project).
 # The agent's node_modules is the host's, shared copy-on-write, and `pnpm
 # install` inside the agent cannot reach a registry. The default `install`/
 # `prompt` behavior tries to reinstall before running a script and fails

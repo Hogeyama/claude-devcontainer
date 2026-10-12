@@ -14,6 +14,14 @@ services:
       # offline from the host's distributions and dependencies, and what it
       # writes stays in the upper directory instead of reaching the host.
       - gradle-home:/home/node/.gradle
+      # Same overlay scheme for the frontend's node_modules (see docs/usage.md
+      # "依存の共有と更新"). The lower is this repository's own
+      # frontend/node_modules, whose absolute path prepare-deps.sh writes to
+      # .env for interpolation.
+      - type: volume
+        source: frontend-node-modules
+        target: /workspace/frontend/node_modules
+        volume: {nocopy: true}
 
 volumes:
   # initializeCommand (devcontainer.json) creates the directories. The options
@@ -26,3 +34,8 @@ volumes:
       type: overlay
       device: overlay
       o: lowerdir=${HOME}/.gradle,upperdir=${HOME}/.local/state/claude-devcontainer/gradle-home/upper,workdir=${HOME}/.local/state/claude-devcontainer/gradle-home/work
+  frontend-node-modules:
+    driver_opts:
+      type: overlay
+      device: overlay
+      o: lowerdir=${DEMO_FRONTEND_NODE_MODULES},upperdir=${HOME}/.local/state/claude-devcontainer/frontend-node-modules/upper,workdir=${HOME}/.local/state/claude-devcontainer/frontend-node-modules/work

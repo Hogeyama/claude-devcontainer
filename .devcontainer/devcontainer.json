@@ -7,7 +7,7 @@
   "updateRemoteUserUID": false,
   "overrideCommand": false,
   "shutdownAction": "stopCompose",
-  "initializeCommand": "chmod 600 .secrets/sumi/secrets.txt && mkdir -p \"$HOME/.gradle\" \"$HOME/.local/state/claude-devcontainer/gradle-home/upper\" \"$HOME/.local/state/claude-devcontainer/gradle-home/work\" && .devcontainer/claude/scripts/initialize.sh",
+  "initializeCommand": "chmod 600 .secrets/sumi/secrets.txt && sh .devcontainer/prepare-deps.sh && .devcontainer/claude/scripts/initialize.sh",
   "postStartCommand": "wait-ready.sh",
   "waitFor": "postStartCommand",
   "userEnvProbe": "none",
