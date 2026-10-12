@@ -22,6 +22,7 @@ alone, so `generate` refuses to run with one.
 
 Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
+  settings.py prepare-dependencies  create persistent Node overlay directories
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
 """
@@ -32,6 +33,7 @@ if sys.version_info < (3, 11):
              f'for tomllib; this is {sys.version.split()[0]}.')
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -58,7 +60,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'PROXY_CA', 'CONNECTORS'))
+    'PROXY_CA', 'CONNECTORS', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -256,6 +258,25 @@ def write(path, text):
     temporary.replace(path)
 
 
+def node_modules_paths(root=ROOT, environ=os.environ):
+    root = Path(root).resolve()
+    state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state').resolve()
+    state = state / 'claude-devcontainer/node-modules' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
+    if state.is_relative_to(root):
+        raise ValueError('Node overlay state must be outside the repository and its build contexts.')
+    paths = {'LOWER': (root / 'node_modules').resolve(), 'UPPER': state / 'upper', 'WORK': state / 'work'}
+    for path in paths.values():
+        if re.search(r"[\s,:\\']", str(path)):
+            raise ValueError(f'Node overlay path cannot contain whitespace, commas, colons, backslashes or quotes: {path}')
+    return {PREFIX + 'NODE_' + key: str(path) for key, path in paths.items()}
+
+
+def prepare_node_modules(root=ROOT, environ=os.environ):
+    # Never clear upper/work here: changes survive ordinary recreation.
+    for path in node_modules_paths(root, environ).values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+
 def generate(root=ROOT, environ=os.environ):
     """Check the settings and the files they name, and write .generated/."""
     outside = outside_settings(root, environ)
@@ -276,7 +297,8 @@ def generate(root=ROOT, environ=os.environ):
     out.mkdir(parents=True, exist_ok=True)
     (out / '.gitignore').write_text('*\n')
     header = '# Written by scripts/settings.py from claude.toml and claude.local.toml; do not edit.\n'
-    write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in variables(settings).items()))
+    values = variables(settings) | node_modules_paths(root, environ)
+    write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in values.items()))
     write(out / 'proxy.json', proxy_json(settings))
     write(out / 'images.txt', images_txt(settings))
     write(out / 'agent.env', header + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings)))
@@ -287,13 +309,15 @@ def main():
     try:
         if sys.argv[1:] == ['generate']:
             generate()
+        elif sys.argv[1:] == ['prepare-dependencies']:
+            prepare_node_modules()
         elif len(sys.argv) == 3 and sys.argv[1] == 'proxy-json':
             path = Path(sys.argv[2])
             data = read(path)
             check(data, path.name)
             print(proxy_json(merge(copy.deepcopy(DEFAULTS), data)), end='')
         else:
-            sys.exit('usage: settings.py generate | proxy-json FILE')
+            sys.exit('usage: settings.py generate | prepare-dependencies | proxy-json FILE')
     except ValueError as error:
         sys.exit(f'error: {error}')
 

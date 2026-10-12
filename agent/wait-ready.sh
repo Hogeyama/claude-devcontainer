@@ -22,7 +22,7 @@ fi
 # initializeCommand also loads the images of docker.images in claude.toml into
 # DinD (scripts/load-images.py), and names its marker after the content of the
 # list that scripts/settings.py wrote at `up`.
-list=/workspace/.devcontainer/.generated/images.txt
+list=/run/host/generated/images.txt
 if [ "$dind" = 1 ] && [ -n "$(sed 's/#.*//' "$list" 2>/dev/null | tr -d ' \t\r\n')" ]; then
     marker="$markers/images-$(sha256sum <"$list" | cut -c1-16)"
     # Large images take minutes, so wait long only once loading has started.
@@ -35,3 +35,6 @@ if [ "$dind" = 1 ] && [ -n "$(sed 's/#.*//' "$list" 2>/dev/null | tr -d ' \t\r\n
         cat "$marker" >&2
     fi
 fi
+
+# Git runs only after the entrypoint dropped privileges, as remoteUser node.
+python3 /usr/local/bin/clone-workspace.py

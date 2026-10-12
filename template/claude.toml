@@ -13,7 +13,7 @@
 # the host's home.
 
 [agent]
-# The agent's user, which must be able to write the workspace on the host.
+# Owner of the agent's volumes; match the host UID/GID for dependency overlays.
 # uid = 1000
 # gid = 1000
 

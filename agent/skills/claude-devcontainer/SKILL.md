@@ -1,6 +1,6 @@
 ---
 name: claude-devcontainer
-description: Limits of the isolated dev container you are running in (all egress through an inspecting proxy, .devcontainer/ and .git/config read-only, Docker only as an offline DinD) and what to do instead of working around them. Use it whenever a network request, package install, or download fails (HTTP 403, `blocked`, timeouts, `Could not resolve host`, `certificate verify failed`, `self-signed certificate in certificate chain`), when using docker, docker build, Testcontainers, or published ports, when `git push -u`, `git remote add`, or `git config` fails, when a write under .devcontainer/ or .git/ fails with `Read-only file system`, and when a task needs a tool, language runtime, or container image that is not installed.
+description: Use in this dev container when clone, Git, network requests, package installs, Docker or Testcontainers fail, or when a task needs unavailable tools or dependencies. Covers the independent workspace, host review and mandatory proxy.
 ---
 
 # Working in this dev container
@@ -24,12 +24,13 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
-- `.devcontainer/` is read-only, because the host builds and runs what is in it the next time it starts the container. When it needs a change, show the change and ask the human to make it. Do not get the change in through Git either (committing or staging a `.devcontainer/` change with `git update-index`, `git commit`, and the like).
-- `.git/config`, `.git/hooks/`, and `.git/modules/` are read-only, for the same reason.
-  - `git push -u` fails. Name the destination instead: `git push origin HEAD` or `git push origin <branch>`.
-  - `git remote add`, repository-level `git config`, new hooks, and adding or updating submodules are impossible.
-- Committing, creating branches, and pushing work.
-- The working directory `/workspace` is the repository root. `git worktree` is not supported.
+- `/workspace` is your own persistent clone, initialized automatically from a local copy of the host's committed HEAD (including unpublished commits), using the host's branch name at creation time. If the host has detached HEAD, the clone does too. Later starts preserve your current branch. Create a separate task branch with `git switch -c agent/task-name` when needed.
+- The host's worktree and `.git` are not mounted. Your `.devcontainer/`, Git configuration and hooks are writable; host startup uses the host's copies until the human reviews and integrates your commit.
+- Commit work on a task branch and tell the human its name and exact commit ID. No push is required: the host automatically has an `agent` remote pointing directly to this container and fetches your commits with ordinary Git. GitHub is not involved in this exchange.
+- You have no automatic remote that can write back to the host. The human fetches, reviews fixed commit IDs, then integrates that ID.
+- To receive host changes, ask the human to run `git push agent HEAD:refs/heads/host/main` on the host, then merge/rebase the local `host/main` branch here. For host-only tests, commit the code and ask for review before execution; receive results in chat.
+- Restarts and container recreation preserve your clone, dirty files and dependency changes. They do not automatically fetch/reset. Never recommend deleting workspace volumes as routine recovery.
+- `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Run Git as node, never root.
 - If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte. This is deliberate. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
 
 ## Docker (DinD)
@@ -44,7 +45,7 @@ Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docke
 
 ## Adding tools and dependencies
 
-Nothing can be installed from a package registry while you run. The host provides these through the files below, all under the read-only `.devcontainer/`, and applies them with `devcontainer up --remove-existing-container`. Propose the exact addition to the human.
+Package registries are unavailable. Propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
 
 | What is needed | Change for the human to make |
 |---|---|
@@ -55,4 +56,6 @@ Nothing can be installed from a package registry while you run. The host provide
 | Environment variables or volumes | `.devcontainer/compose.yaml` |
 | A claude.ai connector (Google Drive, ...) | `connectors = ["<id>"]` under `[proxy]` in `.devcontainer/claude.local.toml`. List the IDs with `curl -s 'https://api.anthropic.com/v1/mcp_servers?limit=1000' -H 'anthropic-beta: mcp-servers-2025-12-04' \| jq -r '.data[] \| "\(.id)\t\(.display_name)"'` and give the human the ID of the one needed. It needs the host's Claude login; with an API key there are no connectors |
 
-Project dependencies that are already in the working tree, such as `node_modules`, can be used. If they are missing, ask the human to fetch them on the host.
+Root `node_modules` reuses host dependencies through CoW. Your changes go to a persistent upper layer; they do not update host dependencies or the pnpm store. Additional monorepo mounts need host configuration. npm, ordinary pnpm and Yarn node_modules mode are supported; Yarn PnP and external virtual stores are not automatic. Native addons require compatible Node/libc.
+
+Ask the human to stop/remove containers before changing host dependencies, then preserve needed agent edits and refresh only the Node upper/work directories. Do not clear the workspace volume or Gradle state. Gradle uses its existing CoW cache with `--offline`; do not add registry routes or Java proxy settings to compensate for missing dependencies.
