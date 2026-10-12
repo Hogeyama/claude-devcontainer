@@ -18,6 +18,7 @@ Without arguments, copy now. With --background, as the Dev Containers
 initializeCommand runs it before the containers start, archive now and hand the
 archive to a detached process that copies it once the agent is up.
 """
+import hashlib
 import importlib.util
 import io
 import json
@@ -47,7 +48,12 @@ TARGET = '/home/node'
 MANAGED = '/etc/claude-code/managed-settings.d/50-host.json'
 # The agent's postStartCommand waits for this.
 MARKER = '/run/claude-devcontainer/host-config-copied'
-WAIT_SECONDS = 60
+# How long the copy watches for the agent: `up` builds the images after
+# initializeCommand starts it, which takes minutes the first time.
+WAIT_SECONDS = 600
+# Only the newest copy for a workspace goes on: an older one, left from an
+# earlier `up`, holds the host's configuration as it was then.
+WATCHER = LOG.parent / f'copy-config-{hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]}.pid'
 REFERENCE = re.compile(r'(?:~|\$HOME|\$\{HOME\})/\.claude/([^\s\'"`;|&<>()]+)')
 # A command that runs sumi, as `sumi init` writes it on the host.
 SUMI = re.compile(r'(?:^|[/\s\'"])sumi(?:$|[\s\'"])')
@@ -260,9 +266,13 @@ def copy(agent, data):
 def wait_and_copy(data):
     # Copy again whenever the agent changes: `up` may recreate an agent that
     # was running when this started.
+    WATCHER.write_text(str(os.getpid()))
     copied = None
     deadline = time.monotonic() + WAIT_SECONDS
     while time.monotonic() < deadline:
+        if WATCHER.read_text() != str(os.getpid()):
+            print(time.strftime('%F %T'), 'a newer copy took over.', flush=True)
+            return
         try:
             agent = find_agent()
             if agent and agent != copied:

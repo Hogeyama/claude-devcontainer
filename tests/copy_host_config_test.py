@@ -185,5 +185,59 @@ class ArchiveTest(unittest.TestCase):
         self.assertEqual(self.members(), {})
 
 
+class WaitAndCopyTest(unittest.TestCase):
+    """How the detached copy waits for the agent that `up` starts."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.watcher = Path(directory.name) / 'watcher.pid'
+        self.clock = 0
+        # (seconds since the start, agent) in order; the last one reached is running.
+        self.timeline = []
+        self.copies = []
+        for name, value in [('WATCHER', self.watcher), ('find_agent', self.agent),
+                            ('copy', lambda agent, data: self.copies.append(agent))]:
+            patcher = mock.patch.object(copy_host_config, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for name, value in [('monotonic', lambda: self.clock), ('sleep', self.sleep)]:
+            patcher = mock.patch.object(copy_host_config.time, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch('sys.stdout', io.StringIO())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def sleep(self, seconds):
+        self.clock += seconds
+
+    def agent(self):
+        running = [agent for start, agent in self.timeline if start <= self.clock]
+        return running[-1] if running else None
+
+    def test_waits_for_an_agent_that_starts_after_a_slow_build(self):
+        # `up` builds the images after initializeCommand starts the copy.
+        self.timeline = [(90, 'agent')]
+        copy_host_config.wait_and_copy(b'archive')
+        self.assertEqual(self.copies, ['agent'])
+
+    def test_copies_again_into_an_agent_recreated_after_a_slow_build(self):
+        self.timeline = [(0, 'old'), (90, None), (120, 'new')]
+        copy_host_config.wait_and_copy(b'archive')
+        self.assertEqual(self.copies, ['old', 'new'])
+
+    def test_a_newer_copy_takes_over(self):
+        # A later `up` starts another copy, with the host's configuration as it is then.
+        def sleep(seconds):
+            self.clock += seconds
+            if self.clock >= 30:
+                self.watcher.write_text('another process')
+        self.timeline = [(90, 'agent')]
+        with mock.patch.object(copy_host_config.time, 'sleep', sleep):
+            copy_host_config.wait_and_copy(b'archive')
+        self.assertEqual(self.copies, [])
+
+
 if __name__ == '__main__':
     unittest.main()

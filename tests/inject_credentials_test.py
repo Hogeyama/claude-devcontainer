@@ -247,5 +247,46 @@ class ConfigTest(unittest.TestCase):
         self.assertNotIn('pat', str(log.call_args))
 
 
+class WatchTest(unittest.TestCase):
+    """How the detached watcher waits for the environment that `up` starts."""
+
+    def setUp(self):
+        self.clock = 0
+        # (seconds since the start, (agent, proxy)) in order; the last one reached is running.
+        self.timeline = []
+        self.injected = []
+        source = mock.Mock(mode='oauth', **{'current.return_value': 'token', 'settings.return_value': None})
+        for name, value in [('take_over', lambda: None), ('claude', lambda values: source),
+                            ('find_environment', self.environment), ('requested_secrets', lambda proxy: []),
+                            ('inject', lambda proxy, data: self.injected.append(proxy)),
+                            ('install_settings', lambda agent, settings: None), ('log', lambda *message: None)]:
+            patcher = mock.patch.object(inject_credentials, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for name, value in [('monotonic', lambda: self.clock), ('sleep', self.sleep)]:
+            patcher = mock.patch.object(inject_credentials.time, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def sleep(self, seconds):
+        self.clock += seconds
+
+    def environment(self):
+        running = [ids for start, ids in self.timeline if start <= self.clock]
+        return running[-1] if running else (None, None)
+
+    def test_waits_for_a_proxy_that_starts_after_a_slow_build(self):
+        # `up` builds the images after initializeCommand starts the watcher.
+        self.timeline = [(90, ('agent', 'proxy')), (200, (None, None))]
+        inject_credentials.watch({'secrets': {}})
+        self.assertEqual(self.injected, ['proxy'])
+
+    def test_stops_soon_after_the_environment_stops(self):
+        self.timeline = [(0, ('agent', 'proxy')), (100, (None, None))]
+        inject_credentials.watch({'secrets': {}})
+        self.assertEqual(self.injected, ['proxy'])
+        self.assertLessEqual(self.clock, 100 + inject_credentials.WAIT_SECONDS + inject_credentials.POLL_SECONDS)
+
+
 if __name__ == '__main__':
     unittest.main()
