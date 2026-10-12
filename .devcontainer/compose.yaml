@@ -18,6 +18,9 @@ services:
         tmpfs:
           size: 65536
           mode: 0700
+      # The host executes these dependencies, whose changes are not reviewed
+      # in Git. The agent may read them but must not modify them.
+      - ../node_modules:/workspace/node_modules:ro
       # The host's Gradle home, copy-on-write: Gradle in the agent runs
       # offline from the host's distributions and dependencies, and what it
       # writes stays in the upper directory instead of reaching the host.
