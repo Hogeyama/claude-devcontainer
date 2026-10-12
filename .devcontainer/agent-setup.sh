@@ -5,5 +5,5 @@
 # This repository's own copy, kept as an example of adding tools. Nothing here
 # needs Java; template/agent-setup.sh is what a new workspace starts from.
 apt-get update
-apt-get install -y --no-install-recommends openjdk-17-jdk-headless gradle
+apt-get install -y --no-install-recommends openjdk-17-jdk-headless
 rm -rf /var/lib/apt/lists/*

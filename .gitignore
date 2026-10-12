@@ -7,3 +7,7 @@ __pycache__/
 /images.tar
 /images/*.tar
 claude.local.toml
+node_modules/
+/frontend/dist/
+/backend/build/
+/backend/.gradle/

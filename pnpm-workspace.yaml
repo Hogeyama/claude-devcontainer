@@ -1,0 +1,13 @@
+packages:
+  - frontend
+# Hoist everything into the root node_modules: the agent shares exactly that
+# directory with the host copy-on-write. A per-package node_modules would need
+# its own overlay volume.
+nodeLinker: hoisted
+# Optional helpers of dockerode (a testcontainers dependency). The SSH/native
+# pieces are unused against DinD, so their build scripts stay off — explicitly,
+# so that `pnpm install` does not flag them as ignored.
+allowBuilds:
+  cpu-features: false
+  protobufjs: false
+  ssh2: false

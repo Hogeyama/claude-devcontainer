@@ -1,0 +1,41 @@
+# Demo app stack: a pnpm-built frontend and a Gradle-built backend that start
+# together. Inside the agent it runs on DinD (DOCKER_HOST=tcp://127.0.0.1:2375);
+# on the host it uses the local Docker. Build the artifacts first:
+#
+#   pnpm -C frontend build
+#   cd backend && ./gradlew installDist   # --offline inside the agent
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U app -d appdb"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  backend:
+    build: ./backend
+    environment:
+      JDBC_URL: jdbc:postgresql://db:5432/appdb
+      JDBC_USER: app
+      JDBC_PASSWORD: app
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Alpine's busybox wget; the JRE image has no curl.
+      test: [CMD-SHELL, "wget -q -O /dev/null http://localhost:8080/api/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  frontend:
+    build: ./frontend
+    ports:
+      # dind-bridge mirrors this to the agent's 127.0.0.1:3000.
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy

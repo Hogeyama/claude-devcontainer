@@ -34,6 +34,9 @@
             packages = with pkgs; [
               python3
               nodejs_22
+              pnpm
+              jdk17_headless
+              gradle
               git
               docker-client
               openssl

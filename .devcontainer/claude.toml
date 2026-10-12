@@ -2,8 +2,10 @@
 
 [docker]
 enabled = true
-# Images needed by this repository's offline Docker probes.
-images = ["busybox:1.37", "testcontainers/ryuk:0.14.0"]
+# Images needed by this repository's offline Docker probes and the demo app
+# stack (the root compose.yaml): postgres for the backend and the
+# Testcontainers tests, a JRE and nginx for the compose-built images.
+images = ["busybox:1.37", "testcontainers/ryuk:0.14.0", "postgres:16-alpine", "eclipse-temurin:17-jre-alpine", "nginx:1.27-alpine"]
 
 [nix]
 enabled = true

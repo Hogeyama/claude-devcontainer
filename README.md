@@ -336,10 +336,37 @@ devcontainer up --remove-existing-container
 
 ## このリポジトリを開発する
 
-このリポジトリ自身も同じ構成で、`.devcontainer/claude`が利用者のリポジトリに取り込まれる部分、その外がこのリポジトリ用のファイルです。`claude.toml`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、Git、Docker CLI、OpenSSL、ShellCheck、playwright-cli（Chromium）が入り、ホストでは`nix develop`、agentではBashから使えます。
+このリポジトリ自身も同じ構成で、`.devcontainer/claude`が利用者のリポジトリに取り込まれる部分、その外がこのリポジトリ用のファイルです。`claude.toml`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、pnpm、JDK 17、Gradle、Git、Docker CLI、OpenSSL、ShellCheck、playwright-cli（Chromium）が入り、ホストでは`nix develop`、agentではBashから使えます。
 
 sumiのデモ用の公開値を`.secrets/sumi/secrets.txt`にコミットしています。これはcloneにも入ります。実際の秘密をGitへコミットしないでください。sumiの一覧の実ファイルは引き続きsumiサービスだけにmountします。旧構成でこのデモファイルに付けた`assume-unchanged`は不要です。
 
-`.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れ、`compose.yaml`はホストの`~/.gradle`をagentの`~/.gradle`にcopy-on-writeでmountします。agentのGradleはホストで取得済みの配布物と依存でオフラインに動き、agentが書き込んだものは`~/.local/state/claude-devcontainer/gradle-home/upper`に残ってホストの`~/.gradle`には入りません。agentの起動中は、ホストでGradleを実行しないでください（overlayfsは、mount中に下の層が変わったときの動作を定めていません）。どれもこのリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`のテンプレートから始めてください。
+`.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKを入れ、`compose.yaml`はホストの`~/.gradle`をagentの`~/.gradle`にcopy-on-writeでmountします。agentのGradleはホストで取得済みの配布物と依存でオフラインに動き、agentが書き込んだものは`~/.local/state/claude-devcontainer/gradle-home/upper`に残ってホストの`~/.gradle`には入りません。agentの起動中は、ホストでGradleを実行しないでください（overlayfsは、mount中に下の層が変わったときの動作を定めていません）。どれもこのリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`のテンプレートから始めてください。
+
+依存の共有とDinDのデモとして、ルートに小さなアプリを置いています。
+
+- `frontend/`: pnpmで管理するReact+Viteのフロントエンド。`pnpm-workspace.yaml`の`nodeLinker: hoisted`で依存がルートの`node_modules`だけに集まるため、agentへは既存のoverlayだけで共有できます。vitestとtestcontainersのテストがあり、DinD上にbusyboxを起動してHTTPを検証します
+- `backend/`: Javalinのバックエンド。Gradleはwrapper経由で、配布物と依存はホストの`~/.gradle`から供給します。`/api/message`がPostgresの値を返します。JUnitとTestcontainersのテストがあり、DinD上に`postgres:16-alpine`を起動します
+- `compose.yaml`: 上の2つとPostgresを協調して起動するアプリ用のスタック。agentの中ではDinDで動き、`3000:80`のpublishがdind-bridgeでagentの`127.0.0.1:3000`に中継されます。ホストでもそのまま起動できます
+
+依存の取得ができるのはホストだけなので、先にホストで用意します。
+
+```sh
+# ホスト（nix developの中）
+pnpm install
+cd backend && ./gradlew build
+```
+
+agentの中では、共有された依存でテストと起動ができます。
+
+```sh
+pnpm -C frontend test                          # busyboxコンテナへのfetch
+cd backend && ./gradlew --offline test; cd ..  # Testcontainers + postgres
+pnpm -C frontend build && cd backend && ./gradlew --offline installDist && cd ..
+docker compose up -d                           # DinD上でdb→backend→frontendの順に起動
+playwright-cli open http://localhost:3000
+playwright-cli screenshot --filename demo.png
+```
+
+agentに必要なイメージは`claude.toml`の`docker.images`に書いてあります。
 
 `main`へpushすると、GitHub Actions（[`.github/workflows/dist.yml`](.github/workflows/dist.yml)）が[`scripts/build-dist.sh`](scripts/build-dist.sh)で`dist`ブランチにコミットを1つ足してpushします。中身は`main`の`.devcontainer/claude`と、それを最後に変更した`main`のコミットのURLを書いた`UPSTREAM`ファイルです。`.devcontainer/claude`にもそのコミットにも変化がなければ何もしません。`dist`は先へ足すだけで書き換えないので、`main`をforce pushしても利用者の`git subtree pull`は壊れません。ただし、force pushで消えた`main`のコミットを指す古い`UPSTREAM`のリンクは、いずれ見られなくなります。`dist`は手で変更しないでください。
