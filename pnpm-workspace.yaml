@@ -4,10 +4,12 @@ packages:
 # directory with the host copy-on-write. A per-package node_modules would need
 # its own overlay volume.
 nodeLinker: hoisted
-# The agent's node_modules is the host's, shared copy-on-write: it is always
-# already installed, and `pnpm install` inside the agent cannot reach a
-# registry. Do not verify/reinstall dependencies before running a script.
-verifyDepsBeforeRun: false
+# The agent's node_modules is the host's, shared copy-on-write, and `pnpm
+# install` inside the agent cannot reach a registry. The default `install`/
+# `prompt` behavior tries to reinstall before running a script and fails
+# there; `warn` keeps the up-to-date check on the host but never modifies the
+# shared modules.
+verifyDepsBeforeRun: warn
 # Optional helpers of dockerode (a testcontainers dependency). The SSH/native
 # pieces are unused against DinD, so their build scripts stay off — explicitly,
 # so that `pnpm install` does not flag them as ignored.
