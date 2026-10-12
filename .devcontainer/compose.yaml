@@ -18,3 +18,19 @@ services:
         tmpfs:
           size: 65536
           mode: 0700
+      # The host's Gradle home, copy-on-write: Gradle in the agent runs
+      # offline from the host's distributions and dependencies, and what it
+      # writes stays in the upper directory instead of reaching the host.
+      - gradle-home:/home/node/.gradle
+
+volumes:
+  # initializeCommand (devcontainer.json) creates the directories. The options
+  # are fixed when Docker first creates the volume; after changing them, remove
+  # it with `.devcontainer/claude/scripts/compose.sh down --volumes`. Do not
+  # run Gradle on the host while the agent runs: overlayfs leaves changes to the
+  # lower directory under a mount undefined.
+  gradle-home:
+    driver_opts:
+      type: overlay
+      device: overlay
+      o: lowerdir=${HOME}/.gradle,upperdir=${HOME}/.local/state/claude-devcontainer/gradle-home/upper,workdir=${HOME}/.local/state/claude-devcontainer/gradle-home/work

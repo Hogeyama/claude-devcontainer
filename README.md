@@ -337,6 +337,6 @@ devcontainer up --remove-existing-container
 
 sumiのデモ用の値を`.secrets/sumi/secrets.txt`にコミットしています。場所は`claude.toml`に相対パスで設定済みで、起動時に権限を0600にします。`.secrets/`はagent側では空の読み取り専用領域で隠され、一覧はsumiコンテナだけに共有されます。agentからはこのファイルが読めず、`git status`で削除扱いになるので、clone後にホストで`git update-index --assume-unchanged .secrets/sumi/secrets.txt`を一度実行してください。
 
-`.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れていますが、このリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`のテンプレートから始めてください。
+`.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れ、`compose.yaml`はホストの`~/.gradle`をagentの`~/.gradle`にcopy-on-writeでmountします。agentのGradleはホストで取得済みの配布物と依存でオフラインに動き、agentが書き込んだものは`~/.local/state/claude-devcontainer/gradle-home/upper`に残ってホストの`~/.gradle`には入りません。agentの起動中は、ホストでGradleを実行しないでください（overlayfsは、mount中に下の層が変わったときの動作を定めていません）。どれもこのリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`のテンプレートから始めてください。
 
 `main`へpushすると、GitHub Actions（[`.github/workflows/dist.yml`](.github/workflows/dist.yml)）が[`scripts/build-dist.sh`](scripts/build-dist.sh)で`dist`ブランチにコミットを1つ足してpushします。中身は`main`の`.devcontainer/claude`と、それを最後に変更した`main`のコミットのURLを書いた`UPSTREAM`ファイルです。`.devcontainer/claude`にもそのコミットにも変化がなければ何もしません。`dist`は先へ足すだけで書き換えないので、`main`をforce pushしても利用者の`git subtree pull`は壊れません。ただし、force pushで消えた`main`のコミットを指す古い`UPSTREAM`のリンクは、いずれ見られなくなります。`dist`は手で変更しないでください。
