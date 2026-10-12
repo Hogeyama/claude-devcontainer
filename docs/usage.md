@@ -2,6 +2,88 @@
 
 基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、取り込んだリポジトリのルートで実行してください。認証情報は、ホストのClaude Codeのログインと`~/.config/claude-devcontainer/credentials`から読みます。
 
+## 初回起動
+
+ホストで開始コミットを push し、VS Code の「Reopen in Container」か `devcontainer up` で起動する。空の workspace volume は起動処理が自動で初期化し、ホストが指定したコミットを detached HEAD で checkout する。人間がコンテナ内で clone する操作は不要である。
+
+エージェントは作業を始めるときにブランチを作る。
+
+```sh
+git switch -c agent/task-name
+# 編集、テスト、commit
+git push -u origin agent/task-name
+```
+
+作業ブランチ名はタスクごとに選ぶ。複数の作業で同じブランチを使い回さない。
+
+## ホストでレビューして取り込む
+
+```sh
+git fetch --no-tags origin refs/heads/agent/task-name
+agent_commit=$(git rev-parse --verify 'FETCH_HEAD^{commit}')
+base_commit=$(git rev-parse --verify 'HEAD^{commit}')
+git log --oneline "$base_commit..$agent_commit"
+git diff "$base_commit" "$agent_commit"
+```
+
+レビューでは、ホストで実行する `package.json`、`.envrc`、ビルドスクリプト、`.devcontainer/` などの変更も確認する。`--no-tags` とブランチを指定した fetch により、レビューと無関係なタグを取り込まない。
+
+承認したら、同じコミットIDを取り込む。
+
+```sh
+test "$(git rev-parse HEAD)" = "$base_commit" && git merge --ff-only "$agent_commit"
+```
+
+レビュー中にエージェントが追加で push したり、IDE が background fetch したりしても、変数に保存したIDは変わらない。ホストの HEAD が変わった場合は差分を確認し直す。ff できなければホストの変更を push し、エージェントに rebase を依頼して、更新後のコミットを再びレビューする。
+
+ホストでテストするために別 worktree へ取り出す場合も、レビュー済みのIDを指定する。
+
+```sh
+git worktree add --detach ../repo.agent "$agent_commit"
+```
+
+取り出したファイルは IDE やビルドツールから実行されるため、別 worktree への取り出しもレビューのあとに行う。`git pull` は fetch と取り込みを続けて行うので、このレビュー手順では使わない。
+
+## ホストの変更を渡す
+
+ホストでコミットして `git push origin main` する。エージェントは `git fetch origin` のあと、必要に応じて `origin/main` に rebase / merge する。通常の Git 操作なので、ホスト側の専用コマンドは要らない。
+
+## 依存の共有と更新
+
+ルートの`node_modules`はホストをlower、agent専用の永続ディレクトリをupper/workとするCoWです。ホストに存在しなければ空のディレクトリを作ります。agentの書き込み・削除はupperに残り、ホストやpnpmのstoreには書き戻しません。upper/workの場所は`.devcontainer/.generated/settings.env`の`CLAUDE_DEVCONTAINER_NODE_UPPER`と`CLAUDE_DEVCONTAINER_NODE_WORK`で確認できます。既定は`$XDG_STATE_HOME`（未指定なら`~/.local/state`）以下で、リポジトリの絶対パスごとに分かれます。overlayのオプションとして表現できない空白、カンマ、コロン、バックスラッシュ、引用符を含むパスは拒否します。
+
+npm、通常のpnpm、Yarnのnode_modulesモードを対象にします。Yarn PnPや外部のvirtual storeは自動対応しません。native addonにはホストとコンテナのNode・libc等の互換性が必要です。新しい依存をオンライン取得する仕組みではありません。
+
+モノレポの各パッケージにも依存が必要なら、ホストで対応するlower/upper/workを用意して、`.devcontainer/compose.yaml`へ同じ方式のvolumeを追加します。以下の絶対パスは自分の環境のものへ置き換えてください。upper/workは同じファイルシステム上、リポジトリとビルド対象の外に置き、agentのUIDで書けるようにします。
+
+```yaml
+services:
+  agent:
+    volumes:
+      - type: volume
+        source: app-node-modules
+        target: /workspace/packages/app/node_modules
+        volume: {nocopy: true}
+volumes:
+  app-node-modules:
+    driver_opts:
+      type: overlay
+      device: overlay
+      o: lowerdir=/absolute/repo/packages/app/node_modules,upperdir=/absolute/state/app/upper,workdir=/absolute/state/app/work
+```
+
+初回cloneは実際の`node_modules`マウントとその祖先ディレクトリだけを許容します。普通の既存ファイルや、取得コミットの追跡パスとマウントの衝突は拒否します。
+
+CoWはスナップショットではないため、mount中にホストのlowerを変更しないでください。依存を更新するときは次の順です。
+
+1. agent側の依存への変更に残すものがあれば退避する。
+2. ホストで`.devcontainer/claude/scripts/compose.sh down`を実行し、コンテナを停止・削除してoverlayをアンマウントする。`--volumes`は付けない。
+3. ホストで使っているpackage managerにより依存を更新する。
+4. `settings.env`に記載されたNode用のupper/workディレクトリだけを削除し、同じ場所に空で作り直す。overlayfsが作るwork内のroot所有の領域の削除には、管理者権限が必要な場合がある。追加したパッケージ用overlayも同様に更新する。
+5. `devcontainer up`で起動する。workspace volumeとGradleのupperは削除しない。
+
+通常の再起動・再作成はupperを保持します。Gradleは既存の`~/.gradle`のCoWを使い、`./gradlew --offline jar test`を実行します。ホストでGradleのキャッシュを更新する場合も、先にoverlayをアンマウントしてください。
+
 ## 認証情報を更新する
 
 Claudeの認証には、ホストのClaude Codeのログインを使います。ホストで`claude`にログインしていれば、設定は要りません。ログインし直した場合や、`~/.config/claude-devcontainer/credentials`で`proxy.hosts`が参照する秘密（`GITHUB_TOKEN`など）を変えた場合は、注入スクリプトを再実行してください。proxyやagentの再起動・再ビルドは不要です。
@@ -52,7 +134,7 @@ images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
 - コンテナの起動時は、読み込みが終わるまで`up`が待ちます。失敗したイメージは警告に出ます。詳しくは`~/.local/state/claude-devcontainer/load-images.log`を見てください。
 - `up`の後に`images`を変えた場合は、ホストで`.devcontainer/claude/scripts/load-images.py`を実行すると反映できます。
 
-イメージ読み込みスクリプトは、`images`にある名前をホストでそのままpullするので、`claude.toml`は`.devcontainer/`に置いてagentから書き換えられないようにしています。agentが名前を選べると、ホストを任意のregistryへ接続させられるからです。agentのコミットで`claude.toml`が変わっていないかも確認してください。
+イメージ読み込みスクリプトはホスト側の`claude.toml`から生成した一覧を使います。agentが編集できるclone内の一覧は使いません。`claude.toml`の変更をホストへ取り込むとpull先も変わるため、コミットのレビュー時に確認してください。
 
 投入後は、agentのシェルから`docker run`や`docker build --network=none`を実行できます。buildには投入済みのbase imageとローカルにある依存ファイルを使ってください。Gradleは`--offline`で実行し、その他のツールも事前に用意したキャッシュや依存ファイルを使ってください。ビルド中のオンラインpackage installには対応していません。
 
@@ -72,7 +154,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagent
 
 VS CodeのGUI接続と、ホスト認証が転送されないことは未検証です。Dev Containersには[ホストのGit認証を共有する機能](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials)があります。使う場合は認証情報のない専用ホストアカウントと専用editor profileを用意してください。SSH／GPG agentや、ホストのGitHub／Docker認証を用意・転送しないことが利用条件です。
 
-認証用環境変数を渡さずに、専用profileのVS Codeを起動してこのリポジトリを開いてください。Dev Containersの「Reopen in Container」を実行すると、作業ディレクトリは`/workspace`になります。ホストのホームや認証用socketを追加mountしないでください。起動後、認証用環境変数を設定したホストの別ターミナルから`python3 .devcontainer/claude/scripts/inject-credentials.py`を1回実行し、認証値をproxyへ渡してください。その後はVS Codeのコンテナ内ターミナルで通常どおり`claude`を実行できます。
+認証用環境変数を渡さずに、専用profileのVS Codeを起動してこのリポジトリを開いてください。Dev Containersの「Reopen in Container」を実行すると、作業ディレクトリは`/workspace`になります。ホストのホームや認証用socketを追加mountしないでください。起動前にホストのcredentialsファイルを設定してください。自動注入と初回cloneが終わるまで起動処理が待ちます。その後はVS Codeのコンテナ内ターミナルで通常どおり`claude`を実行できます。
 
 ビルド、テスト、デバッグやコードを実行する拡張機能はコンテナ内で動かしてください。改変されたGradle設定を人間が実行する場合も、コンテナ内であれば通信制限の対象です。ホストで実行するスクリプト、Dockerfile、起動設定は先にレビューしてください。
 

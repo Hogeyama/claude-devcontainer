@@ -10,7 +10,7 @@ enabled = true
 
 [sumi]
 enabled = true
-# Kept in this repository; compose.yaml hides it from the agent.
+# Public demo fixture included in the clone; keep real secret lists outside Git.
 secrets = "../.secrets/sumi/secrets.txt"
 
 # GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories to

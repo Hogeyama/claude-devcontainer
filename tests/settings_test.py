@@ -162,7 +162,7 @@ connectors = ["mcpsrv_01A", "mcprs_02B"]
 dind = "10.99.1"
 ''')
         out = self.generate()
-        self.assertEqual(self.env(), {
+        self.assertEqual({k: v for k, v in self.env().items() if '_NODE_' not in k}, {
             'CLAUDE_DEVCONTAINER_UID': "'1001'", 'CLAUDE_DEVCONTAINER_GID': "'1000'",
             'CLAUDE_DEVCONTAINER_DIND': "'1'", 'CLAUDE_DEVCONTAINER_NIX': "'0'",
             'CLAUDE_DEVCONTAINER_NIX_REF': "'HEAD'",
@@ -248,6 +248,28 @@ dind = "10.99.1"
         settings.check(data, 'claude.toml')
         self.assertEqual(set(data['proxy']['hosts']), {'api.github.com', 'github.com'})
         self.assertEqual(data['proxy']['hosts']['api.github.com']['env'], ['GH_TOKEN'])
+
+    def test_node_paths_are_repo_keyed_and_do_not_clear_state(self):
+        with tempfile.TemporaryDirectory() as state:
+            env = {'XDG_STATE_HOME': state}
+            paths = settings.node_modules_paths(self.root, env)
+            other = settings.node_modules_paths(self.root / 'other', env)
+            self.assertEqual(paths['CLAUDE_DEVCONTAINER_NODE_LOWER'], str(self.root / 'node_modules'))
+            self.assertNotEqual(paths['CLAUDE_DEVCONTAINER_NODE_UPPER'], other['CLAUDE_DEVCONTAINER_NODE_UPPER'])
+            settings.prepare_node_modules(self.root, env)
+            upper = Path(paths['CLAUDE_DEVCONTAINER_NODE_UPPER'])
+            (upper / 'keep').write_text('keep')
+            settings.prepare_node_modules(self.root, env)
+            self.assertEqual((upper / 'keep').read_text(), 'keep')
+            self.assertTrue((self.root / 'node_modules').is_dir())
+            settings.generate(self.root, env)
+            for name, value in paths.items():
+                self.assertEqual(self.env()[name], "'" + value + "'")
+
+    def test_overlay_option_delimiters_and_state_in_repo_are_refused(self):
+        for state in ('/tmp/a,b', '/tmp/a:b', str(self.root / 'state')):
+            with self.subTest(state=state), self.assertRaises(ValueError):
+                settings.node_modules_paths(self.root, {'XDG_STATE_HOME': state})
 
 
 if __name__ == '__main__':

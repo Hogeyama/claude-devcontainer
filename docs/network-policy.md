@@ -43,64 +43,31 @@ agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの
 
 ## ホストが実行する設定の保護
 
-agentが書き換えたものをホストが実行すると、通信の制限を外されたり、ホストで認証情報を盗まれたりします。そのため同梱のCompose設定は、ホストが実行・参照するものをagentへread-onlyでmountします。
+agentは専用のDocker volumeにある独立cloneで作業します。ホストの作業ツリー、index、refs、Git設定、hooksをmountしません。agentが自分のindexに`assume-unchanged`を付けても、ホストのレビューには影響しません。
 
-| パス | ホストでの使われ方 |
-|---|---|
-| `.devcontainer/` | compose設定、proxyの通信ルール、`initializeCommand`、認証情報の注入、`agent-setup.sh`。次の起動時にホストがビルド・実行する |
-| `.git/config` | `core.fsmonitor`、`core.hooksPath`、`filter.*`、`include.path`など、ホストのGitにコマンドを実行させる設定を書ける |
-| `.git/hooks/` | ホストのGitが実行する |
-| `.git/modules/` | サブモジュールのconfigとhooks |
+ホストの生成物は`/run/host/generated`、Nixの環境は`/run/host/nix-env`にread-onlyで渡します。コンテナの管理スクリプトはこれらを読み、clone内の`.devcontainer/`を管理用入力として使いません。Gitの初期化・取得は権限を落としたnodeで行います。ホストからGitを実行する場合も`docker exec --user node`を使ってください。
 
-`.git`自体も別にmountしているので、agentは`.git`を置き換えられません。`objects`や`refs`などは書き込めるので、agentはコミット、ブランチの作成、pushができます。`.git/config`へは書き込めないので、`git push -u`や`git remote add`は失敗します。push先は`git push origin HEAD`のように明示してください。サブモジュールの追加・更新もできません。
+Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはなく、agentの変更はupperへ残ります。Gradleの既存CoWも維持します。利用中にホストのlowerを変更しないでください。[依存の共有と更新](usage.md#依存の共有と更新)を参照してください。
 
-このため、作業ディレクトリはGitリポジトリのルートである必要があります。`git worktree`で作った作業ツリーには対応していません。
+ホストの設定（`~/.claude`の一部と`~/.config/claude-devcontainer/extra/`）は、従来どおりホストからagentへ一方向にコピーします。ホームや認証情報を丸ごとmountしません。
 
-設定のコピースクリプトは、ホストの設定（`~/.claude`の一部と`~/.config/claude-devcontainer/extra/`）をホストからagentへコピーするだけで、mountもしませんし、逆向きにも戻しません。`~/.claude`をmountすると、agentがhookを書き込んで、ホストのClaude Codeに実行させられるからです。コピーの対象は名前を決めたものだけです。`.credentials.json`やセッション履歴はコピーしません。
+### コミットをレビューして取り込む
 
-### 人間が気付く必要があるもの
+共通リモートのブランチはagentも更新できます。pushされたことを承認済みとは扱いません。ホストでfetch後、信頼するベースと候補のコミットIDを固定して比較し、レビューしたIDだけを`git merge --ff-only`で取り込みます。[具体的な手順](usage.md#ホストでレビューして取り込む)を参照してください。
 
-agentは、作業ツリーを書き換えずに、Gitの操作で`.devcontainer/`を変更したコミットを作ったり、indexに載せたりできます。それをホストで`git restore`、`checkout`、`reset --hard`、`pull`などで反映すると、次の`devcontainer up`で実行されます。同じように、agentが途中で止めたrebaseのtodoに`exec`行があると、ホストで`git rebase --continue`したときに実行されます。
-
-どちらも仕組みでは止められないので、反映する前に気付く必要があります。`.devcontainer/`がHEADやindexと異なる状態は`git status`に出ます。シェルのプロンプトに警告を出しておくと見落としにくくなります。starshipを使う場合の設定例です。
-
-```toml
-# ~/.config/starship.toml
-[custom.devcontainer_drift]
-when = """
-top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$top/.devcontainer" ] &&
-! { git -C "$top" diff --quiet HEAD -- .devcontainer && git -C "$top" diff --quiet -- .devcontainer; }
-"""
-shell = ["sh"]
-format = "[⚠ .devcontainer differs from HEAD/index ]($style)"
-style = "bold red"
-```
-
-Powerlevel10kを使う場合は、`~/.p10k.zsh`に次の関数を足し、`POWERLEVEL9K_LEFT_PROMPT_ELEMENTS`に`devcontainer_drift`を加えてください。
-
-```zsh
-# ~/.p10k.zsh
-function prompt_devcontainer_drift() {
-  local top
-  top=$(git rev-parse --show-toplevel 2>/dev/null) && [[ -d $top/.devcontainer ]] || return
-  git -C $top diff --quiet HEAD -- .devcontainer && git -C $top diff --quiet -- .devcontainer && return
-  p10k segment -f red -t '⚠ .devcontainer differs from HEAD/index'
-}
-```
-
-rebaseの途中であることは、starshipでは標準の`git_state`モジュールが、Powerlevel10kでは標準の`vcs`セグメントが表示します。
+`.devcontainer/`、`package.json`、`.envrc`、ビルドスクリプトなど、ホストでコードが実行される変更を確認します。IDEで開く、別worktreeへcheckoutする、ホストでテストする場合も先にレビューします。リモートのrefが後から変わっても、レビュー対象のコミットIDは変えません。
 
 ## 保護の対象外
 
-通信制限が適用されるのはコンテナ内で実行するプログラムです。共有したソースコードをホスト上で実行しても、この制限では保護できません。ホストのDocker操作権限は強い権限を持つため、ホストで使うスクリプトや起動設定はレビューしてから実行してください。
+通信制限が適用されるのはコンテナ内で実行するプログラムです。取り込んだソースコードをホスト上で実行しても、この制限では保護できません。ホストのDocker操作権限は強い権限を持つため、ホストで使うスクリプトや起動設定はレビューしてから実行してください。
 
-作業ツリー全体がagentへ共有されます。この環境は、共有ファイルに含まれる秘密の読取りを防ぐものではありません。ホストのホーム、Docker socket、秘密のディレクトリを追加mountしないでください。Claudeが受け取る入力元の制限も対象外です。
+コミットに含まれるファイルはagentへ渡ります。未コミット・未追跡ファイルは転送しませんが、Gitに入れた秘密の読取りは防げません。ホストのホーム、Docker socket、秘密のディレクトリを追加mountしないでください。Claudeが受け取る入力元の制限も対象外です。
 
 VS Codeから使う場合には、エディタを通じたホスト認証の転送にも注意が必要です。[VS Codeの利用条件](usage.md#vs-codeで開く)を参照してください。
 
 ## 通信ルールを変更する
 
-Anthropicへのルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。それ以外の接続先は、リポジトリの`.devcontainer/claude.toml`の`proxy.hosts`に書きます。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。agentからは編集できません。
+Anthropicへのルールは[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.py)に固定しています。それ以外の接続先は、リポジトリの`.devcontainer/claude.toml`の`proxy.hosts`に書きます。どちらもproxyのimageをビルドするときに組み込むので、ファイルを編集するだけでは反映されません。clone内の設定はagentが編集できますが、ホストへレビューして取り込むまで反映しません。
 
 追加先の認証方法と送信先の制限をレビューしてから、READMEの停止手順で環境を停止し、`devcontainer up`で起動し直してください。proxyのimageは起動のたびにビルドし直されます。変更がなければキャッシュが使われます。`devcontainer build`がビルドするのはagentのimageだけなので、proxyの変更には使えません。
 
@@ -145,7 +112,7 @@ agentのNode.jsの`fetch`も、`NODE_USE_ENV_PROXY=1`によりproxyを通りま�
 
 #### 送信先を決めるのはリポジトリ
 
-どの秘密をどの接続先へ付けるかは、リポジトリの`claude.toml`が決めます。`.devcontainer/`を変えるコミットを取り込むと、ホストの秘密が別の接続先へ送られえます。`agent-setup.sh`がホストでrootで実行されるのと同じく、`.devcontainer/`の変更はレビューしてから取り込んでください（[人間が気付く必要があるもの](#人間が気付く必要があるもの)）。認証情報のファイルには、agentに使わせてよい秘密だけを置いてください。
+どの秘密をどの接続先へ付けるかは、リポジトリの`claude.toml`が決めます。`.devcontainer/`を変えるコミットを取り込むと、ホストの秘密が別の接続先へ送られえます。`agent-setup.sh`がホストでrootで実行されるのと同じく、`.devcontainer/`の変更はレビューしてから取り込んでください（[コミットをレビューして取り込む](#コミットをレビューして取り込む)）。認証情報のファイルには、agentに使わせてよい秘密だけを置いてください。
 
 要求のpathとqueryには、agentが任意のデータを載せられます。追加した接続先は、そのまま外部への送信経路になります。認証を付けた接続先では、agentはそのトークンの権限でできることをすべてできます。トークンの権限は必要な範囲に絞ってください。
 
@@ -163,7 +130,7 @@ inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 
 `claude.local.toml`のホストは`claude.toml`のホストに追加されます。同じホストが両方にある場合は、`claude.local.toml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`、`env`は混ぜません。秘密は`claude.toml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
 
-`claude.toml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合は起動処理が失敗し、`claude.local.toml:`で始まる理由を表示します。agentからは編集できませんが、読むことはできます。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
+`claude.toml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合は起動処理が失敗し、`claude.local.toml:`で始まる理由を表示します。ホストの未追跡ファイルなのでcloneには入りません。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
 
 ### 社内CAを信頼させる
 

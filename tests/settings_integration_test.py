@@ -39,7 +39,10 @@ class SettingsIntegrationTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(prefix='cdc-settings-')
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        (self.root / '.git').mkdir()
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=t', '-c', 'user.email=t@example.com',
+                        'commit', '--allow-empty', '-qm', 'fixture'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'remote', 'add', 'origin', 'https://github.com/o/r.git'], check=True)
         self.config = self.root / '.devcontainer'
         scripts = self.config / 'claude/scripts'
         scripts.mkdir(parents=True)
@@ -47,7 +50,7 @@ class SettingsIntegrationTest(unittest.TestCase):
         shutil.copy(CORE / 'compose.yaml', self.config / 'claude/compose.yaml')
         shutil.copy(CORE / 'template/compose.yaml', self.config / 'compose.yaml')
         shutil.copy(CORE / 'proxy/policy.py', self.config / 'claude/proxy/policy.py')
-        for script in ('initialize.sh', 'settings.py', 'compose.sh'):
+        for script in ('initialize.sh', 'settings.py', 'compose.sh', 'workspace-source.py'):
             shutil.copy(CORE / 'scripts' / script, scripts / script)
         # Replace background side effects, keeping the real initialization
         # script and its decision to load images.
@@ -57,6 +60,9 @@ class SettingsIntegrationTest(unittest.TestCase):
             path.chmod(0o755)
         (scripts / 'pick-networks.py').write_text(PICK_NETWORKS)
         self.env = environment()
+        state = tempfile.TemporaryDirectory(prefix='cdc-settings-state-')
+        self.addCleanup(state.cleanup)
+        self.env['XDG_STATE_HOME'] = state.name
 
     def write(self, name, text):
         (self.config / name).write_text(text)
@@ -162,6 +168,20 @@ class SettingsIntegrationTest(unittest.TestCase):
         refused = run('up', '-d')
         self.assertEqual(refused.returncode, 1)
         self.assertIn('fix the settings first', refused.stderr)
+
+    def test_workspace_mounts_are_isolated(self):
+        self.initialize()
+        config = self.compose_config()
+        mounts = {m['target']: m for m in config['services']['agent']['volumes']}
+        self.assertEqual(mounts['/workspace']['type'], 'volume')
+        self.assertEqual(mounts['/workspace/node_modules']['type'], 'volume')
+        self.assertFalse(any(p.startswith('/workspace/.git') for p in mounts))
+        self.assertNotIn('/workspace/.devcontainer', mounts)
+        for path in ('/run/host/generated', '/run/host/nix-env'):
+            self.assertTrue(mounts[path]['read_only'])
+        options = config['volumes']['node-modules']['driver_opts']
+        self.assertEqual(options['type'], 'overlay')
+        self.assertIn('lowerdir=' + str(self.root / 'node_modules'), options['o'])
 
 
 if __name__ == '__main__':

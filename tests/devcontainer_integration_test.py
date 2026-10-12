@@ -65,16 +65,16 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         extra = cls.directory / 'config/claude-devcontainer/extra'
         extra.mkdir(parents=True)
         (extra / '.gitconfig').write_text('[user]\n\tname = fixture-user\n')
+        (extra.parent / 'credentials').write_text('GITHUB_TOKEN=synthetic-managed-token\nANTHROPIC_API_KEY=synthetic-managed-token\n')
+        cls.addClassCleanup(docker, 'run', '--rm', '--network', 'none', '--entrypoint', 'rm',
+                            '-v', str(cls.directory / 'state') + ':/state', AGENT_IMAGE,
+                            '-rf', '/state/claude-devcontainer/node-modules')
         cls.start_environment()
         # initializeCommand chose free subnets unless they were set.
         chosen = cls.workspace / '.devcontainer/.generated/networks.env'
         cls.dind_net = SUBNETS['dind'] or dict(
             line.split('=', 1) for line in chosen.read_text().splitlines() if '=' in line and not line.startswith('#')
         )['CLAUDE_DEVCONTAINER_DIND_NET']
-        denied = cls.exec('curl', '--max-time', '5', '-s', '-o', '/dev/null', '-w', '%{http_code}',
-                          'https://api.github.com/user')
-        assert denied.stdout == '403', denied.stdout + denied.stderr
-        assert cls.compose_run('exec', '-T', 'proxy', 'sh', '-c', 'test ! -e /tmp/upstream.jsonl') == ''
         cls.inject_credentials('api-key')
         # docker.images had them loaded into DinD before `up` returned.
         cls.exec('docker', 'image', 'inspect', 'busybox:1.37', 'testcontainers/ryuk:0.14.0')
@@ -118,20 +118,54 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         local += '[subnets]\n' + ''.join(f'{key} = "{net}"\n' for key, net in SUBNETS.items() if net)
         (cls.workspace / '.devcontainer/claude.local.toml').write_text(local)
         shutil.copytree(ROOT / 'tests', cls.workspace / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
+        (cls.workspace / 'package.json').write_text(json.dumps({
+            'private': True, 'scripts': {'test': 'node -e "require(\'testcontainers\')"'}}))
+        nested = cls.workspace / 'packages/app'
+        nested.mkdir(parents=True)
+        (nested / 'package.json').write_text('{"private":true}\n')
         git = ['git', '-C', str(cls.workspace), '-c', 'user.name=t', '-c', 'user.email=t@example.com']
         for args in (['init', '-q'], ['add', '-A'], ['commit', '-qm', 'fixture']):
             subprocess.run([*git, *args], check=True)
+        dependency_source = os.environ.get('TESTCONTAINERS_NODE_MODULES')
+        if dependency_source:
+            shutil.copytree(dependency_source, cls.workspace / 'node_modules', symlinks=True)
         # Delay the production entrypoint so that `up` must wait for postStartCommand.
-        startup = cls.directory / 'entrypoint.sh'
+        remote_root = cls.directory / 'repos'
+        remote = remote_root / 'example/repo.git'
+        remote.parent.mkdir(parents=True)
+        subprocess.run(['git', 'clone', '--bare', str(cls.workspace), str(remote)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(remote), 'config', 'http.receivepack', 'true'], check=True)
+        subprocess.run([*git, 'remote', 'add', 'origin', 'https://github.com/example/repo.git'], check=True)
+        cls.initial_commit = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
+        if (os.getuid(), os.getgid()) != (int(AGENT_UID), int(AGENT_GID)):
+            docker('run', '--rm', '--network', 'none', '--user', '0', '--entrypoint', 'chown',
+                   '-v', str(remote_root) + ':/repos', AGENT_IMAGE, '-R', f'{AGENT_UID}:{AGENT_GID}', '/repos')
+        upstream = cls.directory / 'upstream'
+        upstream.mkdir()
+        for name in ('server.pem', 'server.key'):
+            shutil.copy(cls.directory / name, upstream / name)
+        shutil.copy(ROOT / 'tests/fixtures/git_server.py', upstream / 'git_server.py')
+        startup_dir = cls.directory / 'startup'
+        startup_dir.mkdir()
+        startup = startup_dir / 'entrypoint.sh'
         startup.write_text('#!/bin/sh\nsleep 3\nexec /usr/local/bin/entrypoint.sh "$@"\n')
         startup.chmod(0o755)
         override = cls.directory / 'override.json'
         override.write_text(json.dumps({'services': {
-            'agent': {'image': AGENT_IMAGE, 'volumes': [str(cls.directory) + ':/startup-fixture:ro'],
+            'agent': {'image': AGENT_IMAGE, 'volumes': [str(startup_dir) + ':/startup-fixture:ro',
+                          'app-node-modules:/workspace/packages/app/node_modules'],
                       'entrypoint': ['/startup-fixture/entrypoint.sh']},
             'sumi': {'image': SUMI_IMAGE},
-            'proxy': {'image': PROXY_IMAGE, 'entrypoint': ['python', '/fixtures/proxy_server.py'],
-                      'volumes': [str(cls.directory) + ':/fixtures:ro']}}}))
+            'git-fixture': {
+                'image': AGENT_IMAGE, 'user': f'{AGENT_UID}:{AGENT_GID}', 'cap_drop': ['ALL'],
+                'entrypoint': ['python3', '/fixtures/git_server.py'],
+                'volumes': [str(remote_root) + ':/repos', str(upstream) + ':/fixtures:ro'],
+                'networks': ['proxy-external'],
+                'healthcheck': {'test': ['CMD', 'python3', '-c', "import socket; socket.create_connection(('127.0.0.1',9443),2).close()"],
+                                'interval': '1s', 'timeout': '3s', 'retries': 30}},
+            'proxy': {'image': PROXY_IMAGE, 'environment': {'GIT_FIXTURE_HOST': 'git-fixture'},
+                      'depends_on': {'git-fixture': {'condition': 'service_healthy'}}, 'entrypoint': ['python', '/fixtures/proxy_server.py'],
+                      'volumes': [str(cls.directory) + ':/fixtures:ro']}}, 'volumes': {'app-node-modules': {}}}))
         config = cls.workspace / '.devcontainer/devcontainer.json'
         value = json.loads(config.read_text())
         value['dockerComposeFile'] = ['compose.yaml', str(override)]
@@ -257,26 +291,74 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         result = self.exec('python3', '/workspace/tests/fixtures/network_probe.py', self.host_ip, str(self.host_server.server_port))
         self.assertIn('direct-network-blocked', result.stdout)
 
-    def test_devcontainer_directory_is_read_only(self):
-        probe = ('set -u; cd /workspace/.devcontainer; '
-                 'for op in "touch new" "echo x >> claude/proxy/addon.py" "rm devcontainer.json" "mv claude moved"; do '
-                 'if sh -c "$op" 2>/dev/null; then echo "writable: $op"; exit 1; fi; done; '
-                 'touch /workspace/.write-check && rm /workspace/.write-check && echo read-only-ok')
-        result = self.exec('sh', '-c', probe, check=False)
-        self.assertIn('read-only-ok', result.stdout, result.stdout + result.stderr)
+    def test_agent_git_and_config_changes_do_not_reach_host(self):
+        host_head = subprocess.check_output(['git', '-C', str(self.workspace), 'rev-parse', 'HEAD'], text=True)
+        paths = ['.git/config', '.devcontainer/devcontainer.json', '.git/index']
+        before = {name: (self.workspace / name).read_bytes() for name in paths}
+        self.exec('sh', '-ec', """
+            git switch -c agent/isolation
+            git config isolation.probe agent-only
+            printf '#!/bin/sh\\nexit 0\\n' > .git/hooks/pre-commit
+            chmod +x .git/hooks/pre-commit
+            printf '\\n' >> .devcontainer/devcontainer.json
+            git add .devcontainer/devcontainer.json
+            git -c user.name=fixture -c user.email=fixture@example.com commit -m isolation
+            git push -u origin agent/isolation
+        """)
+        for name in paths:
+            self.assertEqual((self.workspace / name).read_bytes(), before[name])
+        self.assertEqual(subprocess.check_output(['git', '-C', str(self.workspace), 'rev-parse', 'HEAD'], text=True), host_head)
+        remote = self.directory / 'repos/example/repo.git'
+        self.assertEqual(subprocess.check_output(['git', '-C', str(remote), 'rev-parse', 'refs/heads/agent/isolation'], text=True),
+                         self.exec('git', 'rev-parse', 'HEAD').stdout)
+        self.exec('git', 'switch', '--detach', self.initial_commit)
 
-    def test_git_settings_are_read_only_but_commits_work(self):
-        probe = ('set -u; cd /workspace; '
-                 'for op in "git config core.fsmonitor evil" "echo x > .git/hooks/pre-commit" '
-                 '"echo x >> .git/config" "mkdir .git/modules/x" "mv .git .git.old"; do '
-                 'if sh -c "$op" 2>/dev/null; then echo "writable: $op"; exit 1; fi; done; '
-                 'git checkout -qb agent-branch && echo change > agent-file && git add agent-file '
-                 '&& git -c user.name=a -c user.email=a@example.com commit -qm agent && echo git-ok')
-        result = self.exec('sh', '-c', probe, check=False)
-        self.assertIn('git-ok', result.stdout, result.stdout + result.stderr)
-        log = subprocess.run(['git', '-C', str(self.workspace), 'log', '-1', '--format=%s', 'agent-branch'],
-                             capture_output=True, text=True, check=True)
-        self.assertEqual(log.stdout.strip(), 'agent')
+    def test_initial_clone_and_readonly_host_inputs(self):
+        self.assertEqual(self.exec('cat', 'packages/app/package.json').stdout, '{"private":true}\n')
+        self.exec('sh', '-ec', 'echo writable > packages/app/node_modules/probe')
+        self.assertEqual(self.exec('git', 'rev-parse', 'HEAD').stdout.strip(), self.initial_commit)
+        self.assertEqual(self.exec('git', 'remote', 'get-url', 'origin').stdout.strip(), 'https://github.com/example/repo.git')
+        for path in ('/run/host/generated/workspace.json', '/run/host/generated/images.txt', '/run/host/nix-env/probe'):
+            self.assertNotEqual(self.exec('sh', '-c', 'echo x >> "$1"', 'sh', path, check=False).returncode, 0)
+        config = json.loads(self.compose_run('config', '--format', 'json'))
+        mounts = {m['target']: m for m in config['services']['agent']['volumes']}
+        self.assertEqual(mounts['/workspace']['type'], 'volume')
+        self.assertEqual(mounts['/workspace/node_modules']['type'], 'volume')
+        self.assertFalse(any(p.startswith('/workspace/.git') for p in mounts))
+        container = self.compose_run('ps', '-q', 'agent').strip()
+        actual = json.loads(docker('inspect', container))[0]['Mounts']
+        self.assertEqual(next(m['Type'] for m in actual if m['Destination'] == '/workspace'), 'volume')
+        for mount in actual:
+            if mount['Type'] == 'bind' and Path(mount['Source']).is_relative_to(self.workspace):
+                self.assertFalse(mount['RW'])
+                if mount['Destination'] == '/nix/store':
+                    # The disabled Nix feature mounts this empty core directory.
+                    self.assertEqual(mount['Source'], str(self.workspace / '.devcontainer/claude/features/nix-0'))
+                else:
+                    self.assertIn(mount['Destination'], ('/run/host/generated', '/run/host/nix-env'))
+
+
+    def test_existing_clone_preserved_without_remote(self):
+        self.exec('git', 'switch', '-c', 'agent/preserved')
+        self.exec('sh', '-ec', 'echo dirty >> package-fixture; echo cache > node_modules/preserved')
+        self.compose_run('stop', 'git-fixture')
+        try:
+            self.exec('python3', '/usr/local/bin/clone-workspace.py')
+        finally:
+            self.compose_run('start', 'git-fixture')
+        # Use the real CLI so its labels, startup gate and generated overrides
+        # are retained, exactly like user-requested container recreation.
+        result = subprocess.run(['devcontainer', 'up', '--workspace-folder', str(self.workspace),
+                                 '--remove-existing-container', '--default-user-env-probe', 'none'],
+                                env=self.env, capture_output=True, text=True, timeout=600)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        try:
+            self.assertEqual(self.exec('git', 'branch', '--show-current').stdout.strip(), 'agent/preserved')
+            self.assertEqual(self.exec('cat', 'package-fixture').stdout.strip(), 'dirty')
+            self.assertEqual(self.exec('cat', 'node_modules/preserved').stdout.strip(), 'cache')
+        finally:
+            self.exec('rm', '-f', 'package-fixture', 'node_modules/preserved')
+            self.exec('git', 'switch', '--detach', self.initial_commit)
 
     def test_dind_bridge_and_host_network_cannot_egress(self):
         control = self.exec('docker', 'run', '--rm', 'busybox:1.37', 'sh', '-c',
@@ -365,11 +447,10 @@ echo nested-network-blocked
             self.skipTest('actual Testcontainers not run: set TESTCONTAINERS_NODE_MODULES to pinned fixture dependencies')
         package = Path(source) / 'testcontainers/package.json'
         self.assertEqual(json.loads(package.read_text())['version'], '12.1.0')
-        self.compose_run('cp', source, 'agent:/tmp/cdc-sdk-modules')
-        self.exec('sh', '-c', 'printf \'{"private":true}\' > /tmp/package.json; ln -sfn /tmp/cdc-sdk-modules /tmp/node_modules')
+        self.exec('npm', 'test', '--offline', '--silent')
         orphan = 'cdc-sdk-orphan-' + uuid.uuid4().hex[:12]
         result = self.exec('node', '/workspace/tests/fixtures/testcontainers_probe.mjs',
-                           environment={'SDK_PACKAGE_JSON': '/tmp/package.json', 'SDK_ORPHAN_NAME': orphan, 'DEBUG': 'testcontainers*'})
+                           environment={'SDK_PACKAGE_JSON': '/workspace/package.json', 'SDK_ORPHAN_NAME': orphan, 'DEBUG': 'testcontainers*'})
         self.assertIn('actual-testcontainers-start-wait-port-exec-ok', result.stdout)
         for _ in range(100):
             result = self.exec('docker', 'ps', '-aq', '--filter', 'name=' + orphan)

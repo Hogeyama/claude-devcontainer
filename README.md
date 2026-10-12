@@ -20,8 +20,8 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 * agentが接続できるのは、Anthropicと、`.devcontainer/claude.toml`の`proxy.hosts`に書いた接続先だけです。package registryなども、`proxy.hosts`に書かなければ使えません。
 * Anthropicのweb searchなど、Anthropicのサーバーから外部へ接続する機能は使えません。claude.aiのコネクタは、指定したものだけ使えます。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
-* `git worktree`には対応していません。Gitリポジトリのルートで使ってください。
-* agentには`.devcontainer/`と`.git`の設定（config、hooks）のような任意コード実行に直接繋がるファイルを書き換えられないようにしていますが、`.git/objects`等の通常作業に必要なファイルへの書き込みは許しているため、悪意のあるagentはmainブランチのコミットに含まれる`.devcontainer/`を変更できます。これをホストに反映してDev Containerを起動すると危ないため、`.devcontainer`への変更の取り込みは慎重に行ってください。詳しくは[ホストが実行する設定の保護](docs/network-policy.md#ホストが実行する設定の保護)を参照してください。
+* ホストとagentが読み書きできる共通のGitリモートが必要です。初回起動前にホストのHEADをリモートのブランチへpushしてください。未コミット・未追跡ファイルはagentへ渡りません。
+* agentは専用volumeのcloneで作業します。ホストの作業ツリーと`.git`は共有しません。成果はpush/fetchで受け渡し、[コミットIDを固定してレビュー・取り込み](docs/usage.md#ホストでレビューして取り込む)ます。
 
 ## クイックスタート
 
@@ -60,7 +60,7 @@ claude /login
 
 API keyを使う場合は、[Claude ConsoleのAPI keys](https://platform.claude.com/settings/keys)で発行したkeyを、3.で`ANTHROPIC_API_KEY`に設定してください。ただし、API keyではArtifactsやclaude.aiのコネクタなどは使えません。
 
-#### GitHub（任意）
+#### Gitリモートの認証（GitHubの場合）
 
 GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
 
@@ -84,15 +84,18 @@ GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使�
 
 ### 4. 起動する
 
+初回は、開始点となるコミットを共通リモートへpushしてから起動してください。`origin`はHTTPS、またはGitHubのSSH形式に対応します。GitHub以外では、そのホストの通信ルールと認証を`proxy.hosts`に設定します。
+
 #### CLIとして実行する場合
 
 ```sh
+git push origin HEAD
 devcontainer up
 devcontainer exec claude
 ```
 
 Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）の起動を行います。
-起動時に3.で設定した認証情報がプロキシに読み込まれます。
+起動時に3.で設定した認証情報がプロキシに読み込まれます。空のworkspace volumeには、ホストのHEADと同じコミットを自動取得し、detached HEADでcheckoutします。コンテナ内で`git switch -c agent/task-name`して作業を始めてください。再起動・再作成では既存cloneをfetch/resetせず、ブランチと未コミットの変更を保持します。
 
 > [!NOTE]
 > Claudeが接続できない場合は、[接続できない場合](docs/troubleshooting.md)を確認してください。
@@ -120,7 +123,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 
 `compose.sh`は、このリポジトリのDev Containerを見つけて`docker compose`に引数を渡します。`logs proxy`のように`down`以外のサブコマンドも使えます。
 
-作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。これらも消す場合は`down --volumes`を使ってください。
+作業ファイル、Claudeのセッション履歴（`~/.claude/projects`）、DinDのデータ、プロキシのCAは残ります。`down --volumes`は未pushのコミット・未コミットの作業も消します。通常の停止や依存更新には使わないでください。Node・GradleのCoWのupperはホストの状態ディレクトリに残ります。依存の更新方法は[依存の共有と更新](docs/usage.md#依存の共有と更新)を参照してください。
 
 ## カスタマイズする
 
@@ -265,7 +268,7 @@ shell = "devShells.x86_64-linux.foo"    # 名前付きdev shell。省略する�
 `devcontainer up`のたびにホストで`nix print-dev-env`を実行し、その結果をagentのBashで読み込みます。読み込むのは環境変数だけです。`TZ`や`SOURCE_DATE_EPOCH`のようにビルドにしか使わない変数、bashの関数、`shellHook`は除きます。agentのBashは、コマンドのたびにこの結果を読み込むためです。ホストの`/nix/store`は読み取り専用で使います。
 
 > [!WARNING]
-> * flakeの評価、inputの取得、ビルドはホストで実行するので、proxyの通信制限を受けません。評価するのはコミット済みのflakeですが、agentもコミットやrefを変えられます。`up`の前にflakeの変更を確認してください。
+> * flakeの評価、inputの取得、ビルドはホストで実行するので、proxyの通信制限を受けません。ホストのコミットを評価し、agentのcloneのrefは使いません。flakeの変更もホストへ取り込む前にレビューしてください。
 > * agentからはホストの`/nix/store`全体を読めます。store内の設定ファイルなどに秘密が含まれていれば、その値も見えます。
 
 ### シークレットをマスクする
@@ -319,7 +322,7 @@ dind = "10.99.1"       # agentとDinDの間のネットワーク。既定は自�
 - UIDとGIDは、ホストでリポジトリを所有するユーザーに合わせてください。DinDのdockerdも同じUIDで動きます。0と、DinDが内部で使う100000〜165535は指定できません。
 - ネットワークは`/24`の先頭3オクテットで書きます。proxyとDinDは`.10`、agentは`.20`を使います。書かなければ、既存のDockerネットワークと重ならない`10.231.x.0/24`を2つ選び、空いている限り次の起動でも同じ値を使います。同じホストで複数のリポジトリを同時に起動すると、同じ値を選ぶことがあります。その場合は、片方を起動し直すか、ここで値を指定してください。
 
-UIDを変えると、DinDのデータとClaudeのセッション履歴が古いUIDの所有のまま残り、DinDが起動できなくなります。変える前に、[終了する](#5-終了する)の手順で`down --volumes`を実行してください（セッション履歴も消えます）。
+UIDを変えると、workspace、DinD、Claudeの履歴、依存のupperに古い所有者が残ります。先に未pushのコミットと未コミットの作業を退避し、停止後に対象データの所有者を移行してください。`down --volumes`で消す場合は、workspaceの作業も失われます。
 
 ## 更新する
 
@@ -336,7 +339,7 @@ devcontainer up --remove-existing-container
 
 このリポジトリ自身も同じ構成で、`.devcontainer/claude`が利用者のリポジトリに取り込まれる部分、その外がこのリポジトリ用のファイルです。`claude.toml`でDinD・nix・sumiを有効にしています。`flake.nix`のdev shellにはPython、Node.js、Git、Docker CLI、OpenSSL、ShellCheck、playwright-cli（Chromium）が入り、ホストでは`nix develop`、agentではBashから使えます。
 
-sumiのデモ用の値を`.secrets/sumi/secrets.txt`にコミットしています。場所は`claude.toml`に相対パスで設定済みで、起動時に権限を0600にします。`.secrets/`はagent側では空の読み取り専用領域で隠され、一覧はsumiコンテナだけに共有されます。agentからはこのファイルが読めず、`git status`で削除扱いになるので、clone後にホストで`git update-index --assume-unchanged .secrets/sumi/secrets.txt`を一度実行してください。
+sumiのデモ用の公開値を`.secrets/sumi/secrets.txt`にコミットしています。これはcloneにも入ります。実際の秘密をGitへコミットしないでください。sumiの一覧の実ファイルは引き続きsumiサービスだけにmountします。旧構成でこのデモファイルに付けた`assume-unchanged`は不要です。
 
 `.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKとgradleを入れ、`compose.yaml`はホストの`~/.gradle`をagentの`~/.gradle`にcopy-on-writeでmountします。agentのGradleはホストで取得済みの配布物と依存でオフラインに動き、agentが書き込んだものは`~/.local/state/claude-devcontainer/gradle-home/upper`に残ってホストの`~/.gradle`には入りません。agentの起動中は、ホストでGradleを実行しないでください（overlayfsは、mount中に下の層が変わったときの動作を定めていません）。どれもこのリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`のテンプレートから始めてください。
 

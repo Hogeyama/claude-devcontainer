@@ -18,7 +18,7 @@ class AgentShellIntegrationTest(unittest.TestCase):
             tool = root / 'bin/dev-shell-tool'
             tool.write_text('#!/bin/sh\necho dev-shell-ok\n')
             tool.chmod(0o755)
-            (root / 'env.rc').write_text('export PATH="/workspace/.devcontainer/.nix-env/bin:$PATH"\n')
+            (root / 'env.rc').write_text('export PATH="/run/host/nix-env/bin:$PATH"\n')
             for enabled in ('0', '1'):
                 for args in (['-c'], ['-lc'], ['-ic'], ['-lic'], ['--norc', '-ic']):
                     with self.subTest(nix=enabled, shell=args):
@@ -28,7 +28,7 @@ class AgentShellIntegrationTest(unittest.TestCase):
                         script += 'if command -v dev-shell-tool >/dev/null; then dev-shell-tool; else echo no-dev-shell; fi'
                         result = docker('run', '--rm', '--network', 'none', '--user', 'node',
                                         '-e', 'CLAUDE_DEVCONTAINER_NIX=' + enabled,
-                                        '-v', directory + ':/workspace/.devcontainer/.nix-env:ro',
+                                        '-v', directory + ':/run/host/nix-env:ro',
                                         '--entrypoint', '/bin/bash', AGENT_IMAGE, *args, script)
                         self.assertEqual(result.strip(), 'dev-shell-ok' if enabled == '1' else 'no-dev-shell')
 

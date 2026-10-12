@@ -13,6 +13,8 @@ if [ "${1:-}" != --as-node ]; then
     else
         rm -f "$sumi"
     fi
+    # Only mount roots, never recursively traverse agent-controlled files.
+    python3 /usr/local/bin/workspace_mounts.py
     exec setpriv --reuid=node --regid=node --init-groups \
         --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
         "$0" --as-node "$@"

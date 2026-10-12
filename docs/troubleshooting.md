@@ -1,5 +1,15 @@
 # 接続できない場合
 
+## 初回cloneが失敗する
+
+`Could not fetch origin`ならproxyの通信ルールと認証を確認してください。fetchは30秒で打ち切り、2秒間隔で最大3回試します。`Push the starting commit`ならホストの開始コミットをリモートのブランチへpushしてください。解消後、次のコマンドで再試行できます。
+
+```sh
+.devcontainer/claude/scripts/compose.sh exec --user node agent wait-ready.sh
+```
+
+初期化途中は`.git/claude-bootstrap.json`に記録したURLとコミットを使い続けます。勝手に最新HEADへ切り替えたり、既存ファイルを消したりしません。既存ファイルや依存マウントとの衝突が報告されたら、volumeの内容を確認してください。未完了のリポジトリを自動削除する処理はありません。
+
 ## HTTP 403が返る
 
 proxyが要求を拒否しています。本文が`blocked: no credentials`の場合は、proxyに認証情報がありません。ホストで`.devcontainer/claude/scripts/inject-credentials.py`を実行して渡してください。`blocked: no secret GITHUB_TOKEN`のように秘密の名前が出る場合は、`claude.toml`の`proxy.hosts`が参照する秘密が、ホストの`~/.config/claude-devcontainer/credentials`で代入されていません。代入してから同じスクリプトを実行してください。起動時の自動注入の記録は`~/.local/state/claude-devcontainer/inject.log`にあります。

@@ -41,8 +41,6 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     && install -d -o node -g node /workspace \
     # The claude-projects volume copies this owner when it is first created.
     && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
-    # .git/config is read-only (see compose.yaml); do not try to record upstreams.
-    && git config --system branch.autoSetupMerge false \
     # Interactive shells, including Nix's Bash launched by VS Code.
     && printf '%s\n' '. /etc/bash-env.sh' >>/home/node/.bashrc
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
@@ -65,7 +63,7 @@ COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # ~/.claude/skills does not replace them.
 COPY agent/skills/ /etc/claude-code/.claude/skills/
 COPY agent/bash-env.sh /etc/bash-env.sh
-COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh /usr/local/bin/
+COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh agent/clone-workspace.py agent/workspace_mounts.py /usr/local/bin/
 # Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
 # reach anything (a Next.js server calling an API, for one).
 ENV NODE_USE_ENV_PROXY=1

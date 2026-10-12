@@ -57,18 +57,13 @@ services:
       - path: ../.generated/agent.env
         required: false
     volumes:
-      - ../..:/workspace
-      # The host builds and runs what is here (compose files, the proxy's
-      # policy, initializeCommand, credential injection), so the agent must
-      # not change it.
-      - ..:/workspace/.devcontainer:ro
-      # Git on the host runs what these name (hooks, core.fsmonitor, filters,
-      # ...). .git is its own mount so that it cannot be replaced. Writing the
-      # config fails, so the image disables automatic upstream tracking.
-      - {type: bind, source: ../../.git, target: /workspace/.git, bind: {create_host_path: false}}
-      - {type: bind, source: ../../.git/config, target: /workspace/.git/config, read_only: true, bind: {create_host_path: false}}
-      - {type: bind, source: ../../.git/hooks, target: /workspace/.git/hooks, read_only: true, bind: {create_host_path: false}}
-      - {type: bind, source: ../../.git/modules, target: /workspace/.git/modules, read_only: true, bind: {create_host_path: false}}
+      - workspace:/workspace
+      - type: volume
+        source: node-modules
+        target: /workspace/node_modules
+        volume: {nocopy: true}
+      - {type: bind, source: ../.generated, target: /run/host/generated, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ../.nix-env, target: /run/host/nix-env, read_only: true, bind: {create_host_path: false}}
       - public-ca:/public-ca:ro
       - dind-run:/var/run/dind:ro
       # Read-only, so that the agent cannot swap the broker's socket for its own.
@@ -227,6 +222,12 @@ networks:
     enable_ipv6: false
 
 volumes:
+  workspace:
+  node-modules:
+    driver_opts:
+      type: overlay
+      device: overlay
+      o: lowerdir=${CLAUDE_DEVCONTAINER_NODE_LOWER:?Run initialize.sh},upperdir=${CLAUDE_DEVCONTAINER_NODE_UPPER:?Run initialize.sh},workdir=${CLAUDE_DEVCONTAINER_NODE_WORK:?Run initialize.sh}
   claude-projects:
   public-ca:
   proxy-private-ca:
