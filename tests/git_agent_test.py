@@ -41,9 +41,8 @@ with open(os.environ['FAKE_DOCKER_LOG'], 'a') as log:
 if args[0] == 'ps':
     print(os.environ['FAKE_CONTAINERS'], end='')
 elif args[:4] == ['exec', '-i', '--user', 'node'] and args[-1] == '/workspace':
-    service = args[-2]
-    assert service in ('git-upload-pack', 'git-receive-pack')
-    os.execvp(service, [service, os.environ['FAKE_AGENT_REPO']])
+    command = args[5:-1]
+    os.execvp(command[0], [*command, os.environ['FAKE_AGENT_REPO']])
 else:
     sys.exit('unexpected Docker invocation')
 ''')
@@ -86,9 +85,33 @@ else:
         self.assertEqual(result.stdout, self.git('rev-parse', 'HEAD').stdout)
         calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
         self.assertTrue(any(call[-2:] == ['git-upload-pack', '/workspace'] for call in calls))
-        self.assertTrue(any(call[-2:] == ['git-receive-pack', '/workspace'] for call in calls))
+        self.assertTrue(any(call[-2:] == ['receive-pack', '/workspace'] for call in calls))
         self.assertTrue(all(call[:4] == ['exec', '-i', '--user', 'node'] for call in calls if call[0] == 'exec'))
         self.assertTrue(any('label=devcontainer.local_folder=' + str(self.host) in call for call in calls))
+
+    def test_push_to_checked_out_branch_keeps_uncommitted_work(self):
+        self.register()
+        agent = self.root / 'agent'
+        def agent_git(*args):
+            return subprocess.run(['git', '-C', str(agent), *args], env=self.env,
+                                  text=True, capture_output=True, check=True)
+        subprocess.run(['git', 'clone', str(self.server), str(agent)], env=self.env, check=True, capture_output=True)
+        self.env['FAKE_AGENT_REPO'] = str(agent)
+        (agent / 'work').write_text('agent\n')
+        agent_git('add', 'work')
+        agent_git('commit', '-m', 'agent work')
+        dropped = agent_git('rev-parse', 'HEAD').stdout
+        self.git('commit', '--amend', '--allow-empty', '-m', 'rewritten on the host')
+        (agent / 'work').write_text('uncommitted\n')
+        result = self.git('push', '--force', 'agent', 'HEAD:main', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unstaged changes', result.stderr)
+        self.assertEqual((agent / 'work').read_text(), 'uncommitted\n')
+        agent_git('checkout', '--', 'work')
+        self.git('push', '--force', 'agent', 'HEAD:main')
+        self.assertEqual(agent_git('rev-parse', 'HEAD').stdout, self.git('rev-parse', 'HEAD').stdout)
+        self.assertFalse((agent / 'work').exists())
+        self.assertEqual(agent_git('rev-parse', 'main@{1}').stdout, dropped)
 
     def test_fetch_refuses_missing_or_ambiguous_container(self):
         self.register()

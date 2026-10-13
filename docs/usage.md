@@ -57,7 +57,15 @@ git worktree add --detach ../repo.agent "$agent_commit"
 git push agent HEAD:refs/heads/host/main
 ```
 
-エージェントはコンテナ内で`git merge host/main`または`git rebase host/main`を実行する。コンテナでcheckout中のブランチへのpushはGitが拒否するので、`host/main`など別のブランチへ送る。コンテナの未コミットの作業を自動で上書きしない。
+エージェントはコンテナ内で`git merge host/main`または`git rebase host/main`を実行する。
+
+コンテナでcheckout中のブランチへも、`-f`を含めてpushできる。次の例は、コンテナで`main`をcheckoutしている場合である。
+
+```sh
+git push -f agent HEAD:main
+```
+
+このときGitは、コンテナの作業ツリーとインデックスもpushしたコミットに合わせて更新する（`receive.denyCurrentBranch=updateInstead`）。エージェントが作業している途中でも、未コミットの変更がなければ作業ツリーのファイルは書き換わる。コンテナの作業ツリーかインデックスに未コミットの変更があるとき、またはpushしたコミットが未追跡のファイルを上書きするときは、Gitがpushを拒否する。そのため、コンテナの未コミットの作業を自動で上書きしない。`-f`でブランチからたどれなくなったコンテナのコミットは、コンテナの`git reflog`に残る。
 
 ## 依存の共有と更新
 

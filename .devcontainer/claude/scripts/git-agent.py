@@ -47,9 +47,15 @@ def serve(service, root=ROOT):
         check=True, capture_output=True, text=True).stdout.split()
     if len(containers) != 1:
         raise ValueError('Expected exactly one running agent container for this workspace; run devcontainer up.')
+    command = [service]
+    if service == 'git-receive-pack':
+        # A push to the branch checked out in /workspace also updates its work
+        # tree. Git refuses the push while the work tree or index has changes,
+        # or when it would overwrite an untracked file.
+        command = ['git', '-c', 'receive.denyCurrentBranch=updateInstead', 'receive-pack']
     # stdout/stdin belong exclusively to Git's wire protocol. No shell, TTY,
     # root Git process, host-side checkout, or exposed TCP listener is involved.
-    os.execvp('docker', ['docker', 'exec', '-i', '--user', 'node', containers[0], service, '/workspace'])
+    os.execvp('docker', ['docker', 'exec', '-i', '--user', 'node', containers[0], *command, '/workspace'])
 
 
 if __name__ == '__main__':
