@@ -2,6 +2,7 @@
 # As root: trust the proxy CA and allow egress only to the proxy and DinD, then
 # re-run this script as node without capabilities.
 set -eu
+umask 022
 if [ "${1:-}" != --as-node ]; then
     cp /public-ca/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/managed-proxy.crt
     update-ca-certificates >/dev/null
