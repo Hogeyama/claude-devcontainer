@@ -35,3 +35,32 @@ frontendの実行時に`node_modules are out of sync with your lockfile`のWARN�
 
 - `docker compose down`で、frontend、backend、dbのコンテナと`workspace_default`ネットワークが削除されました。
 - 停止後、`docker ps -a`にコンテナは残っていませんでした。
+
+## VS Codeのリモート拡張機能からホストでコマンドを実行
+
+2026-10-14に、[VS Codeが作る経路](usage.md#vs-codeが作る経路)のうち、リモート拡張機能からホスト側のターミナルを開き、コマンドを実行する経路を実機で確認しました。
+
+### 条件と手順
+
+- ホストはLinux（NixOS）、VS Code 1.119.0（commit `8b640eef5a6c6089c029249d48efa5c99adf7d51`）、Dev Containers 0.469.0です。Windowsでは未検証です。
+- 稼働中のagentコンテナへ「Attach to Running Container」に相当する接続を使いました。拡張機能から見た`vscode.env.remoteName`は`attached-container`でした。
+- ホストのuser-dataとローカル拡張機能のディレクトリは、検証専用の一時ディレクトリに分けました。Workspace Trustはこの検証用設定で無効にしました。Restricted Modeでの検証ではありません。
+- 検証用拡張機能をコンテナの`node`（UID 1000）でインストールしました。`extensionKind: ["workspace"]`、`activationEvents: ["onStartupFinished"]`を指定し、`~/.vscode-server/extensions/local-security-test.host-terminal-probe-0.0.1`から読み込みました。通常の接続で実行し、成功した試行では`--extensionDevelopmentPath`を使っていません。
+- 拡張機能は一度だけ動作し、`workbench.action.terminal.newLocal`を呼びました。新しいターミナルがactiveになったことを確認してから、`workbench.action.terminal.sendSequence`へPythonコマンドと改行を渡しました。ホスト側のシェルは`bash --noprofile --norc`です。
+- コマンドの処理は、専用の`/tmp/vscode-host-terminal-probe-5cba7a2b2ce2/host-result.json`へランダムな識別子と実行環境を書き出すだけです。このディレクトリはコンテナへマウントしていません。
+
+### 結果
+
+| 観測点 | 結果 |
+| --- | --- |
+| リモート拡張機能の実行場所 | hostname `2ff361e5c7d4`、UID 1000、`/.dockerenv`あり |
+| 拡張機能による操作 | `new-local-terminal`、`sequence-sent`を順に記録 |
+| ホストに作られたファイル | hostname `nixos`、UID 1000、cwd `/home/hogeyama`、`/.dockerenv`なし |
+| ファイルに記録されたmount namespace | `mnt:[4026531832]`。ホストから別途読んだ値と一致 |
+| コンテナのmount namespace | `mnt:[4026533492]`。ホストと異なる |
+| ランダムな識別子 | 拡張機能のコマンドに埋め込んだ値とファイル内の値が一致 |
+| コンテナから同じパスを確認 | ファイルは存在しない |
+
+共有ファイルへの直接書き込みではなく、コンテナ内の拡張機能からVS Codeを通じてホストのユーザー権限でPythonを実行できました。コマンド送信後に、人間がターミナルでEnterを押す操作は行っていません。
+
+この試行で確認したのは、`node`権限で配置した検証用拡張機能からの実行です。既存の第三者拡張機能の書き換え、Restricted Modeの回避、Windows上での実行は試していません。
