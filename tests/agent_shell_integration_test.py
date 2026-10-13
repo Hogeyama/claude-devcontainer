@@ -45,6 +45,16 @@ class AgentShellIntegrationTest(unittest.TestCase):
                     result = self.run_agent('node', enabled, NIX_ENV + ' && exec /bin/bash "$@"', *args, script)
                     self.assertEqual(result.strip(), 'dev-shell-ok' if enabled == '1' else 'no-dev-shell')
 
+    def test_dev_shell_is_loaded_where_bash_skips_bash_env(self):
+        # Claude Code's Bash tool when VS Code starts Claude: a socket for stdin
+        # and no SHLVL, so Bash takes itself for a command run by rshd.
+        spawn = ('import os, socket, subprocess, sys; stdin, _ = socket.socketpair(); '
+                 'env = {k: v for k, v in os.environ.items() if k != "SHLVL"}; '
+                 'subprocess.run(["/bin/bash", "-c", sys.argv[1]], stdin=stdin, env=env, check=True)')
+        result = self.run_agent('node', '1', NIX_ENV + ' && exec python3 -c "$1" "$2"', spawn,
+                                'if command -v dev-shell-tool >/dev/null; then dev-shell-tool; else echo no-dev-shell; fi')
+        self.assertEqual(result.strip(), 'dev-shell-ok')
+
     def test_bash_run_as_root_ignores_the_dev_shell_node_wrote(self):
         result = self.run_agent('0', '1', 'setpriv --reuid=node --regid=node --init-groups sh -c "$1" && '
                                 'exec /bin/bash -c "command -v dev-shell-tool || echo no-dev-shell"', NIX_ENV)

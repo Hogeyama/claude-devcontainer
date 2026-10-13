@@ -41,8 +41,12 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     && install -d -o node -g node /workspace \
     # The claude-projects volume copies this owner when it is first created.
     && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
-    # Interactive shells, including Nix's Bash launched by VS Code.
-    && printf '%s\n' '. /etc/bash-env.sh' >>/home/node/.bashrc
+    # Interactive shells, including Nix's Bash launched by VS Code, and Bash
+    # that takes itself for a command run by rshd, which reads ~/.bashrc in
+    # place of BASH_ENV: one with a socket for stdin and no SHLVL, as Claude
+    # Code's Bash tool is when VS Code starts Claude. At the top, since
+    # Debian's ~/.bashrc returns early unless the shell is interactive.
+    && sed -i '1i . /etc/bash-env.sh' /home/node/.bashrc
 # The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
