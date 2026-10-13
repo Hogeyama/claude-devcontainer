@@ -37,7 +37,11 @@ agentの起動処理はfirewallとCAを設定してから一般ユーザー（�
 
 managed settingsではWebSearchも禁止しています。検索結果は`api.anthropic.com`の応答としてモデルに届くので、取得元を通信の検査では判定できず、未信頼のWebページの内容が入り込むためです。サーバー側のtoolはproxyでも拒否しているので、この禁止は重ねがけです。
 
-同梱のCompose設定は、rootless DinDをprivilegedコンテナで起動します。同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentのloopbackへ中継します。
+WebFetchは禁止していません。WebFetchではagentのClaude Codeが自分でURLを取得するので、ほかの通信と同じくproxyの制限を受け、`proxy.hosts`に書いた接続先にしか届きません。なお、Claude CodeはURLを取得する前に、接続先のホスト名を`api.anthropic.com`の`/api/web/domain_info`へ問い合わせます。proxyはこの要求を通さないので、settingsで`skipWebFetchPreflight`を`true`にしていなければ、WebFetchは失敗します。
+
+同梱のCompose設定は、rootless DinDをprivilegedコンテナで起動します。dockerdはagentのUIDで動き、DinDの中のコンテナはuser namespaceの中で動きます。それでもagentは、Docker APIで`--privileged`や`--security-opt seccomp=unconfined`を付けたコンテナを起動でき、その中ではagent自身より多くのカーネルの機能を呼べます。DinDのコンテナはprivilegedなので、seccomp、AppArmor、デバイスの制限がありません。そのため、カーネルに脆弱性があれば、agentはDinDを経てホストのrootを取れます。Dockerを使わないリポジトリでは、`docker.enabled`を有効にしないでください。
+
+同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentのloopbackへ中継します。
 
 agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの操作権限を読取り専用にはしません。同梱のCompose設定は、ホストのDocker socketを共有しません。
 
