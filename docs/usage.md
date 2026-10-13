@@ -95,6 +95,31 @@ CoWはスナップショットではないため、mount中にホストのlower�
 
 通常の再起動・再作成はupperを保持します。Gradleは既存の`~/.gradle`のCoWを使い、`./gradlew --offline jar test`を実行します。ホストでGradleのキャッシュを更新する場合も、先にoverlayをアンマウントしてください。
 
+### 読み取り専用のバインドで共有する
+
+CoWの代わりに、ホストの`node_modules`を読み取り専用でバインドすることもできます。agentは依存を変更できず、`pnpm install`などの書き込みは`Read-only file system`（`EROFS`）で失敗します。一方で、ホストで依存を更新するときに、agentを止めたりupper/workを消したりする必要はありません。ただし、更新の途中の`node_modules`にはまだ入っていないパッケージや書きかけのファイルが含まれることがあるので、その間はagentでツールを実行しないでください。
+
+ツールによっては、実行時に`node_modules`の下へキャッシュや一時ファイルを書き込みます。たとえばVite、Vitest、`@nuxt/test-utils`、jiti、Prettier、vue-tscは、`node_modules/.cache`、`node_modules/.vite-temp`、`node_modules/.vue-global-types`のいずれかへ書き込みます。書き込み先はツールと設定によって違うので、使うコマンドをagentで実行し、`Read-only file system`で失敗するディレクトリを確かめてください。それらのディレクトリにtmpfsなどの書き込めるマウントを追加します。tmpfsの内容はコンテナを再起動すると消えます。
+
+```yaml
+services:
+  agent:
+    volumes:
+      - type: bind
+        source: /absolute/repo/packages/app/node_modules
+        target: /workspace/packages/app/node_modules
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs:
+      - /workspace/packages/app/node_modules/.cache:mode=1777
+      - /workspace/packages/app/node_modules/.vite-temp:mode=1777
+      - /workspace/packages/app/node_modules/.vue-global-types:mode=1777
+```
+
+Dockerは読み取り専用のバインドの中にマウント先を作れないので、tmpfsのマウント先のディレクトリはホストで先に作っておきます。ホストで`node_modules`を作り直してこれらのディレクトリが消えたときは、もう一度作ってから起動します。
+
+バインドするディレクトリの所有者は、`agent.uid`と`agent.gid`に合わせてください（[UIDとネットワークを変える](../README.md#uidとネットワークを変える)）。entrypointは依存をマウントしたディレクトリの所有者をagentに変えますが、読み取り専用のマウントでは変えられません。所有者が違うと、agentのコンテナは起動時にentrypointのエラーで終了します。
+
 ## 認証情報を更新する
 
 Claudeの認証には、ホストのClaude Codeのログインを使います。ホストで`claude`にログインしていれば、設定は要りません。ログインし直した場合や、`~/.config/claude-devcontainer/credentials`で`proxy.hosts`が参照する秘密（`GITHUB_TOKEN`など）を変えた場合は、注入スクリプトを再実行してください。proxyやagentの再起動・再ビルドは不要です。
