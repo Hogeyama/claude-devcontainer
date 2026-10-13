@@ -18,6 +18,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 
 * GitHubを使う場合は、共有するリポジトリだけを対象にしたfine-grained tokenを使う前提です。
 * agentが接続できるのは、Anthropicと、`.devcontainer/claude.toml`の`proxy.hosts`に書いた接続先だけです。package registryなども、`proxy.hosts`に書かなければ使えません。
+* agentが動いているコンテナにVS Codeを接続すると、この隔離は成り立ちません。[VS Codeで開く](docs/usage.md#vs-codeで開く)を参照してください。
 * Anthropicのweb searchなど、Anthropicのサーバーから外部へ接続する機能は使えません。claude.aiのコネクタは、指定したものだけ使えます。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * 起動時に、コンテナ内リポジトリを指す`agent`リモートをホストへ自動登録します。受け渡しはホストから直接fetch/pushし、GitHubなどの外部リポジトリは介在しません。初回起動はホストのローカルHEADからコピーするため、未pushでも起動できます。未コミット・未追跡ファイルはagentへ渡りません。
@@ -99,16 +100,9 @@ Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）�
 > [!NOTE]
 > Claudeが接続できない場合は、[接続できない場合](docs/troubleshooting.md)を確認してください。
 
-#### VS Codeで実行する場合
+#### VS Codeを使う場合
 
-1. ホストのVS CodeにDev Containers拡張をインストールしてください。
-2. 取り込んだリポジトリで`code .`を実行し、通知またはコマンドパレットから「Dev Containers: Reopen in Container」を実行してください。VS Codeが上の手順で起動したコンテナにそのまま接続します。
-
-VS Codeはホストの認証情報をコンテナへ転送する機能を持っています。使う前に[VS Codeで開く](docs/usage.md#vs-codeで開く)の利用条件を確認してください。
-
-> [!NOTE]
-> コマンドパレットから「Dev Containers: Install devcontainer CLI」を実行してCLIを落とすと、以降は `devcontainer open .` で直接 Dev Container を使った VS Code を開くことができます。
-> npmやGitHubリリース経由でインストールできるdevcontainer CLIにはこの機能（`open`サブコマンド）がありません。
+agentが動いているコンテナには、VS Codeを接続しないでください。接続すると、コンテナで動くプロセスが、ホストでコマンドを実行したり、proxyを通らずに外部と通信したりできるようになります。agentの変更は、ホストのリポジトリへfetchし、ホストで差分を見てください。理由と、それでも接続する場合の手順は、[VS Codeで開く](docs/usage.md#vs-codeで開く)を参照してください。
 
 ### 5. 終了する
 
