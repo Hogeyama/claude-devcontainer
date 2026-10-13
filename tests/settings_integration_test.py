@@ -255,6 +255,46 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn('update it from claude/template/compose.yaml', failed.stderr)
 
+    def test_shared_secret_masks_survive_compose_merge(self):
+        (self.root / '.secrets').mkdir()
+        (self.root / '.env').write_text('SECRET=fixture\n')
+        self.write('claude.local.toml', '[git]\nisolation = "shared"\nshared_hidden_paths = [".secrets", ".env"]\n')
+        self.initialize()
+        mounts = {m['target']: m for m in self.compose_config()['services']['agent']['volumes']}
+        for name in ('.git', '.devcontainer', '.secrets', '.env'):
+            self.assertTrue(mounts['/workspace/' + name]['read_only'])
+        self.assertEqual(mounts['/workspace/.secrets']['type'], 'tmpfs')
+        self.assertEqual(Path(mounts['/workspace/.env']['source']).read_bytes(), b'')
+
+    def test_shared_rejects_symlink_mask_replacement_before_startup(self):
+        (self.root / '.secrets').mkdir()
+        self.write('claude.toml', '[git]\nisolation = "shared"\nshared_hidden_paths = [".secrets"]\n')
+        self.initialize()
+        (self.root / '.secrets').rmdir()
+        (self.root / '.secrets').symlink_to(self.root / '.git')
+        checked = subprocess.run(['python3', str(self.config / 'claude/scripts/settings.py'), 'check-shared-mounts'],
+                                 env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn('must not follow a symlink', checked.stderr)
+
+    def test_shared_rejects_mount_beneath_protection(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\n')
+        compose = self.config / 'compose.yaml'
+        compose.write_text(compose.read_text() + '\nservices:\n  agent:\n    volumes:\n'
+                           '      - extra:/workspace/.git/hooks\nvolumes:\n  extra:\n')
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('Mount overrides shared protection', failed.stderr)
+
+    def test_shared_rejects_short_tmpfs_beneath_protection(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\n')
+        compose = self.config / 'compose.yaml'
+        compose.write_text(compose.read_text() + '\nservices:\n  agent:\n    tmpfs:\n'
+                           '      - /workspace/.git/hooks\n')
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('Mount overrides shared protection', failed.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

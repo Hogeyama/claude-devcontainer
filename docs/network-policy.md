@@ -65,9 +65,13 @@ Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはな�
 
 ### sharedで共有されるもの
 
-`[git] isolation = "shared"`ではホストの作業ツリーと`.git`をread-writeで共有します。編集、index、refs、Git設定、hooks、`.devcontainer/`の変更はホストへ直接反映されます。ホストの`git status`や`git diff`もagentから独立したレビューの根拠にはできません。未追跡・ignoredな`.env`や`.secrets/`も共有され、sumiはこれらを自動で隠しません。
+`[git] isolation = "shared"`ではホストの作業ツリーをread-writeで共有し、その上に`.git`全体と`.devcontainer`全体のread-only bindを重ねます。index、refs、Git設定、hooksと、次回起動時にホストで使う設定・スクリプトへの書き込みを防ぎます。`.git/config`だけの保護では、`.git/commondir`で別のconfigを読ませられるので不十分です。agentの通常プロセスはcapabilityを持たず、マウントを解除できません。マウントポイント自体のrenameによる差し替えもできません。commit・switch・stashはホストで行います。
 
-proxy、firewall、認証情報の代理注入、ホストDocker socketを渡さない構成は維持します。管理用の`/run/host/generated`と`/run/host/nix-env`自体はread-onlyですが、sharedでは同じ内容を`/workspace/.devcontainer/`経由で編集できます。ホストのビルドや次回起動では変更された設定が実行され得ます。cloneへ戻すだけでホストの信頼性が回復するわけではありません。
+`.devcontainer`の保護は無効にできません。管理用の`/run/host/generated`と`/run/host/nix-env`もread-onlyで、`/workspace/.devcontainer`経由の書き込みも防ぎます。これらの生成物はホストが書きます。`.devcontainer/claude`自体の開発にはcloneを使います。
+
+`git.shared_hidden_paths`で指定したパスと、リポジトリ内の`sumi.secrets`を空のread-onlyマウントで覆います。パスのリストの既定は空で、ディレクトリ名による自動選択はしません。対象は設定で指定します（[設定例](usage.md#gitの共有と分離)）。ディレクトリはtmpfs、ファイルは空ファイルのbindです。対象や親のsymlink、および保護を上書きする追加マウントは起動前に拒否します。対象は生成時に存在するパスに限られ、起動後に新しく作った未保護の場所までは隠せません。別名のコピーやハードリンク、Git履歴に入った秘密もこのマウントでは隠せません。
+
+ホストのGit管理情報をagentから保護することで、ホストの`git diff`で変更をレビューできます。ただし、`flake.nix`、`package.json`のscripts、テストなど、ホストで実行する作業ツリーのファイルは編集できます。既存のGit設定が作業ツリー内の別の設定や実行ファイルを参照している場合も、その参照先はこの保護の対象外です。ignoredファイルは通常のstatusに出ないため、ホストで`git status --ignored`も確認してください。proxy、firewall、認証情報の代理注入、ホストDocker socketを渡さない構成は維持します。cloneへ戻すだけで共有中の変更の信頼性が回復するわけではありません。
 
 ## 保護の対象外
 

@@ -23,7 +23,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * 既定の`git.isolation = "clone"`では、起動時にコンテナ内リポジトリを指す`agent`リモートをホストへ自動登録します。受け渡しはホストから直接fetch/pushし、GitHubなどの外部リポジトリは介在しません。初回起動はホストのローカルHEADからコピーするため、未pushでも起動できます。未コミット・未追跡ファイルはagentへ渡りません。
 * 既定ではagentは専用volumeのcloneで作業します。ホストの作業ツリーと`.git`は共有しません。成果はホストの`git fetch agent`で受け取り、[コミットIDを固定してレビュー・取り込み](docs/usage.md#ホストでレビューして取り込む)ます。
-* `[git] isolation = "shared"`で未追跡・ignoredファイルも含め直接共有できます（[設定と切り替え](docs/usage.md#gitの共有と分離)）が、リスクを理解したうえで使う必要があります。
+* `[git] isolation = "shared"`で作業ツリーを直接共有できます。`.git`と`.devcontainer`はread-only、設定した秘密のパスは空のマウントで隠します。commit等の操作はホストで行います（[設定と切り替え](docs/usage.md#gitの共有と分離)）。
 
 ## クイックスタート
 

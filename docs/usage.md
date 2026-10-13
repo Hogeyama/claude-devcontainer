@@ -14,7 +14,7 @@ isolation = "clone" # "shared" にするとホストと共有
 | 設定 | 作業場所 | Gitと変更の受け渡し |
 | --- | --- | --- |
 | `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストから`git fetch/push agent` |
-| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | ホストと同じ`.git`。編集・commit・ブランチ切り替えが双方に即時反映 |
+| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | `.git`はread-only。編集は即時反映、commit・switch・stashはホストで実行 |
 
 設定変更後はコンテナを再作成する。
 
@@ -28,7 +28,19 @@ sharedでは初期Gitコピーと`agent`リモート登録を省略する。既�
 
 sharedはルートに実体の`.git`ディレクトリがある通常リポジトリに対応する。linked worktree、外部git-dir、object alternatesなどは`clone`を使う。ホストのUID/GIDに`agent.uid`/`agent.gid`を合わせ、追加の依存mountの親ディレクトリはホストで事前に作る。起動処理はホストの作業ツリーや`.git`をchown/chmodしない。
 
-sharedでは`.env`、`.secrets/`などの未追跡・ignoredファイルもagentに見え、Git設定、hooks、起動設定も直接編集できる。通信制限は維持されるが、ホストの作業ツリーとGitは保護されない。[隔離の範囲](network-policy.md#sharedで共有されるもの)も参照する。
+sharedでは`.git`と`.devcontainer`全体をread-onlyで重ねてマウントする。agentは通常ファイルの編集と`git status` / `git diff` / `git log`を行い、add・commit・switch・stashなどGitの状態を変える操作はホストで行う。`.devcontainer`の保護を無効にする設定はない。このリポジトリの`.devcontainer/claude`など、起動設定を開発するときはcloneを使う。
+
+秘匿対象は`.devcontainer/claude.local.toml`の`git.shared_hidden_paths`で指定する。既定は空のリストで、`.secrets`などの名前を特別扱いしない。リポジトリ内を指す`sumi.secrets`は別途自動で隠す。ディレクトリは空のread-only tmpfs、ファイルは空ファイルのread-only bindで覆う。
+
+```toml
+[git]
+isolation = "shared"
+shared_hidden_paths = [".env", "private/credentials"]
+```
+
+`shared_hidden_paths`はリポジトリルートからの相対パスのリストで、ワイルドカードや`..`は使えない。指定したパスは生成時に存在する必要がある。無効なsumiの未作成ファイルはスキップする。ローカル設定のリストは共有設定のリストを置き換え、`[]`なら指定対象なしになる。対象とその親がsymlinkなら起動を拒否する。重複・入れ子の指定は親のマウントにまとめる。`.git`や、別の管理用パスでも参照する`.devcontainer/.generated`・`.devcontainer/.nix-env`は隠せないので、そこには秘密を置かない。
+
+対象は`generate`時に決まり、反映にはコンテナの再作成が必要になる。起動後に作った、まだ覆われていない場所の秘密は隠せない。秘匿対象外の未追跡・ignoredファイルは共有される。ホストでは`git diff`で追跡ファイルの変更をレビューし、`git status --ignored`でignoredファイルも確認してから実行する。[隔離の範囲](network-policy.md#sharedで共有されるもの)も参照する。
 
 既存の利用先を更新した場合は、`.devcontainer/compose.yaml`のincludeを次の形に変更する。コアのsubtree更新だけでは、利用先が所有するこのファイルは更新されない。
 

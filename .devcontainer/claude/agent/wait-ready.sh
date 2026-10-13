@@ -45,7 +45,7 @@ clone)
     echo 'Git isolation: clone' >&2
     python3 /usr/local/bin/clone-workspace.py ;;
 shared)
-    echo 'Git isolation: shared; edits and Git operations write directly to the host repository.' >&2
+    echo 'Git isolation: shared; edits reach the host; .git and .devcontainer are read-only. Commit, switch and stash on the host.' >&2
     python3 /usr/local/bin/workspace_mounts.py --check-shared ;;
 *)
     echo 'error: unknown CLAUDE_DEVCONTAINER_GIT_ISOLATION' >&2

@@ -1,11 +1,13 @@
 """Shared repository validation and ownership boundaries, without a Docker daemon."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,10 +90,118 @@ class GitIsolationTest(unittest.TestCase):
         chown.assert_not_called()
 
     def test_shared_access_error_explains_uid_configuration(self):
-        mounts.check_shared(self.root)
         with patch.object(mounts.os, 'access', return_value=False):
             with self.assertRaisesRegex(ValueError, 'agent.uid and agent.gid'):
                 mounts.check_shared(self.root)
+
+    def test_shared_requires_read_only_management_mounts(self):
+        with self.assertRaisesRegex(ValueError, 'must be mounted read-only'):
+            mounts.check_shared(self.root)
+        def access(path, mode):
+            return not (Path(path) != self.root and mode & os.W_OK)
+        with patch.object(mounts.os, 'access', side_effect=access), \
+                patch.object(mounts.os, 'statvfs', return_value=SimpleNamespace(f_flag=os.ST_RDONLY)):
+            mounts.check_shared(self.root)
+        # chmod alone is insufficient, even when W_OK is false.
+        with patch.object(mounts.os, 'access', side_effect=access):
+            with self.assertRaisesRegex(ValueError, 'must be mounted read-only'):
+                mounts.check_shared(self.root)
+
+    def generated_mounts(self):
+        settings.generate(self.root, {})
+        data = json.loads((self.root / '.devcontainer/.generated/workspace.compose.yaml').read_text())
+        return {m['target']: m for m in data['services']['agent']['volumes']}
+
+    def test_shared_protects_whole_management_directories(self):
+        generated = self.generated_mounts()
+        for name in ('.git', '.devcontainer'):
+            mount = generated['/workspace/' + name]
+            self.assertEqual(mount, {'type': 'bind', 'source': str(self.root / name),
+                                    'target': '/workspace/' + name, 'read_only': True,
+                                    'bind': {'create_host_path': False}})
+        self.assertFalse(generated['/workspace'].get('read_only', False))
+        self.assertNotIn('/workspace/.secrets', generated)
+
+    def test_shared_masks_configured_paths_and_sumi(self):
+        (self.root / 'vault').mkdir()
+        (self.root / 'vault/secret').write_text('hidden')
+        (self.root / 'private').mkdir()
+        (self.root / 'private/sumi.txt').write_text('hidden')
+        (self.root / '.env').write_text('hidden')
+        (self.root / '.devcontainer/claude.local.toml').write_text(
+            '[git]\nshared_hidden_paths = [".env", "vault", "vault/secret"]\n'
+            '[sumi]\nsecrets = "../private/sumi.txt"\n')
+        generated = self.generated_mounts()
+        self.assertEqual(generated['/workspace/vault'],
+                         {'type': 'tmpfs', 'target': '/workspace/vault', 'read_only': True,
+                          'tmpfs': {'size': 4096, 'mode': 0o555}})
+        self.assertNotIn('/workspace/vault/secret', generated)
+        for target in ('/workspace/.env', '/workspace/private/sumi.txt'):
+            mount = generated[target]
+            self.assertEqual(mount['type'], 'bind')
+            self.assertTrue(mount['read_only'])
+            self.assertFalse(mount['bind']['create_host_path'])
+            self.assertEqual(Path(mount['source']).read_bytes(), b'')
+        self.assertEqual((self.root / '.env').read_text(), 'hidden')
+
+    def test_shared_rejects_missing_extra_and_reserved_paths(self):
+        for path in ('missing', '.git/config', '.devcontainer', '.devcontainer/.generated/key',
+                     '.devcontainer/.nix-env'):
+            with self.subTest(path=path):
+                (self.root / '.devcontainer/claude.local.toml').write_text(
+                    '[git]\nshared_hidden_paths = ' + json.dumps([path]) + '\n')
+                with self.assertRaises(ValueError):
+                    settings.generate(self.root, {})
+
+    def test_hidden_paths_must_stay_inside_workspace(self):
+        for path in ('', '.', '..', 'private/../../key', '/tmp/secret', 'line\nbreak'):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'shared_hidden_paths'):
+                settings.check({'git': {'shared_hidden_paths': [path]}}, 'test')
+
+    def test_shared_rejects_secret_symlinks_even_when_dangling(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nshared_hidden_paths = [".secrets"]\n')
+        for target in (self.root.parent / 'absent', self.root / '.git'):
+            with self.subTest(target=target):
+                link = self.root / '.secrets'
+                link.symlink_to(target)
+                try:
+                    with self.assertRaisesRegex(ValueError, 'must not follow a symlink'):
+                        settings.generate(self.root, {})
+                finally:
+                    link.unlink()
+        (self.root / 'private').symlink_to(self.root.parent)
+        (self.root / '.devcontainer/claude.local.toml').write_text(
+            '[sumi]\nsecrets = "../private/absent"\n')
+        with self.assertRaisesRegex(ValueError, 'must not follow a symlink'):
+            settings.generate(self.root, {})
+
+    def test_clone_has_no_masks_even_if_secret_is_a_symlink(self):
+        (self.root / '.secrets').symlink_to(self.root.parent)
+        (self.root / '.devcontainer/claude.local.toml').write_text(
+            '[git]\nisolation = "clone"\nshared_hidden_paths = [".secrets"]\n')
+        self.assertEqual(self.generated_mounts(), {'/workspace': {'type': 'volume', 'source': 'workspace',
+                                                               'target': '/workspace'}})
+
+    def test_mask_paths_escape_compose_interpolation(self):
+        (self.root / '$TOKEN').write_text('hidden')
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nshared_hidden_paths = ["$TOKEN"]\n')
+        self.assertIn('/workspace/$$TOKEN', self.generated_mounts())
+
+    def test_sumi_host_alias_into_workspace_is_hidden(self):
+        (self.root / 'secret').write_text('hidden')
+        alias = self.root.parent / 'sumi-alias'
+        alias.symlink_to(self.root / 'secret')
+        (self.root / '.devcontainer/claude.local.toml').write_text(f'[sumi]\nsecrets = "{alias}"\n')
+        self.assertIn('/workspace/secret', self.generated_mounts())
+
+    def test_no_implicit_secret_paths_and_local_list_can_be_cleared(self):
+        (self.root / '.secrets').mkdir()
+        self.assertNotIn('/workspace/.secrets', self.generated_mounts())
+        (self.root / '.devcontainer/claude.toml').write_text(
+            '[git]\nisolation = "shared"\nshared_hidden_paths = [".secrets"]\n')
+        self.assertIn('/workspace/.secrets', self.generated_mounts())
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nshared_hidden_paths = []\n')
+        self.assertNotIn('/workspace/.secrets', self.generated_mounts())
 
     def test_shared_only_prepares_overlay_roots(self):
         info = self.root / 'mountinfo'

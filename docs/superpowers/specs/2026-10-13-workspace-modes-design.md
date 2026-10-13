@@ -23,9 +23,9 @@ isolation = "clone" # 既定値。共有する場合は "shared"
 | --- | --- | --- |
 | `/workspace` | 既存の専用 Docker volume | ホストのリポジトリルートを read-write bind mount |
 | 作業開始時の内容 | 初回のみホストのローカル HEAD と履歴をコピー | ホストの現在のファイル。未コミット・未追跡も見える |
-| Git の状態 | 独立した `.git` | ホストと同じ `.git` |
-| ブランチ | 初回作成時だけホストに合わせ、以後は独立 | ホストと常に同じ。どちらかの切り替えが他方にも反映される |
-| 変更の受け渡し | ホストの `agent` リモートで fetch / push | 編集とコミットがそのままホストに反映される |
+| Git の状態 | 独立した `.git` | ホストと同じ `.git` を read-only で参照 |
+| ブランチ | 初回作成時だけホストに合わせ、以後は独立 | ホストと常に同じ。切り替えはホストで行う |
+| 変更の受け渡し | ホストの `agent` リモートで fetch / push | 編集は即時反映。コミットはホストで行う |
 | コンテナ再作成 | 保存済み clone を再利用 | その時点のホストの作業ツリーを再びマウント |
 | Node / Gradle の依存 | 既存の CoW マウント | 同じ CoW マウント |
 
@@ -51,14 +51,14 @@ clone                              shared
 共通：Node / Gradle の CoW、proxy、firewall、任意の DinD / Nix / sumi
 ```
 
-モードで変える範囲は `/workspace` のマウント、初期 clone、所有権の準備、`agent` リモートの利用可否に限定する。agent サービスを二重に定義せず、ビルド、ネットワーク、認証、依存マウントは共通に保つ。同じホストの作業ツリーについて、二つのモードを同時には起動しない。
+モードで変える範囲は `/workspace` と保護・秘匿用サブマウント、初期 clone、所有権の準備、`agent` リモートの利用可否に限定する。agent サービスを二重に定義せず、ビルド、ネットワーク、認証、依存マウントは共通に保つ。同じホストの作業ツリーについて、二つのモードを同時には起動しない。
 
 ### 設定生成と Compose
 
-`settings.py` がモードを検証し、既存の `settings.env` に加えて `.generated/workspace.compose.yaml` を生成する。この小さな Compose ファイルは `agent` の `/workspace` マウントだけを定義する。
+`settings.py` がモードを検証し、既存の `settings.env` に加えて `.generated/workspace.compose.yaml` を生成する。この Compose ファイルは `agent` の `/workspace` と、shared の保護・秘匿用サブマウントを定義する。
 
 - `clone` は現在の `workspace` named volume を使う。
-- `shared` は解決済みのホストのリポジトリルートを bind mount する。パスを文字列連結で YAML に埋め込まず、適切にシリアライズする。存在しない source の自動作成は無効にする。
+- `shared` は解決済みのホストのリポジトリルートを bind mount する。パスを文字列連結で YAML に埋め込まず、適切にシリアライズする。存在しない source の自動作成は無効にする。`.git` と `.devcontainer` 全体の read-only bind を重ね、秘密のディレクトリを空の read-only tmpfs、秘密のファイルを `.generated/empty-secret` の read-only bind で覆う。
 
 既存の Compose include を、core と生成ファイルを一組としてマージする構成にする。core の相対パスの基準と `settings.env` の適用範囲は維持する。利用者にモードごとの Compose 編集を要求しない。外側の Compose にある Gradle や追加の Node マウントも引き続き利用できる。
 
@@ -81,7 +81,7 @@ Compose の project 名と `workspace` volume 名は切り替えで変更しな�
 
 モードは生成設定からコンテナの環境変数と label に渡し、コンテナ作成時に確定する。起動中のコンテナは、ホストの TOML や更新された生成ファイルを読み直してモードを切り替えない。残っている `workspace.json` や `/workspace/.git` の有無からモードを推測しない。
 
-shared では初期 clone の完了だけを待たずに進む。proxy、認証、DinD の image 読み込みなど、既存の起動待ちは維持する。ログに実際のモードを出し、shared ではホストの作業ツリーと Git の状態へ直接書き込むことを一度表示する。
+shared では初期 clone の完了だけを待たずに進む。proxy、認証、DinD の image 読み込みなど、既存の起動待ちは維持する。ログに実際のモードを出し、shared では編集がホストに直接反映され、`.git` と `.devcontainer` は read-only、commit・switch・stash はホストで行うことを一度表示する。
 
 ### 所有権とマウントポイント
 
@@ -89,7 +89,7 @@ shared では初期 clone の完了だけを待たずに進む。proxy、認証�
 
 `shared` ではホストの作業ツリーのルート、親ディレクトリ、`.git` に対して chown / chmod しない。root による準備は、実際にマウントされた CoW の依存ディレクトリのルートに限り、symlink をたどらない。依存マウントの親はホストで事前に存在することを確認し、Docker に root 所有の親を自動作成させない。
 
-共有する作業ツリーは、設定した `agent.uid` / `agent.gid` の node が必要な読み書きをできることを前提とする。起動時に workspace と Git 管理ディレクトリのアクセスを node で検査し、使えない場合は対象パスと UID / GID の設定箇所を示して停止する。自動的な権限変更や `safe.directory=*` による回避は行わない。
+共有する作業ツリーは、設定した `agent.uid` / `agent.gid` の node が必要な読み書きをできることを前提とする。起動時に workspace が読み書きでき、Git 管理ディレクトリが読めることを node で検査する。`.git` と `.devcontainer` は read-only ファイルシステムで、書き込みできないことも確認する。使えない場合は対象パスと UID / GID の設定箇所を示して停止する。自動的な権限変更や `safe.directory=*` による回避は行わない。
 
 ## モード切り替えとデータの保持
 
@@ -131,13 +131,15 @@ linked worktree の shared 対応には、worktree 専用管理ディレクト�
 
 ## 共有モードの信頼の境界
 
-shared は、エージェントによるホストのリポジトリの直接変更を利用者が許容するモードである。作業ファイルだけでなく、index、refs、Git 設定、hooks、`.devcontainer/` も変更できる。ホスト側の `git status` / `git diff` を、エージェントから独立したレビューの根拠にはできない。ホストでビルドや次回起動を行うと、変更されたファイルや設定が実行され得る。
+shared は、通常の作業ファイルの編集をホストへ直接反映しつつ、`.git` と `.devcontainer` 全体を read-only のサブマウントで保護する。ファイル単位の保護はしない。たとえば `.git/config` だけを保護しても `.git/commondir` で別の config を使わせられる。agent は capability を持たないためマウントを解除できず、マウントポイントの rename による差し替えもできない。agent は編集と status・diff・log を行い、commit・switch・stash はホストで行う。
 
-proxy、firewall、認証情報の代理注入、ホスト Docker socket を渡さない構成は維持する。ただし、これらがホストの作業ツリーや Git を保護するわけではない。ホストの `.env` や `.secrets/` など、リポジトリ内の未追跡・ignored ファイルも共有される。sumi を使っていても、それらのファイルが自動で隠れるわけではない。
+`.devcontainer` の保護を無効にする設定は設けない。`initialize.sh` や Compose も次回起動でホストが使うためである。このリポジトリ自身の `.devcontainer/claude` の開発には clone を使う。`.generated` と `.nix-env` はホストが書き、コンテナの管理処理は読むだけである。コンテナの起動時生成物は `/run/claude-devcontainer` に置く。`/run/host/generated` と `/run/host/nix-env` の read-only マウントも維持する。
 
-`/run/host/generated` と `/run/host/nix-env` の read-only マウントは、共通の参照先として維持する。ただし shared では同じ内容に `/workspace/.devcontainer/` から書き込めるため、管理用生成物が改ざんできないとは扱わない。共有モードのために `.git` や `.devcontainer` の一部だけを隠す仕組みは追加しない。
+秘匿対象の既定は空のリストとし、`.secrets` を含め名前による特別扱いはしない。リポジトリ内を指す `sumi.secrets` は別途自動で隠す。対象は `[git] shared_hidden_paths = [".env", "private/credentials"]` として `claude.local.toml` で指定できる。リポジトリルートからの相対パスとし、絶対パス、`..`、存在しない指定対象は拒否する。リストは既存のマージ規則に従い置き換え、`[]` で空にできる。無効な sumi の未作成ファイルはスキップする。重複・入れ子は親のマウントにまとめる。管理用の別パスでも見える `.devcontainer/.generated` と `.devcontainer/.nix-env`、および `.git` やそれらの親は秘匿対象に指定できない。
 
-clone に戻しても、shared 中に変更されたホストのコードや設定の信頼性が回復するわけではない。必要な確認はホスト側で行う。
+対象は generate 時点で決まる。生成後に新しく作った未保護の場所は隠れず、再生成・再作成が必要である。`check_shared_mounts` は依存マウントに加え、新しい保護・秘匿マウントの対象と親の symlink も拒否する。保護を上書きする追加マウントも拒否する。秘密の別コピー、ハードリンク、Git に入った内容は別途読めるため、この仕組みで隠せるとは扱わない。
+
+ホストの index、refs、Git 設定を agent から保護するので、ホストの `git diff` で作業ファイルをレビューできる。ただし `flake.nix`、`package.json` の scripts、テストなど、作業ツリー内のホストで実行されるファイルは守れない。既存 Git 設定から参照する作業ツリー内の設定や実行ファイルも同様である。通常の status に出ない ignored ファイルは `git status --ignored` で確認する。proxy、firewall、認証情報の代理注入、ホスト Docker socket を渡さない構成は維持する。clone に戻すだけでは、shared 中の編集の信頼性は回復しない。
 
 ## 検証すること
 
@@ -145,12 +147,13 @@ clone に戻しても、shared 中に変更されたホストのコードや設�
 
 1. 設定省略で clone、ローカル設定で shared、不正な値と環境変数の上書きはエラーになる。
 2. 両モードの Compose 解決結果で `/workspace` のマウントが一つだけになり、共通サービスと外側の追加マウントが保たれる。
-3. shared の初回起動で未コミット・未追跡ファイルが見え、編集、commit、ブランチ切り替えが双方向に反映される。Git コピーと remote 登録は起きない。
+3. shared の初回起動で秘匿対象以外の未コミット・未追跡ファイルが見え、編集が双方向に反映される。status・diff・log は成功し、agent の add・commit・switch・stash は拒否される。ホストでは commit・switch が成功する。Git コピーと remote 登録は起きない。
 4. shared の起動でホストの workspace と親ディレクトリの UID / GID / mode が変わらず、権限不足や未対応 Git 配置では明確に停止する。
 5. clone → shared → clone と切り替えて、clone の未コミット変更とブランチが保存され、共有側の変更が勝手に混ざらない。clone 未作成の場合はその時点のホストから初期化される。
 6. shared に接続する `git fetch agent` / `git push agent` を拒否する。設定ファイルだけ変更した場合、コンテナ再作成後、旧コンテナの場合も実際の接続先に基づいて判定する。
 7. 両モードで依存マウントへの編集がホストの lower を変えず、切り替えで upper が失われない。Gradle と Testcontainers の既存シナリオも成立する。
-8. shared でも proxy と firewall の既存制限が保たれ、clone のホスト隔離テストも引き続き通る。
+8. 生成 Compose の必須 read-only マウント、指定パス・sumi の秘匿と既定のリストが空であること、clone に影響しないことを単体テストする。実マウントで書き込み・秘密の読み取り・rename・umount の拒否、CapEff=0、ホストの内容が不変であることを検証する。symlink と保護を上書きするマウントも起動前に拒否する。
+9. shared でも proxy と firewall の既存制限が保たれ、clone のホスト隔離テストも引き続き通る。
 
 shared の実コンテナ試験には専用の一時リポジトリを使い、開発中のこのリポジトリをテスト対象として書き換えない。
 

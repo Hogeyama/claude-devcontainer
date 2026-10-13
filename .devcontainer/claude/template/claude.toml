@@ -9,13 +9,18 @@
 #
 # After a change, stop the environment and run `devcontainer up` again; for
 # git.isolation, agent.*, docker.enabled, nix.enabled, sumi.enabled and tode.*, with
-# --remove-existing-container. Relative paths are from this directory, and ~ is
-# the host's home.
+# --remove-existing-container. Relative paths are from this directory (except
+# git.shared_hidden_paths, from the repository root), and ~ is the host's home.
 
 [git]
 # "clone": independent workspace volume (default).
-# "shared": edit the host's working tree and .git directly, including ignored files.
+# "shared": edit the host's working tree; .git and .devcontainer are read-only.
+# Commit, switch and stash on the host; use clone to develop .devcontainer.
 # isolation = "clone"
+# Existing files/directories to hide in shared mode, relative to the repository
+# root. Default: [] (no paths). In-repository sumi.secrets is also hidden.
+# Set these paths in claude.local.toml. Recreate after changing this.
+# shared_hidden_paths = [".env", "private/credentials"]
 
 [agent]
 # Owner of the agent's volumes; match the host UID/GID for dependency overlays.

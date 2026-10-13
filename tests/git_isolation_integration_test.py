@@ -4,6 +4,7 @@ RUN_GIT_ISOLATION_DOCKER_TESTS=1 enables this; an existing agent image supplies
 Python/Git/setpriv. Current workspace scripts are mounted over its old copies.
 No builds, network access, credentials or developer repository writes are used.
 """
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,9 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / '.devcontainer/claude'
+spec = importlib.util.spec_from_file_location('isolation_settings', CORE / 'scripts/settings.py')
+settings = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(settings)
 
 
 @unittest.skipUnless(os.environ.get('RUN_GIT_ISOLATION_DOCKER_TESTS') == '1', 'Git isolation Docker tests disabled')
@@ -53,6 +57,10 @@ class GitIsolationIntegrationTest(unittest.TestCase):
         self.command(sys.executable, str(scripts / 'workspace-source.py'))
         self.command(sys.executable, str(scripts / 'git-agent.py'), 'register')
         self.generated = self.host / '.devcontainer/.generated'
+        (self.host / '.secrets').mkdir()
+        (self.host / '.secrets/token').write_text('directory-secret\n')
+        (self.host / '.env').write_text('file-secret\n')
+        (self.host / '.devcontainer/sumi.txt').write_text('sumi-secret\n')
         lower = self.host / 'node_modules'
         lower.mkdir()
         (lower / 'dependency').write_text('host dependency\n')
@@ -80,26 +88,35 @@ class GitIsolationIntegrationTest(unittest.TestCase):
 
     def start(self, mode):
         self.docker('rm', '-f', self.container, check=False)
-        source = self.volume if mode == 'clone' else str(self.host)
-        kind = 'volume' if mode == 'clone' else 'bind'
-        args = ['run', '-d', '--init', '--network', 'none', '--name', self.container,
-                '--label', f'devcontainer.local_folder={self.host}',
-                '--label', 'com.docker.compose.service=agent',
-                '--label', f'com.docker.compose.project={self.project}',
-                '--label', f'dev.claude-devcontainer.git-isolation={mode}',
-                '-e', f'CLAUDE_DEVCONTAINER_GIT_ISOLATION={mode}',
-                '-e', 'CLAUDE_DEVCONTAINER_DIND=0', '-e', 'CLAUDE_DEVCONTAINER_NIX=0',
-                '-e', 'CLAUDE_DEVCONTAINER_SUMI=0',
-                '--mount', f'type={kind},src={source},dst=/workspace',
-                '--mount', f'type=volume,src={self.dependencies},dst=/workspace/node_modules',
-                '--mount', f'type=bind,src={self.generated},dst=/run/host/generated,readonly']
+        (self.host / '.devcontainer/claude.toml').write_text(
+            f'[git]\nisolation = "{mode}"\nshared_hidden_paths = [".secrets", ".env"]\n'
+            '[sumi]\nsecrets = "sumi.txt"\n')
+        settings.generate(self.host, {})
+        volumes = [
+            {'type': 'volume', 'source': 'dependencies', 'target': '/workspace/node_modules'},
+            {'type': 'bind', 'source': str(self.generated), 'target': '/run/host/generated', 'read_only': True}]
         for name in ('workspace_mounts.py', 'clone-workspace.py', 'wait-ready.sh'):
-            args += ['--mount', f'type=bind,src={CORE}/agent/{name},dst=/usr/local/bin/{name},readonly']
+            volumes.append({'type': 'bind', 'source': str(CORE / 'agent' / name),
+                            'target': '/usr/local/bin/' + name, 'read_only': True})
         script = ('mkdir -p /run/claude-devcontainer; touch /run/claude-devcontainer/host-config-copied; '
                   'python3 /usr/local/bin/workspace_mounts.py && '
                   'exec setpriv --reuid=node --regid=node --init-groups '
                   '--bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs sleep infinity')
-        self.docker(*args, '--entrypoint', 'sh', self.image, '-ec', script)
+        runner = self.root / 'runner.json'
+        runner.write_text(json.dumps({
+            'services': {'agent': {
+                'image': self.image, 'container_name': self.container, 'init': True, 'network_mode': 'none',
+                'user': '0:0', 'entrypoint': ['sh', '-ec', script], 'command': [],
+                'cap_drop': ['ALL'], 'cap_add': ['CHOWN', 'SETUID', 'SETGID', 'SETPCAP'],
+                'security_opt': ['no-new-privileges=true'],
+                'labels': {'devcontainer.local_folder': str(self.host), 'dev.claude-devcontainer.git-isolation': mode},
+                'environment': {'CLAUDE_DEVCONTAINER_GIT_ISOLATION': mode, 'CLAUDE_DEVCONTAINER_DIND': '0',
+                                'CLAUDE_DEVCONTAINER_NIX': '0', 'CLAUDE_DEVCONTAINER_SUMI': '0'},
+                'volumes': volumes}},
+            'volumes': {'workspace': {'external': True, 'name': self.volume},
+                        'dependencies': {'external': True, 'name': self.dependencies}}}))
+        self.docker('compose', '-p', self.project, '-f', str(self.generated / 'workspace.compose.yaml'),
+                    '-f', str(runner), 'up', '-d', '--no-build', '--pull', 'never', 'agent')
         # docker exec may start before root mount preparation has finished.
         self.docker('exec', self.container, 'sh', '-ec',
                     'for i in $(seq 1 100); do '
@@ -122,9 +139,16 @@ class GitIsolationIntegrationTest(unittest.TestCase):
         self.assertEqual(self.execute('cat', '/workspace/tracked').stdout, 'host dirty\n')
         self.assertEqual(self.execute('cat', '/workspace/untracked').stdout, 'host untracked\n')
         self.execute('sh', '-ec', 'echo shared-edit > /workspace/tracked')
-        self.execute('git', '-C', '/workspace', 'switch', '-c', 'shared/task')
-        self.execute('git', '-C', '/workspace', 'add', 'tracked')
-        self.execute('git', '-C', '/workspace', 'commit', '-m', 'shared edit')
+        for args in [('status', '--short'), ('diff',), ('log', '-1', '--oneline')]:
+            self.execute('git', '-C', '/workspace', *args)
+        for args in [('switch', '-c', 'forbidden'), ('add', 'tracked'), ('commit', '-am', 'forbidden'), ('stash',)]:
+            self.assertNotEqual(self.execute('git', '-C', '/workspace', *args, check=False).returncode, 0, args)
+        self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.initial)
+        self.assertIn('+shared-edit', self.git('diff').stdout)
+        self.assert_shared_protections()
+        self.git('switch', '-c', 'shared/task')
+        self.git('add', 'tracked')
+        self.git('commit', '-qm', 'shared edit')
         self.assertEqual((self.host / 'tracked').read_text(), 'shared-edit\n')
         self.assertEqual(self.git('branch', '--show-current').stdout.strip(), 'shared/task')
         self.assertEqual([(p.stat().st_uid, p.stat().st_gid, p.stat().st_mode) for p in paths], before)
@@ -140,6 +164,42 @@ class GitIsolationIntegrationTest(unittest.TestCase):
         self.assertEqual(self.execute('cat', '/workspace/node_modules/dependency').stdout, 'overlay-change\n')
         self.assertEqual((self.host / 'node_modules/dependency').read_text(), 'host dependency\n')
         self.assertEqual(self.git('branch', '--show-current').stdout.strip(), 'shared/task')
+
+    def assert_shared_protections(self):
+        self.execute('python3', '-c', '''
+import ctypes, errno, os
+from pathlib import Path
+status = Path('/proc/self/status').read_text()
+assert int(next(line.split()[1] for line in status.splitlines() if line.startswith('CapEff:')), 16) == 0
+assert list(Path('/workspace/.secrets').iterdir()) == []
+for name in ('.env', '.devcontainer/sumi.txt'):
+    assert (Path('/workspace') / name).read_bytes() == b''
+assert not Path('/workspace/.secrets/token').exists()
+for name in ('.git/config', '.git/commondir', '.git/hooks/evil', '.git/objects/evil',
+             '.devcontainer/claude.toml', '.devcontainer/new', '.devcontainer/.generated/empty-secret',
+             '.secrets/new', '.env', '.devcontainer/sumi.txt'):
+    try:
+        (Path('/workspace') / name).write_text('tampered')
+    except OSError as error:
+        assert error.errno == errno.EROFS, (name, error)
+    else:
+        raise AssertionError(name)
+libc = ctypes.CDLL(None, use_errno=True)
+for name in ('.git', '.devcontainer', '.secrets', '.env'):
+    path = '/workspace/' + name
+    try:
+        os.rename(path, path + '-moved')
+    except OSError as error:
+        assert error.errno in (errno.EBUSY, errno.EROFS), (name, error)
+    else:
+        raise AssertionError(name)
+    assert libc.umount2(os.fsencode(path), 0) == -1
+    assert ctypes.get_errno() == errno.EPERM
+''')
+        self.assertEqual((self.host / '.secrets/token').read_text(), 'directory-secret\n')
+        self.assertEqual((self.host / '.env').read_text(), 'file-secret\n')
+        self.assertEqual((self.host / '.devcontainer/sumi.txt').read_text(), 'sumi-secret\n')
+
 
 
 if __name__ == '__main__':

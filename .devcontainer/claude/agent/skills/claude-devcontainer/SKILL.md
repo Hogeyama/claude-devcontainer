@@ -24,7 +24,7 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
-`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected when this container was created (default `clone`). In `shared`, `/workspace` is the host working tree and `.git`: edits, commits, branches, hooks and settings affect the host immediately, and untracked/ignored files are visible too. Do not use the `agent` remote for fetch/push in shared mode. `/run/host/generated` and `/run/host/nix-env` remain read-only mounts, but their contents are writable through `/workspace/.devcontainer/`. Network and dependency CoW restrictions still apply. Changing TOML takes effect only after the human recreates the container.
+`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected when this container was created (default `clone`). In `shared`, `/workspace` is the host working tree: ordinary edits affect it immediately, but all of `.git` and `.devcontainer` are read-only mounts. Use `git status`, `git diff` and `git log`; the human performs add, commit, switch and stash on the host. Use clone to develop `.devcontainer` itself. The host's `git.shared_hidden_paths` (empty by default) and in-repository `sumi.secrets` are covered with empty read-only mounts; no directory name is treated specially. Other untracked/ignored files remain shared. Do not use the `agent` remote in shared mode. `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Network and dependency CoW restrictions still apply. Changes to mount settings take effect after the human recreates the container.
 
 The independent workspace and Git exchange rules below apply to `clone`:
 
@@ -51,7 +51,7 @@ Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docke
 
 ## Adding tools and dependencies
 
-Package registries are unavailable. Propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
+Package registries are unavailable. In shared mode, ask the human to edit `.devcontainer` on the host, or switch to clone for this work. In clone mode, propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
 
 | What is needed | Change for the human to make |
 |---|---|

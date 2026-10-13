@@ -63,11 +63,18 @@ def prepare(workspace, uid, gid, isolation='clone'):
 
 def check_shared(workspace):
     workspace = Path(workspace)
-    paths = [workspace, workspace / '.git', workspace / '.git/objects', workspace / '.git/refs']
+    if not os.access(workspace, os.R_OK | os.W_OK | os.X_OK):
+        raise ValueError(f'{workspace} is not writable to {os.getuid()}:{os.getgid()}; '
+                         'set agent.uid and agent.gid in claude.local.toml to the host owner.')
+    for name in ('.git', '.devcontainer'):
+        path = workspace / name
+        if not os.statvfs(path).f_flag & os.ST_RDONLY or os.access(path, os.W_OK):
+            raise ValueError(f'{path} must be mounted read-only in shared mode; regenerate settings and recreate the container.')
+    paths = [workspace / '.devcontainer', workspace / '.git', workspace / '.git/objects', workspace / '.git/refs']
     paths += [workspace / '.git' / name for name in ('HEAD', 'config', 'index')
               if (workspace / '.git' / name).exists()]
     for path in paths:
-        access = os.R_OK | os.W_OK | (os.X_OK if path.is_dir() else 0)
+        access = os.R_OK | (os.X_OK if path.is_dir() else 0)
         if not os.access(path, access):
             raise ValueError(f'{path} is not accessible to {os.getuid()}:{os.getgid()}; '
                              'set agent.uid and agent.gid in claude.local.toml to the host owner.')

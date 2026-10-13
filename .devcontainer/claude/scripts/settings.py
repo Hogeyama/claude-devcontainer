@@ -50,7 +50,7 @@ FILES = ('claude.toml', 'claude.local.toml')
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
-    'git': {'isolation': 'clone'},
+    'git': {'isolation': 'clone', 'shared_hidden_paths': []},
     'agent': {'uid': 1000, 'gid': 1000},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -141,6 +141,10 @@ def check(data, source):
                 raise ValueError(f"{where}: newlines and ' are not allowed")
     if data.get('git', {}).get('isolation', 'clone') not in ('clone', 'shared'):
         raise ValueError(f'{source}: git.isolation: expected "clone" or "shared"')
+    for value in data.get('git', {}).get('shared_hidden_paths', []):
+        path = Path(value)
+        if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
+            raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
     agent, docker, tode, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'tode', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
@@ -319,25 +323,97 @@ def check_shared_repository(root):
                 raise ValueError(f'{advice} Unsupported Git storage: {path}')
 
 
+def check_mount_path(root, relative):
+    """Do not resolve away symlinks in a mount destination, including its leaf."""
+    path = Path(root)
+    for part in relative.parts:
+        path /= part
+        if path.is_symlink():
+            raise ValueError(f'shared workspace mount must not follow a symlink: {path}')
+        if path != Path(root) / relative and not path.is_dir():
+            raise ValueError(f'shared workspace mount needs an existing, non-symlink parent: {path}')
+    return path
+
+
+def shared_mounts(settings, root):
+    """Mandatory protections and existing secret paths; no host files are created."""
+    root = Path(root).resolve()
+    mounts = []
+    for name in ('.git', '.devcontainer'):
+        path = check_mount_path(root, Path(name))
+        if not path.is_dir():
+            raise ValueError(f'shared workspace mount needs a directory: {path}')
+        mounts.append({'type': 'bind', 'source': str(path), 'target': '/workspace/' + name,
+                       'read_only': True, 'bind': {'create_host_path': False}})
+    candidates = {}
+    secrets = settings['sumi']['secrets']
+    if not secrets.is_relative_to(root):
+        # A host-side alias can still name a file in the shared working tree.
+        secrets = secrets.resolve()
+    if secrets.is_relative_to(root):
+        candidates[secrets.relative_to(root)] = False
+    candidates.update({Path(value): True for value in settings['git']['shared_hidden_paths']})
+    hidden = []
+    for relative, required in sorted(candidates.items(), key=lambda item: (len(item[0].parts), str(item[0]))):
+        # Management inputs also have /run/host aliases. Do not promise to hide
+        # data there while leaving the alias readable, or mask Git itself.
+        for reserved in map(Path, ('.git', '.devcontainer/.generated', '.devcontainer/.nix-env')):
+            if relative.is_relative_to(reserved) or reserved.is_relative_to(relative):
+                raise ValueError(f'Cannot hide shared management path: {relative}; move secrets outside it.')
+        # An absent, disabled sumi file needs no mount. Still inspect existing
+        # components so dangling links are rejected.
+        path = root
+        for part in relative.parts:
+            path /= part
+            if path.is_symlink():
+                raise ValueError(f'shared workspace mount must not follow a symlink: {path}')
+            if not path.exists():
+                break
+        path = root / relative
+        if not path.exists():
+            if required:
+                raise ValueError(f'git.shared_hidden_paths: path does not exist: {relative}')
+            continue
+        check_mount_path(root, relative)
+        if any(relative.is_relative_to(parent) for parent in hidden):
+            continue
+        target = '/workspace/' + relative.as_posix()
+        if path.is_dir():
+            mount = {'type': 'tmpfs', 'target': target, 'read_only': True,
+                     'tmpfs': {'size': 4096, 'mode': 0o555}}
+        elif path.is_file():
+            mount = {'type': 'bind', 'source': str(root / '.devcontainer/.generated/empty-secret'),
+                     'target': target, 'read_only': True, 'bind': {'create_host_path': False}}
+        else:
+            raise ValueError(f'Hidden shared path must be a regular file or directory: {relative}')
+        mounts.append(mount)
+        hidden.append(relative)
+    return mounts
+
+
 def workspace_compose(settings, root):
-    mode = settings['git']['isolation']
-    mount = {'type': 'volume', 'source': 'workspace', 'target': '/workspace'}
-    if mode == 'shared':
+    mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
+    if settings['git']['isolation'] == 'shared':
         check_shared_repository(root)
-        mount = {'type': 'bind', 'source': str(Path(root).resolve()).replace('$', '$$'),
-                 'target': '/workspace', 'bind': {'create_host_path': False}}
+        mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),
+                   'target': '/workspace', 'bind': {'create_host_path': False}}]
+        mounts += shared_mounts(settings, root)
     # JSON is YAML; escape Compose interpolation separately from serialization.
-    return json.dumps({'services': {'agent': {'volumes': [mount]}}}, indent=2) + '\n'
+    return json.dumps({'services': {'agent': {'volumes': mounts}}}, indent=2).replace('$', '$$') + '\n'
 
 
 def check_shared_mounts(root=ROOT):
-    """Check consumer-added mounts before Docker can create host parents as root."""
-    if load(root)['git']['isolation'] != 'shared':
+    """Check all destinations and mandatory protections before container startup."""
+    settings = load(root)
+    if settings['git']['isolation'] != 'shared':
         return
     result = subprocess.run(['docker', 'compose', '-f', str(Path(root) / '.devcontainer/compose.yaml'),
                              'config', '--format', 'json'], check=True, capture_output=True, text=True)
     config = json.loads(result.stdout)
-    mounts = config['services']['agent'].get('volumes', [])
+    agent = config['services']['agent']
+    mounts = agent.get('volumes', []) + [
+        {'type': 'tmpfs', 'target': item.split(':', 1)[0]}
+        for item in agent.get('tmpfs', [])]
     workspace = [mount for mount in mounts if mount['target'] == '/workspace']
     if (len(workspace) != 1 or workspace[0]['type'] != 'bind'
             or Path(workspace[0]['source']).resolve() != Path(root).resolve()):
@@ -347,14 +423,24 @@ def check_shared_mounts(root=ROOT):
         target = Path(mount['target'])
         if not target.is_relative_to('/workspace') or target == Path('/workspace'):
             continue
-        path = Path(root)
-        for part in target.relative_to('/workspace').parts[:-1]:
-            path /= part
-            if path.is_symlink() or not path.is_dir():
-                raise ValueError(f'shared workspace mount needs an existing, non-symlink parent: {path}')
-        leaf = path / target.name
-        if leaf.is_symlink():
-            raise ValueError(f'shared workspace mount must not follow a symlink: {leaf}')
+        relative = target.relative_to('/workspace')
+        if '..' in relative.parts:
+            raise ValueError(f'Invalid shared mount target: {target}')
+        check_mount_path(root, relative)
+    # Consumer overrides must not silently disable a protection or expose a
+    # child of a masked directory through another mount.
+    protections = shared_mounts(settings, root)
+    protected_targets = {m['target'] for m in protections}
+    for expected in protections:
+        actual = [m for m in mounts if m['target'] == expected['target']]
+        if (len(actual) != 1 or actual[0]['type'] != expected['type'] or not actual[0].get('read_only')
+                or actual[0].get('source') != expected.get('source')):
+            raise ValueError(f'Missing required shared protection: {expected["target"]}')
+        for mount in mounts:
+            if mount['target'] != expected['target'] and Path(mount['target']).is_relative_to(expected['target']):
+                # The generated secret masks inside .devcontainer are allowed.
+                if mount['target'] not in protected_targets:
+                    raise ValueError(f'Mount overrides shared protection: {mount["target"]}')
 
 
 def generate(root=ROOT, environ=os.environ):
@@ -377,6 +463,9 @@ def generate(root=ROOT, environ=os.environ):
     out = Path(root) / '.devcontainer/.generated'
     out.mkdir(parents=True, exist_ok=True)
     (out / '.gitignore').write_text('*\n')
+    if settings['git']['isolation'] == 'shared':
+        write(out / 'empty-secret', '')
+        (out / 'empty-secret').chmod(0o444)
     header = '# Written by scripts/settings.py from claude.toml and claude.local.toml; do not edit.\n'
     values = variables(settings) | node_modules_paths(root, environ)
     write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in values.items()))
