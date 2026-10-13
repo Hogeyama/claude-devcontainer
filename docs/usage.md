@@ -31,7 +31,25 @@ git log --oneline "$base_commit..$agent_commit"
 git diff "$base_commit" "$agent_commit"
 ```
 
-レビューでは、ホストで実行する `package.json`、`.envrc`、ビルドスクリプト、`.devcontainer/` などの変更も確認する。`--no-tags` とブランチを指定した fetch により、レビューと無関係なタグを取り込まない。
+`--no-tags` とブランチを指定した fetch により、レビューと無関係なタグを取り込まない。
+
+レビューでは、取り込んだ後にホストで実行されるファイルの変更を必ず確認する。そのうち場所の決まっているものは、次のコマンドで一覧できる。
+
+```sh
+git diff --stat "$base_commit" "$agent_commit" -- .devcontainer .gitmodules flake.nix flake.lock .envrc .vscode .claude .mcp.json
+```
+
+| ファイル | ホストでの扱い |
+|---|---|
+| `.devcontainer/`の全体 | `devcontainer up`のたびに、`devcontainer.json`の`initializeCommand`と、そこから呼ぶスクリプト（`claude/scripts/`など）をホストで実行する。`agent-setup.sh`は、agentのimageのビルドでrootとして実行する |
+| `.devcontainer/compose.yaml` | ホストのディレクトリやsocketをagentへmountできる。`cap_add`や`privileged`でagentの隔離を外せる |
+| `.devcontainer/claude.toml` | `proxy.hosts`は、ホストの秘密をどの接続先へ付けるかを決める。`docker.images`はホストがpullするイメージを、`nix`はホストで評価するflakeを、`sumi.secrets`と`proxy.ca`はコンテナへmountするホストのファイルを決める |
+| `flake.nix`、`flake.lock` | `nix.enabled`なら、`devcontainer up`のたびにホストで評価する。ホストの`nix develop`でも実行する |
+| `.envrc` | direnvが、ホストでディレクトリに入ったときに実行する |
+| `.vscode/` | ホストのVS Codeが、`tasks.json`のタスクや、設定に書かれたコマンドを実行する |
+| `.claude/`、`.mcp.json` | ホストのClaude Codeが、hookやMCPサーバーとして実行する |
+| `.gitmodules` | ホストの`git submodule update`が取得するURLを決める |
+| `package.json`、`build.gradle`、`gradle/wrapper/`、`Makefile`、`.husky/`など | ホストでビルド、テスト、`git commit`などを実行したときに動く |
 
 承認したら、同じコミットIDを取り込む。
 
