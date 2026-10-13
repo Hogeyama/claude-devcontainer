@@ -17,7 +17,12 @@ services:
       args:
         AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
+        INSTALL_TODE: ${CLAUDE_DEVCONTAINER_TODE:-0}
+        TODE_EXTENSIONS: ${CLAUDE_DEVCONTAINER_TODE_EXTENSIONS:-}
     command: ["sleep", "infinity"]
+    # sleep as PID 1 reaps nothing, so processes orphaned by devcontainer exec
+    # sessions, such as tode's Chromium, stayed as zombies.
+    init: true
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, CHOWN, DAC_OVERRIDE]
     security_opt:
@@ -70,6 +75,10 @@ services:
       - sumi-run:/run/sumi:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
+      # tode's VS Code user settings, keybindings and extension state, kept
+      # across rebuilds. Extensions and Machine settings stay in the image, so
+      # that an image change reaches them and the agent cannot persist code.
+      - tode-user:/home/node/.local/share/tode/vscode/user-data/User
       # features/nix-1 links to /nix/store; features/nix-0 is empty.
       - type: bind
         source: ./features/nix-${CLAUDE_DEVCONTAINER_NIX:-0}
@@ -229,6 +238,7 @@ volumes:
       device: overlay
       o: lowerdir=${CLAUDE_DEVCONTAINER_NODE_LOWER:?Run initialize.sh},upperdir=${CLAUDE_DEVCONTAINER_NODE_UPPER:?Run initialize.sh},workdir=${CLAUDE_DEVCONTAINER_NODE_WORK:?Run initialize.sh}
   claude-projects:
+  tode-user:
   public-ca:
   proxy-private-ca:
   dind-data:

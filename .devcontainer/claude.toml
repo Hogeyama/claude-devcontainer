@@ -15,6 +15,10 @@ enabled = true
 # Public demo fixture included in the clone; keep real secret lists outside Git.
 secrets = "../.secrets/sumi/secrets.txt"
 
+[tode]
+enabled = true
+extensions = ["anthropic.claude-code"]
+
 # GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories to
 # share: REST for those repositories, GraphQL, and Git over HTTPS.
 [proxy.hosts."api.github.com"]
