@@ -4,13 +4,13 @@
 
 ## 初回起動
 
-VS Code の「Reopen in Container」か `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空のworkspace volumeにホストと同じブランチ名でcheckoutする。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
+`devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空のworkspace volumeにホストと同じブランチ名でcheckoutする。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
 ## 受け渡し用リモート
 
 起動処理がホストに`agent`リモートを自動登録する。接続先は起動中のコンテナ内の`/workspace`であり、GitHubなどの外部リポジトリは介在しない。既存の`origin`は変更しない。同名の`agent`が別用途で存在する場合は上書きせず停止するので、既存のリモートを別名にしてから起動する。
 
-Git標準の`ext`転送とホスト側の`git-agent.py`を使い、Dockerの標準入出力をコンテナ内の`git-upload-pack` / `git-receive-pack`につなぐ。どちらも`node`で実行する。SSHサーバーや公開ポートは不要で、接続時にGitを実行したworktreeとそのコンテナを見つけ直すため、複数worktreeや再作成にも追従する。このホストリポジトリだけに`protocol.ext.allow=always`を設定する。接続にはコンテナが起動している必要がある。
+Git標準の`ext`転送とホスト側の`git-agent.py`を使い、Dockerの標準入出力をコンテナ内の`git-upload-pack` / `git-receive-pack`につなぐ。どちらも`node`で実行する。SSHサーバーや公開ポートは不要で、接続時にGitを実行したworktreeとそのコンテナを見つけ直すため、複数worktreeや再作成にも追従する。このホストリポジトリだけに`protocol.ext.allow=user`を設定する。`user`は、利用者が直接実行したGitのコマンドにだけ`ext`転送を許し、submoduleのcloneのようにGitが自分で実行するコマンドには許さない。接続にはコンテナが起動している必要がある。
 
 エージェントは引き継いだブランチで作業できる。必要なら次のように別の作業ブランチを作る。コミット後はブランチ名とコミットIDを人間に伝える。pushは不要。
 
@@ -31,7 +31,25 @@ git log --oneline "$base_commit..$agent_commit"
 git diff "$base_commit" "$agent_commit"
 ```
 
-レビューでは、ホストで実行する `package.json`、`.envrc`、ビルドスクリプト、`.devcontainer/` などの変更も確認する。`--no-tags` とブランチを指定した fetch により、レビューと無関係なタグを取り込まない。
+`--no-tags` とブランチを指定した fetch により、レビューと無関係なタグを取り込まない。
+
+レビューでは、取り込んだ後にホストで実行されるファイルの変更を必ず確認する。そのうち場所の決まっているものは、次のコマンドで一覧できる。
+
+```sh
+git diff --stat "$base_commit" "$agent_commit" -- .devcontainer .gitmodules flake.nix flake.lock .envrc .vscode .claude .mcp.json
+```
+
+| ファイル | ホストでの扱い |
+|---|---|
+| `.devcontainer/`の全体 | `devcontainer up`のたびに、`devcontainer.json`の`initializeCommand`と、そこから呼ぶスクリプト（`claude/scripts/`など）をホストで実行する。`agent-setup.sh`は、agentのimageのビルドでrootとして実行する |
+| `.devcontainer/compose.yaml` | ホストのディレクトリやsocketをagentへmountできる。`cap_add`や`privileged`でagentの隔離を外せる |
+| `.devcontainer/claude.toml` | `proxy.hosts`は、ホストの秘密をどの接続先へ付けるかを決める。`docker.images`はホストがpullするイメージを、`nix`はホストで評価するflakeを、`sumi.secrets`と`proxy.ca`はコンテナへmountするホストのファイルを決める |
+| `flake.nix`、`flake.lock` | `nix.enabled`なら、`devcontainer up`のたびにホストで評価する。ホストの`nix develop`でも実行する |
+| `.envrc` | direnvが、ホストでディレクトリに入ったときに実行する |
+| `.vscode/` | ホストのVS Codeが、`tasks.json`のタスクや、設定に書かれたコマンドを実行する |
+| `.claude/`、`.mcp.json` | ホストのClaude Codeが、hookやMCPサーバーとして実行する |
+| `.gitmodules` | ホストの`git submodule update`が取得するURLを決める |
+| `package.json`、`build.gradle`、`gradle/wrapper/`、`Makefile`、`.husky/`など | ホストでビルド、テスト、`git commit`などを実行したときに動く |
 
 承認したら、同じコミットIDを取り込む。
 
@@ -196,25 +214,61 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagent
 
 ## VS Codeで開く
 
-VS CodeのGUI接続と、ホスト認証が転送されないことは未検証です。Dev Containersには[ホストのGit認証を共有する機能](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials)があります。使う場合は認証情報のない専用ホストアカウントと専用editor profileを用意してください。SSH／GPG agentや、ホストのGitHub／Docker認証を用意・転送しないことが利用条件です。
+agentが動いているコンテナに、VS Codeを接続しないでください。VS Codeで接続すると、VS Codeとその拡張機能が、コンテナからホストへ通じる経路をいくつか作ります。どの経路もproxyとfirewallを通りません。VS Codeのサーバーはagentと同じ`node`ユーザーで動くので、コンテナで動くプロセスはすべてこれらの経路を使えます。その中には、ホストでコマンドを実行する経路と、proxyを通らずに外部と通信する経路があり、どちらも遮断できません。
 
-認証用環境変数を渡さずに、専用profileのVS Codeを起動してこのリポジトリを開いてください。Dev Containersの「Reopen in Container」を実行すると、作業ディレクトリは`/workspace`になります。ホストのホームや認証用socketを追加mountしないでください。起動前にホストのcredentialsファイルを設定してください。自動注入と初回cloneが終わるまで起動処理が待ちます。その後はVS Codeのコンテナ内ターミナルで通常どおり`claude`を実行できます。
+agentの変更を見るときは、[ホストでレビューして取り込む](#ホストでレビューして取り込む)の手順でホストのリポジトリへfetchし、ホストで差分を見てください。VS Codeを使う場合も、ホストで開いたリポジトリのまま差分を見てください。fetchしただけではファイルを取り出さないので、agentが書いた`.vscode/`の設定などをホストのVS Codeが実行することはありません。
 
-ビルド、テスト、デバッグやコードを実行する拡張機能はコンテナ内で動かしてください。改変されたGradle設定を人間が実行する場合も、コンテナ内であれば通信制限の対象です。ホストで実行するスクリプト、Dockerfile、起動設定は先にレビューしてください。
+### VS Codeが作る経路
 
-### 認証転送を抑制する設定
+| 経路 | コンテナで動くプロセスができること | 遮断 |
+|---|---|---|
+| リモートの拡張機能（`~/.vscode-server`） | ホスト側のターミナルを開かせて、ホストで任意のコマンドを実行する | 遮断できない |
+| ホストのブラウザ（`$BROWSER`、`code --openExternal`） | ホストのブラウザでURLやWebページを開き、proxyを通らずに外部と通信する | 遮断できない |
+| Dev Containers拡張機能のIPCソケット（`/tmp/vscode-remote-containers-ipc-*.sock`） | ホストで`git credential`を実行させて、任意の接続先のGitの認証情報を受け取る。保存と削除もできる。Dockerの認証情報も同じように扱える | 遮断できない |
+| SSH agentの転送（`/tmp/vscode-ssh-auth-*.sock`） | ホストのSSH鍵で署名する。ブラウザの経路と組み合わせれば、SSHの認証を中継して、利用者としてpushできる | VS Codeを`SSH_AUTH_SOCK`なしで起動すれば遮断できる |
+| VS CodeのGitHubアカウント（`/tmp/vscode-git-*.sock`） | VS CodeでサインインしているGitHubアカウントのトークンを受け取る。scopeには`repo`と`workflow`が含まれる | ホストの設定で遮断できる（`github.gitAuthentication`） |
+| Waylandのソケット（`/tmp/vscode-wayland-*.sock`） | ホストの画面にウィンドウを出す。compositorによっては、画面の取得や入力の送信もできる | ホストの設定で遮断できる（`dev.containers.mountWaylandSocket`） |
+| X11の転送（`/tmp/.X11-unix/X*`） | ホストの画面を取得し、キー入力とクリップボードを読む | 同梱のimageで遮断済み |
+| gpg-agentの転送 | ホストのGPG鍵で署名する | 同梱のimageにはGnuPGがないので起きない |
 
-Dev Containers拡張機能0.469.0では、以下をホストのuser/profile設定に指定できます。
+この表は、Dev Containers拡張機能0.469.0とVS Code 1.119.0のコードから作りました。実際にコンテナから接続して確かめたのは、SSH agentとX11の転送だけです。
 
-```json
-{
-  "dev.containers.copyGitConfig": false,
-  "dev.containers.gitCredentialHelperConfigLocation": "none",
-  "dev.containers.dockerCredentialHelper": false,
-  "dev.containers.githubCLILoginWithToken": false
-}
-```
+- リモートの拡張機能: `~/.vscode-server`の拡張機能は`node`の所有なので、コンテナのプロセスはそのコードを書き換えられます。書き換えたコードは、ウィンドウの再読み込みや再接続で拡張機能ホストが起動し直したときに読み込まれます。リモートの拡張機能は、`workbench.action.terminal.newLocal`でホスト側のターミナルを開き、`workbench.action.terminal.sendSequence`でそこへ文字列を送れます。
+- ホストのブラウザ: VS Codeは、信頼済みのドメインでないURLを開く前に確認のダイアログを出します。ただし、`localhost`、`127.0.0.1`、`[::1]`のURLと、VS Codeが最初から信頼済みにしているドメインのURLは、確認なしに開きます。信頼済みのドメインには、`https://*.github.dev`のように、GitHub Codespacesの公開ポートとして第三者が用意できるものも含まれます。`localhost`のURLは、コンテナの同じポートをホストへ転送してから開くので、コンテナが配信したWebページがホストのブラウザで動きます。このページは、外部のサーバーとコンテナの間で通信を中継できます。
+- IPCソケット: VS Codeは、VS Codeのプロセスの環境変数で`git credential`を実行し、ホームディレクトリの`~/.docker/config.json`とそのcredential helperを読みます。接続先のホストは、要求する側が指定します。
+- X11: Dev Containers拡張機能はコンテナの環境変数に`DISPLAY`があるとX11を転送しないので、imageで`DISPLAY=none`を設定しています。VS Codeのサーバーとターミナル、`devcontainer exec`で起動したプロセスでは、`DISPLAY`を空にします。Playwrightのように、`DISPLAY`に値があれば画面付きでブラウザを起動するツールがあるためです。
 
-これらは認証helperの設置などを抑制する設定です。既存のsocketや拡張機能を通じた認証転送まで遮断できたという検証結果はありません。`remoteEnv`で環境変数を消すだけでも不十分です。
+### それでもVS Codeで接続する場合
+
+接続している間にコンテナで動くプロセスは、agentでなくても上の経路を使えます。人間が実行するテストやビルドに加え、VS Codeの拡張機能が実行するworkspaceのコード（ESLintやTypeScriptの設定、Gradleのビルドスクリプトなど）も含みます。そのため、VS Codeでの接続は、ホストでagentのコードを実行するのと同じ扱いになります。次の手順に従ってください。
+
+1. ホストのVS Codeのuser設定に、次を書いてください。遮断できる経路を遮断し、コンテナのGitとDockerがホストの認証情報を自動で使わないようにする設定です。
+
+   ```json
+   {
+     "dev.containers.copyGitConfig": false,
+     "dev.containers.gitCredentialHelperConfigLocation": "none",
+     "dev.containers.dockerCredentialHelper": false,
+     "dev.containers.githubCLILoginWithToken": false,
+     "dev.containers.mountWaylandSocket": false,
+     "github.gitAuthentication": false
+   }
+   ```
+
+   - `copyGitConfig`は、ホストの`~/.gitconfig`をコンテナへコピーしない設定です。
+   - `gitCredentialHelperConfigLocation`と`dockerCredentialHelper`は、IPCソケットを使うcredential helperを、コンテナのGitとDockerに登録しない設定です。IPCソケットは残るので、コンテナのプロセスが直接要求すれば認証情報を受け取れます。
+   - `githubCLILoginWithToken`は、ホストの`gh`のトークンでコンテナの`gh`にログインしない設定です。
+   - `mountWaylandSocket`は、Waylandのソケットをコンテナへmountしない設定です。
+   - `github.gitAuthentication`は、VS CodeのGitHubアカウントのトークンをGitの認証に使わない設定です。user設定なので、ホストで開いたリポジトリにも適用されます。
+
+2. agentに作業をコミットさせ、ホストでfetchしてレビューしてください。未コミットの変更が残っていると、レビューしていないコードをVS Codeの拡張機能が実行します。
+3. agentを止め、ホストでコンテナを作り直してください。agentが残したプロセスや、書き換えた`~/.vscode-server`を消すためです。
+
+   ```sh
+   devcontainer up --remove-existing-container
+   ```
+
+4. ホストのVS CodeにDev Containers拡張機能を入れ、リポジトリで`code .`を実行し、「Dev Containers: Reopen in Container」を実行してください。作業ディレクトリは`/workspace`になります。コマンドパレットの「Dev Containers: Install devcontainer CLI」で入れたCLIなら、`devcontainer open .`でも開けます。npmやGitHubのリリースから入れたdevcontainer CLIには、`open`がありません。
+5. 接続している間は、agentを動かさないでください。ウィンドウを閉じるとComposeも停止します。
 
 [READMEに戻る](../README.md)

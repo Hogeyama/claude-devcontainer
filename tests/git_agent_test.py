@@ -63,7 +63,23 @@ else:
         self.register()
         self.assertEqual((self.host / '.git/config').read_text(), config)
         self.assertEqual(self.git('remote').stdout.strip(), 'agent')
-        self.assertEqual(self.git('config', 'protocol.ext.allow').stdout.strip(), 'always')
+        self.assertEqual(self.git('config', 'protocol.ext.allow').stdout.strip(), 'user')
+
+    def test_submodules_cannot_run_commands_through_ext(self):
+        # A .gitmodules merged from the agent can name a command as a URL.
+        self.register()
+        marker = self.root / 'submodule-ran'
+        url = 'ext::sh -c touch% ' + str(marker).replace('%', '%%').replace(' ', '% ')
+        self.git('config', '-f', '.gitmodules', 'submodule.probe.path', 'probe')
+        self.git('config', '-f', '.gitmodules', 'submodule.probe.url', url)
+        head = self.git('rev-parse', 'HEAD').stdout.strip()
+        self.git('update-index', '--add', '--cacheinfo', f'160000,{head},probe')
+        self.git('add', '-f', '.gitmodules')
+        self.git('commit', '-m', 'submodule')
+        result = self.git('submodule', 'update', '--init', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("transport 'ext' not allowed", result.stderr)
+        self.assertFalse(marker.exists())
 
     def test_registration_preserves_existing_remotes_and_rejects_collision(self):
         self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')

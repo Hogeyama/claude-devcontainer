@@ -257,6 +257,14 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         # env of api.github.com in template/claude.toml.
         self.assertEqual(self.exec('printenv', 'GH_TOKEN').stdout, 'managed-by-proxy\n')
 
+    def test_vs_code_forwards_no_x11_display(self):
+        # Dev Containers forwards the host's display only into a container
+        # whose environment lacks DISPLAY; the processes it starts see none.
+        container = self.compose_run('ps', '-q', 'agent').strip()
+        self.assertIn('DISPLAY=none', json.loads(docker('inspect', container))[0]['Config']['Env'])
+        result = self.cli_exec('sh', '-c', 'printf "display=[%s]" "${DISPLAY-unset}"')
+        self.assertIn('display=[]', result.stdout)
+
     def test_host_claude_configuration_is_copied_before_up_returns(self):
         result = self.exec('sh', '-c', 'git config --global user.name; cd ~/.claude && cat skills/fixture/SKILL.md && sh statusline.sh && ls -A')
         self.assertIn('fixture-user', result.stdout)

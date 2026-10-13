@@ -37,7 +37,11 @@ agentの起動処理はfirewallとCAを設定してから一般ユーザー（�
 
 managed settingsではWebSearchも禁止しています。検索結果は`api.anthropic.com`の応答としてモデルに届くので、取得元を通信の検査では判定できず、未信頼のWebページの内容が入り込むためです。サーバー側のtoolはproxyでも拒否しているので、この禁止は重ねがけです。
 
-同梱のCompose設定は、rootless DinDをprivilegedコンテナで起動します。同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentのloopbackへ中継します。
+WebFetchは禁止していません。WebFetchではagentのClaude Codeが自分でURLを取得するので、ほかの通信と同じくproxyの制限を受け、`proxy.hosts`に書いた接続先にしか届きません。なお、Claude CodeはURLを取得する前に、接続先のホスト名を`api.anthropic.com`の`/api/web/domain_info`へ問い合わせます。proxyはこの要求を通さないので、settingsで`skipWebFetchPreflight`を`true`にしていなければ、WebFetchは失敗します。
+
+同梱のCompose設定は、rootless DinDをprivilegedコンテナで起動します。dockerdはagentのUIDで動き、DinDの中のコンテナはuser namespaceの中で動きます。それでもagentは、Docker APIで`--privileged`や`--security-opt seccomp=unconfined`を付けたコンテナを起動でき、その中ではagent自身より多くのカーネルの機能を呼べます。DinDのコンテナはprivilegedなので、seccomp、AppArmor、デバイスの制限がありません。そのため、カーネルに脆弱性があれば、agentはDinDを経てホストのrootを取れます。Dockerを使わないリポジトリでは、`docker.enabled`を有効にしないでください。
+
+同梱の[`dind-bridge`](../.devcontainer/claude/dind-bridge/README.md)がDocker APIと公開TCPポートをagentのloopbackへ中継します。
 
 agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの操作権限を読取り専用にはしません。同梱のCompose設定は、ホストのDocker socketを共有しません。
 
@@ -57,7 +61,7 @@ Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはな�
 
 起動時に、ホストの`agent`リモートをコンテナ内リポジトリへ自動接続します。Gitの`ext`転送とDocker execを使い、Gitプロセスはコンテナ内のnodeで実行します。GitHub・proxy・SSHサーバーを経由しません。コンテナのブランチはagentが更新できますが、その内容を承認済みとは扱いません。ホストでfetch後、信頼するベースと候補のコミットIDを固定して比較し、レビューしたIDだけを`git merge --ff-only`で取り込みます。[具体的な手順](usage.md#ホストでレビューして取り込む)を参照してください。
 
-`.devcontainer/`、`package.json`、`.envrc`、ビルドスクリプトなど、ホストでコードが実行される変更を確認します。IDEで開く、別worktreeへcheckoutする、ホストでテストする場合も先にレビューします。リモートのrefが後から変わっても、レビュー対象のコミットIDは変えません。
+取り込んだ後にホストで実行されるファイルの変更を確認します。対象のファイルは[ホストでレビューして取り込む](usage.md#ホストでレビューして取り込む)に挙げています。IDEで開く、別worktreeへcheckoutする、ホストでテストする場合も先にレビューします。リモートのrefが後から変わっても、レビュー対象のコミットIDは変えません。
 
 ## 保護の対象外
 
@@ -65,7 +69,7 @@ Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはな�
 
 コミットに含まれるファイルはagentへ渡ります。未コミット・未追跡ファイルは転送しませんが、Gitに入れた秘密の読取りは防げません。ホストのホーム、Docker socket、秘密のディレクトリを追加mountしないでください。Claudeが受け取る入力元の制限も対象外です。
 
-VS Codeから使う場合には、エディタを通じたホスト認証の転送にも注意が必要です。[VS Codeの利用条件](usage.md#vs-codeで開く)を参照してください。
+VS Codeでコンテナに接続すると、VS Codeとその拡張機能が、proxyとfirewallを通らずにホストへ通じる経路をコンテナに作ります。接続している間は、コンテナで動くプロセスが、ホストでコマンドを実行し、proxyを通らずに外部と通信できます。この経路は遮断できないので、agentが動いているコンテナにはVS Codeを接続しないでください。[VS Codeで開く](usage.md#vs-codeで開く)を参照してください。
 
 ## 通信ルールを変更する
 
