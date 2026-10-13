@@ -34,8 +34,10 @@ def register(root=ROOT):
                 raise ValueError(f'Remove remote.agent.{name} before using the direct container remote.')
     else:
         git('remote', 'add', 'agent', url)
-    # Enable the built-in pipe transport only in this trusted host repository.
-    git('config', '--local', 'protocol.ext.allow', 'always')
+    # Enable the built-in pipe transport only in this trusted host repository,
+    # and only for commands run directly: `user` refuses it to those Git runs on
+    # its own, such as the clone of a submodule whose URL .gitmodules names.
+    git('config', '--local', 'protocol.ext.allow', 'user')
 
 
 def serve(service, root=ROOT):
