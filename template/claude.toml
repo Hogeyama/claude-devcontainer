@@ -8,7 +8,7 @@
 # here as a whole.
 #
 # After a change, stop the environment and run `devcontainer up` again; for
-# agent.*, docker.enabled, nix.enabled and sumi.enabled, with
+# agent.*, docker.enabled, nix.enabled, sumi.enabled and tode.*, with
 # --remove-existing-container. Relative paths are from this directory, and ~ is
 # the host's home.
 
@@ -37,6 +37,16 @@
 # Claude's tools return.
 # enabled = false
 # secrets = "~/.config/claude-devcontainer/sumi/secrets.txt"
+
+[tode]
+# Install terminal-code (tode), VS Code drawn in the terminal, in the agent's
+# image. Start it with `devcontainer exec tode /workspace` from a terminal that
+# supports the kitty graphics protocol. See docs/usage.md of claude-devcontainer.
+# enabled = false
+# Extensions to install from the VS Code Marketplace at image build, as
+# publisher.name or publisher.name@version. The agent cannot reach the
+# Marketplace, so a change needs --remove-existing-container like enabled.
+# extensions = ["ms-python.python", "golang.go@0.48.0"]
 
 [proxy]
 # A host PEM file of CA certificates, such as an in-house root under /etc, that
