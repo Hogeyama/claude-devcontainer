@@ -104,6 +104,8 @@ Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）�
 
 agentが動いているコンテナには、VS Codeを接続しないでください。接続すると、コンテナで動くプロセスが、ホストでコマンドを実行したり、proxyを通らずに外部と通信したりできるようになります。agentの変更は、ホストのリポジトリへfetchし、ホストで差分を見てください。理由と、それでも接続する場合の手順は、[VS Codeで開く](docs/usage.md#vs-codeで開く)を参照してください。
 
+コンテナの中でVS Codeを使う場合は、ターミナルで動かす[tode](docs/usage.md#ターミナルでvs-codeを使うtode)を使ってください。
+
 ### 5. 終了する
 
 Claudeを終了するには、Ctrl-Cを押すか`/exit`を入力してください。VS Codeで開いていた場合は、ウィンドウを閉じるとComposeも停止します。
@@ -163,7 +165,7 @@ enabled = false
 
 配列も置き換えです。`claude.local.toml`に`docker.images`を書くと、`claude.toml`の一覧には足されず、その一覧だけになります。`proxy.hosts`は、同じホストの設定を丸ごと置き換えます。
 
-設定を変えたら、[終了する](#5-終了する)の手順で環境を停止し、`devcontainer up`で起動し直してください。`agent`、`docker.enabled`、`nix.enabled`、`sumi.enabled`を変えたときは、リポジトリのルートで次を実行してコンテナも作り直してください。
+設定を変えたら、[終了する](#5-終了する)の手順で環境を停止し、`devcontainer up`で起動し直してください。`agent`、`docker.enabled`、`nix.enabled`、`sumi.enabled`、`tode.enabled`、`tode.extensions`を変えたときは、リポジトリのルートで次を実行してコンテナも作り直してください。
 
 ```sh
 devcontainer up --remove-existing-container

@@ -51,6 +51,7 @@ DEFAULTS = {
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
+    'tode': {'enabled': False, 'extensions': []},
     'proxy': {'ca': '', 'connectors': [], 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
@@ -60,7 +61,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'PROXY_CA', 'CONNECTORS', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -68,6 +69,8 @@ ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 RESERVED_ENV = {'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'DOCKER_HOST', 'CLAUDE_CODE_OAUTH_TOKEN'}
 RESERVED_ENV_PREFIXES = ('TESTCONTAINERS_', PREFIX)
 CONNECTOR = re.compile(r'mcp(srv|rs)_[A-Za-z0-9]+')
+# A Marketplace extension ID, publisher.name, optionally @version.
+EXTENSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(@[0-9][0-9A-Za-z.+-]*)?')
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
 # rootlesskit in DinD maps these subordinate IDs besides the agent's UID.
 SUBORDINATE_IDS = range(100000, 165536)
@@ -132,13 +135,16 @@ def check(data, source):
                 raise ValueError(f'{where}: expected {type_name(default)}')
             if isinstance(value, str) and ('\n' in value or "'" in value):
                 raise ValueError(f"{where}: newlines and ' are not allowed")
-    agent, docker, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'proxy', 'subnets'))
+    agent, docker, tode, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'tode', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
             raise ValueError(f'{source}: agent.{key}: must be positive')
     for image in docker.get('images', []):
         if not image or re.search(r'[\s#]', image):
             raise ValueError(f'{source}: docker.images: {image!r} is not an image name')
+    for item in tode.get('extensions', []):
+        if not EXTENSION.fullmatch(item):
+            raise ValueError(f'{source}: tode.extensions: {item!r} is not an extension ID (publisher.name)')
     for item in proxy.get('connectors', []):
         if not CONNECTOR.fullmatch(item):
             raise ValueError(f'{source}: proxy.connectors: {item!r} is not a connector ID (mcpsrv_...)')
@@ -190,6 +196,8 @@ def load(root=ROOT):
     if settings['docker']['enabled'] and settings['agent']['uid'] in SUBORDINATE_IDS:
         raise ValueError(f'agent.uid: {settings["agent"]["uid"]} is used by DinD; with docker.enabled it must be '
                          f'outside {SUBORDINATE_IDS.start}-{SUBORDINATE_IDS.stop - 1}')
+    if settings['tode']['extensions'] and not settings['tode']['enabled']:
+        raise ValueError('tode.extensions: needs tode.enabled')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
@@ -225,6 +233,8 @@ def variables(settings):
         PREFIX + 'SUMI': '1' if settings['sumi']['enabled'] else '0',
         PREFIX + 'SUMI_DIR': str(secrets.parent),
         PREFIX + 'SUMI_FILE': secrets.name,
+        PREFIX + 'TODE': '1' if settings['tode']['enabled'] else '0',
+        PREFIX + 'TODE_EXTENSIONS': ' '.join(settings['tode']['extensions']),
         PREFIX + 'PROXY_CA': str(settings['proxy']['ca'] or ''),
         PREFIX + 'CONNECTORS': ','.join(settings['proxy']['connectors']),
     }

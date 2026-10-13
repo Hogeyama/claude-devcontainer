@@ -212,11 +212,61 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
+## ターミナルでVS Codeを使う（tode）
+
+agentのコンテナでVS Codeを使いたい場合は、VS Codeを接続する代わりに、[terminal-code](https://github.com/zenbu-labs/terminal-code)（`tode`）をコンテナの中で動かしてください。`tode`は、code-serverと、それを表示するChromium（Electron）をまとめて動かし、描いた画面をkitty graphics protocolでターミナルへ送ります。
+
+`claude.toml`で有効にすると、agentのimageに入ります。変更後は`devcontainer up --remove-existing-container`で作り直してください。
+
+```toml
+[tode]
+enabled = true
+```
+
+kitty graphics protocolに対応したターミナル（kitty、Ghosttyなど）から、次のように起動します。
+
+```sh
+devcontainer exec tode /workspace
+```
+
+### 拡張機能を入れる
+
+拡張機能は、`tode.extensions`に並べるとimageのビルド時にVS Code Marketplaceから入ります。agentはMarketplaceへ接続できないので、コンテナの中からはインストールできません。バージョンを固定するときは`@`で付けます。変更後は`devcontainer up --remove-existing-container`で作り直してください。
+
+```toml
+[tode]
+enabled = true
+extensions = ["ms-python.python", "golang.go@0.48.0"]
+```
+
+一覧にない拡張機能を試すときは、ホストでダウンロードした`.vsix`をコンテナへ置き、`tode --install-extension <vsixのパス>`で入れてください。この方法で入れた拡張機能は、コンテナを作り直すと消えます。
+
+### 隔離の範囲
+
+code-server、Chromium、拡張機能はすべてコンテナの中で動きます。ホストとの接点は`devcontainer exec`の標準入出力だけで、ホストへはターミナルの制御シーケンスと画像が、コンテナへはキー入力とマウス操作が流れます。そのため、[VS Codeが作る経路](#vs-codeが作る経路)はどれもできません。拡張機能やChromiumの通信はproxyとfirewallを通り、URLを開く操作もコンテナの中のChromiumで開きます。拡張機能やワークスペースのコードは、agentと同じ`node`ユーザーとして同じコンテナで動くので、agentにできないことはできません。
+
+残る経路はターミナルです。コンテナで動くプロセスは、`tode`でなくても、ターミナルへ任意の制御シーケンスを送れます。ホストのターミナルで次を確認してください。
+
+- クリップボードの読み取り（OSC 52、kittyのclipboard protocol）を、拒否するか確認付きにする。kittyは`clipboard_control`、Ghosttyは`clipboard-read`で設定でき、どちらも既定は確認付きです。`tode`の画面は、ターミナル経由でクリップボードを読むことがあります。
+- kitty graphics protocolのうち、ファイルや共有メモリを名前で渡す転送（`t=f`、`t=t`、`t=s`）では、ターミナルがホストのファイルや共有メモリを読みます。読んだ内容はコンテナへ返りませんが、ターミナルの応答から存在の有無は分かります。`tode`はこれらを使わず画像を直接送るよう、imageで`TERMINAL_BROWSER_FRAMES=inline`を設定しています。
+- ターミナルは最新の版を使ってください。
+
+### imageでの設定
+
+- Chromiumのsandboxは、user namespaceかsetuidのhelperを必要とします。agentではseccompと`no-new-privileges`がどちらも拒否するので、`--no-sandbox`で起動します。rendererから抜け出したページは、コンテナの中の`node`ユーザーのプロセスになりますが、これはagent自身と同じ権限です。
+- Chromiumはheadless Ozoneで起動し、`DISPLAY`と`WAYLAND_DISPLAY`を外します。転送されたディスプレイがあっても使いません。
+- Chromiumは`127.0.0.1`でremote debugging portを開き、code-serverも`127.0.0.1`で待ち受けます。コンテナの中のプロセスは、これらを通じて画面を操作できます。agentはもともと同じユーザーなので、権限は増えません。
+- 拡張機能のMarketplaceは、proxyで許可していないので、コンテナの中からは使えません。[拡張機能を入れる](#拡張機能を入れる)を参照してください。
+- todeとcode-serverのtarballは、バージョンとSHA-256を固定してimageのビルド時にダウンロードします。todeは初回の起動時にcode-serverをGitHubから取りに行きますが、proxyが拒否するので、imageに入れたcode-serverを`TODE_CODE_SERVER`で指定しています。todeを更新するときは`agent/Dockerfile`のURLとchecksumを変え、code-serverも新しいtodeが固定するバージョン（`dist/codeserver/vendored.js`）に合わせてください。`tode --upgrade`は使えません。
+- 日本語と絵文字を表示できるよう、Notoのフォントを入れています。
+- Chromiumは`--disable-dev-shm-usage`で起動し、描画のバッファを`/dev/shm`でなく`/tmp`に置きます。Dockerの`/dev/shm`は64MBで、大きな画面では足りず、rendererがログを残さずに落ちて画面が固まるためです。
+- code-serverのターミナルは`/bin/bash`で起動します。nixのdev shellはreadlineなしのBashをPATHの先頭に置き、このBashはプロンプトの`\[ \]`をそのまま表示するためです。dev shellの環境は`~/.bashrc`から読むので、ターミナルでも使えます。
+
 ## VS Codeで開く
 
 agentが動いているコンテナに、VS Codeを接続しないでください。VS Codeで接続すると、VS Codeとその拡張機能が、コンテナからホストへ通じる経路をいくつか作ります。どの経路もproxyとfirewallを通りません。VS Codeのサーバーはagentと同じ`node`ユーザーで動くので、コンテナで動くプロセスはすべてこれらの経路を使えます。その中には、ホストでコマンドを実行する経路と、proxyを通らずに外部と通信する経路があり、どちらも遮断できません。
 
-agentの変更を見るときは、[ホストでレビューして取り込む](#ホストでレビューして取り込む)の手順でホストのリポジトリへfetchし、ホストで差分を見てください。VS Codeを使う場合も、ホストで開いたリポジトリのまま差分を見てください。fetchしただけではファイルを取り出さないので、agentが書いた`.vscode/`の設定などをホストのVS Codeが実行することはありません。
+コンテナの中でエディタを使う場合は、[ターミナルでVS Codeを使う（tode）](#ターミナルでvs-codeを使うtode)を参照してください。agentの変更を見るときは、[ホストでレビューして取り込む](#ホストでレビューして取り込む)の手順でホストのリポジトリへfetchし、ホストで差分を見てください。VS Codeを使う場合も、ホストで開いたリポジトリのまま差分を見てください。fetchしただけではファイルを取り出さないので、agentが書いた`.vscode/`の設定などをホストのVS Codeが実行することはありません。
 
 ### VS Codeが作る経路
 

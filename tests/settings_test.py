@@ -50,6 +50,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
+        self.assertEqual(loaded['tode'], {'enabled': False, 'extensions': []})
         self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'hosts': {}})
         # load() must not change the defaults it starts from.
         self.write('claude.toml', '[sumi]\nsecrets = "s.txt"\n')
@@ -81,6 +82,9 @@ class SettingsTest(unittest.TestCase):
             ('[docker]\nimages = [1]\n', r'docker.images: expected a list'),
             ('[docker]\nimages = ["a b"]\n', r'docker.images:'),
             ('[proxy]\nconnectors = ["drive"]\n', r'proxy.connectors:'),
+            ('[tode]\nenabled = true\nextensions = ["python"]\n', r'tode.extensions: .python. is not'),
+            ('[tode]\nenabled = true\nextensions = ["a.b c"]\n', r'tode.extensions:'),
+            ('[tode]\nextensions = ["ms-python.python"]\n', r'tode.extensions: needs tode.enabled'),
             ('[subnets]\nproxy = "10.0.256"\n', r'subnets.proxy:'),
             ('[subnets]\nproxy = "10.0"\n', r'subnets.proxy:'),
             ('[nix]\nshell = "a\'b"\n', r"nix.shell: newlines and '"),
@@ -155,6 +159,9 @@ shell = "devShells.x86_64-linux.$foo"
 [sumi]
 enabled = true
 secrets = "../.secrets/list.txt"
+[tode]
+enabled = true
+extensions = ["ms-python.python", "golang.go@0.48.0"]
 [proxy]
 ca = "../ca.pem"
 connectors = ["mcpsrv_01A", "mcprs_02B"]
@@ -171,6 +178,8 @@ dind = "10.99.1"
             'CLAUDE_DEVCONTAINER_SUMI': "'1'",
             'CLAUDE_DEVCONTAINER_SUMI_DIR': f"'{self.root / '.secrets'}'",
             'CLAUDE_DEVCONTAINER_SUMI_FILE': "'list.txt'",
+            'CLAUDE_DEVCONTAINER_TODE': "'1'",
+            'CLAUDE_DEVCONTAINER_TODE_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
             'CLAUDE_DEVCONTAINER_PROXY_CA': f"'{self.root / 'ca.pem'}'",
             'CLAUDE_DEVCONTAINER_CONNECTORS': "'mcpsrv_01A,mcprs_02B'",
             # Unset, pick-networks.py chooses the proxy's.

@@ -17,7 +17,12 @@ services:
       args:
         AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
+        INSTALL_TODE: ${CLAUDE_DEVCONTAINER_TODE:-0}
+        TODE_EXTENSIONS: ${CLAUDE_DEVCONTAINER_TODE_EXTENSIONS:-}
     command: ["sleep", "infinity"]
+    # sleep as PID 1 reaps nothing, so processes orphaned by devcontainer exec
+    # sessions, such as tode's Chromium, stayed as zombies.
+    init: true
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, CHOWN, DAC_OVERRIDE]
     security_opt:
