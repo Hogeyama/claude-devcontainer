@@ -137,10 +137,20 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         startup = startup_dir / 'entrypoint.sh'
         startup.write_text('#!/bin/sh\nsleep 3\nexec /usr/local/bin/entrypoint.sh "$@"\n')
         startup.chmod(0o755)
+        # A consumer's read-only dependency bind, with a tmpfs where tools write
+        # at runtime. Docker cannot create that mount point in the read-only
+        # bind. Owned by the host user, which is agent.uid as for sumi's secrets.
+        cls.frontend_dependencies = cls.directory / 'frontend-node-modules'
+        (cls.frontend_dependencies / '.cache').mkdir(parents=True)
+        (cls.frontend_dependencies / 'dependency').write_text('host-dependency\n')
         override = cls.directory / 'override.json'
         override.write_text(json.dumps({'services': {
             'agent': {'image': AGENT_IMAGE, 'volumes': [str(startup_dir) + ':/startup-fixture:ro',
-                          'app-node-modules:/workspace/packages/app/node_modules'],
+                          'app-node-modules:/workspace/packages/app/node_modules',
+                          {'type': 'bind', 'source': str(cls.frontend_dependencies),
+                           'target': '/workspace/frontend/node_modules', 'read_only': True,
+                           'bind': {'create_host_path': False}}],
+                      'tmpfs': ['/workspace/frontend/node_modules/.cache:mode=1777'],
                       'entrypoint': ['/startup-fixture/entrypoint.sh']},
             'sumi': {'image': SUMI_IMAGE},
             'proxy': {'image': PROXY_IMAGE, 'entrypoint': ['python', '/fixtures/proxy_server.py'],
@@ -319,6 +329,15 @@ class DevcontainerIntegrationTest(unittest.TestCase):
                 else:
                     self.assertIn(mount['Destination'], ('/run/host/generated', '/run/host/nix-env'))
 
+    def test_read_only_dependency_bind(self):
+        # The entrypoint and the initial clone accepted it during setUpClass.
+        self.assertEqual(self.exec('cat', 'frontend/node_modules/dependency').stdout, 'host-dependency\n')
+        result = self.exec('sh', '-c', 'echo agent > frontend/node_modules/dependency', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Read-only file system', result.stderr)
+        self.exec('sh', '-ec', 'echo cache > frontend/node_modules/.cache/probe')
+        self.assertEqual((self.frontend_dependencies / 'dependency').read_text(), 'host-dependency\n')
+        self.assertFalse((self.frontend_dependencies / '.cache/probe').exists())
 
     def test_existing_clone_and_remote_preserved_after_recreation(self):
         self.exec('git', 'switch', '-c', 'agent/preserved')

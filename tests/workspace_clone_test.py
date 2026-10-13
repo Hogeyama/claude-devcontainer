@@ -1,3 +1,4 @@
+import errno
 import importlib.util
 import json
 import os
@@ -338,3 +339,36 @@ class WorkspaceCloneTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 mounts.prepare(self.agent, os.getuid(), os.getgid())
         self.assertEqual(outside.stat().st_mode & 0o777, 0o500)
+
+    def read_only_mount(self):
+        """A mount whose fchown fails with EROFS, as on a read-only bind."""
+        mount = self.agent / 'packages/app/node_modules'
+        mount.mkdir(parents=True)
+        def fchown(fd, uid, gid):
+            if os.path.samestat(os.fstat(fd), mount.stat()):
+                raise OSError(errno.EROFS, os.strerror(errno.EROFS))
+        return mount, fchown
+
+    def test_prepare_leaves_read_only_mount_of_the_agent(self):
+        # The kernel refuses fchown on a read-only mount even to its current owner.
+        mount, fchown = self.read_only_mount()
+        with patch.object(mounts, 'dependency_mounts', return_value=[mount]), \
+                patch.object(mounts.os, 'fchown', side_effect=fchown) as called:
+            mounts.prepare(self.agent, os.getuid(), os.getgid())
+        called.assert_not_called()
+
+    def test_prepare_changes_other_owners(self):
+        mount = self.agent / 'packages/app/node_modules'
+        mount.mkdir(parents=True)
+        with patch.object(mounts, 'dependency_mounts', return_value=[mount]), \
+                patch.object(mounts.os, 'fchown') as called:
+            mounts.prepare(self.agent, os.getuid() + 1, os.getgid())
+        # The workspace, packages, app and node_modules.
+        self.assertEqual([c.args[1:] for c in called.call_args_list], [(os.getuid() + 1, os.getgid())] * 4)
+
+    def test_prepare_explains_read_only_mount_of_another_owner(self):
+        mount, fchown = self.read_only_mount()
+        with patch.object(mounts, 'dependency_mounts', return_value=[mount]), \
+                patch.object(mounts.os, 'fchown', side_effect=fchown):
+            with self.assertRaisesRegex(ValueError, f'{mount} is read-only.*agent.uid and agent.gid'):
+                mounts.prepare(self.agent, os.getuid() + 1, os.getgid())
