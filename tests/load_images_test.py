@@ -39,5 +39,43 @@ class ListTest(unittest.TestCase):
             self.assertEqual(load_images.images(listed), ['busybox:1.37', 'postgres:16'])
 
 
+class StartupTest(unittest.TestCase):
+    def run_startup(self, recreate_dind):
+        clock = [0]
+        marks = []
+        def sleep(seconds):
+            clock[0] += 10
+        def find(service):
+            if service == 'agent':
+                return 'old-agent' if clock[0] < 90 else 'new-agent'
+            return 'new-dind' if recreate_dind and clock[0] >= 90 else 'old-dind'
+        def ready(dind, *args, **kwargs):
+            return subprocess.CompletedProcess([], 1 if dind == 'new-dind' and clock[0] < 110 else 0)
+        def finish(agent, content, failures=None):
+            marks.append((clock[0], agent, failures))
+        with mock.patch.object(load_images, 'WAIT_SECONDS', 180), \
+             mock.patch.object(load_images.time, 'monotonic', side_effect=lambda: clock[0]), \
+             mock.patch.object(load_images.time, 'sleep', side_effect=sleep), \
+             mock.patch.object(load_images, 'find', side_effect=find), \
+             mock.patch.object(load_images, 'in_dind', side_effect=ready), \
+             mock.patch.object(load_images, 'load', return_value=[]) as load, \
+             mock.patch.object(load_images, 'finish', side_effect=finish):
+            load_images.wait_and_load(b'busybox:1.37\n')
+        return marks, load.call_args_list
+
+    def test_build_longer_than_a_minute_still_marks_the_replacement_agent(self):
+        marks, loads = self.run_startup(False)
+        self.assertEqual(marks, [(0, 'old-agent', None), (0, 'old-agent', []),
+                                 (90, 'new-agent', None), (90, 'new-agent', [])])
+        self.assertEqual(loads, [mock.call('old-dind', ['busybox:1.37'])])
+
+    def test_replacement_dind_is_checked_before_reporting_completion(self):
+        marks, loads = self.run_startup(True)
+        self.assertEqual(marks, [(0, 'old-agent', None), (0, 'old-agent', []),
+                                 (90, 'new-agent', None), (110, 'new-agent', [])])
+        self.assertEqual(loads, [mock.call('old-dind', ['busybox:1.37']),
+                                 mock.call('new-dind', ['busybox:1.37'])])
+
+
 if __name__ == '__main__':
     unittest.main()
