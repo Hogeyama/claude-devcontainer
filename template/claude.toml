@@ -55,6 +55,10 @@
 # IDs of the claude.ai connectors that Claude may use. They are per account, so
 # they usually go in claude.local.toml.
 # connectors = ["mcpsrv_01AbCdEf"]
+# Allow Claude Code's server-side WebSearch. Search traffic from Anthropic is
+# outside proxy.hosts; this also allows API calls made from Bash. Restart the
+# environment after changing it. See "WebSearchを使う" in docs/network-policy.md.
+# web_search = false
 
 # What the proxy lets through besides Anthropic, by host. The host bakes it
 # into the proxy image on every `devcontainer up`. See "通信ルールを変更する" in

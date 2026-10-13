@@ -25,6 +25,9 @@ fi
 list=/run/host/generated/images.txt
 if [ "$dind" = 1 ] && [ -n "$(sed 's/#.*//' "$list" 2>/dev/null | tr -d ' \t\r\n')" ]; then
     marker="$markers/images-$(sha256sum <"$list" | cut -c1-16)"
+    if [ ! -e "$marker" ]; then
+        echo "Waiting for docker.images to be loaded into DinD..." >&2
+    fi
     # Large images take minutes, so wait long only once loading has started.
     if ! timeout 60 sh -c 'until [ -e "$1.started" ] || [ -e "$1" ]; do sleep 0.5; done' sh "$marker" ||
         ! timeout 600 sh -c 'until [ -e "$1" ]; do sleep 0.5; done' sh "$marker"; then

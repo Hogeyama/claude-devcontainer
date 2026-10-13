@@ -184,6 +184,7 @@ class PolicyTest(unittest.TestCase):
 
     def test_anthropic_rejects_ways_to_reach_other_hosts(self):
         variants = [messages(mcp_servers=[]), messages(container='c'),
+                    messages(tools=[{'type': 'web_search_20250305', 'name': 'web_search'}]),
                     messages(tools=[{'type': 'web_fetch_20250910', 'name': 'web_fetch'}]),
                     messages(tools=[{'type': 'advisor_20270101', 'name': 'advisor'}]),
                     messages(tools=[{'type': ['advisor_20260301'], 'name': 'x'}])]
@@ -202,6 +203,28 @@ class PolicyTest(unittest.TestCase):
         self.denied(anthropic(headers=[('Content-Encoding', 'gzip')]))
         self.denied(anthropic(path='/v1/files'))
         self.denied(flow('https://api.anthropic.com/api/event_logging/v2/batch', 'POST'))
+
+    def test_web_search_opt_in(self):
+        search = {'type': 'web_search_20250305', 'name': 'web_search'}
+        with patch('addon.WEB_SEARCH', True):
+            for path in ['/v1/messages', '/v1/messages/count_tokens']:
+                with self.subTest(path=path):
+                    headers = self.allowed(anthropic(messages(tools=[search]), path=path))
+                    self.assertEqual(headers['x-api-key'], 'managed-anthropic')
+            # Search is the only new capability: no dynamic filtering, fetch,
+            # code execution, unknown search versions, or connector requests.
+            for kind in ['web_search_20260209', 'web_search_20260318', 'web_search_20990101',
+                         'web_fetch_20250910', 'code_execution_20250825']:
+                with self.subTest(kind=kind):
+                    self.denied(anthropic(messages(tools=[search, {'type': kind, 'name': 'other'}])))
+            for field in [{'mcp_servers': []}, {'container': 'c'}, {'messages': [
+                    {'role': 'user', 'content': [{'type': 'image', 'source': {
+                        'type': 'url', 'url': 'https://attacker.example'}}]}]}]:
+                with self.subTest(field=field):
+                    self.denied(anthropic(messages(tools=[search], **field)))
+            self.denied(flow('https://example.com/search'))
+            self.credentials = None
+            self.denied(anthropic(messages(tools=[search])))
 
     def test_anthropic_feature_flags(self):
         self.allowed(flow('https://api.anthropic.com/api/eval/sdk-abc', 'POST', b'{"attributes":{}}'))

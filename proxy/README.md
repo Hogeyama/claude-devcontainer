@@ -1,5 +1,6 @@
-The proxy policy is fixed in `addon.py`. Rebuild the image from the host to
-change it; never mount an agent-editable addon into the running proxy.
+The proxy policy is defined in `addon.py`, with host settings for workspace
+hosts, connectors and web search. Rebuild the image from the host to change
+the code; never mount an agent-editable addon into the running proxy.
 
 Run unit tests with Python and `proxy/requirements.txt` installed:
 
@@ -36,6 +37,15 @@ advisor_20260301, which only runs a model; later versions until checked), and UR
 file sources in messages, the system prompt, and tool results. Other fields
 and beta headers pass, so new Claude Code features need no policy update; a
 future server-side feature in some other shape would pass too.
+
+`proxy.web_search = true` in `claude.toml` or `claude.local.toml` opts in to
+`web_search_20250305`, the basic search used by Claude Code. It defaults to
+false. Host initialization passes it as `CLAUDE_DEVCONTAINER_WEB_SEARCH=1` to
+the proxy only; restart the environment after changing it. No image rebuild
+is needed to toggle the setting once this code is installed. Later search
+versions, including ones that run code, remain blocked. Search traffic from
+Anthropic is outside `proxy.hosts`; the proxy cannot inspect search queries
+or result sources. This permission also applies to direct API calls from Bash.
 
 claude.ai connectors (mcp-proxy.anthropic.com) are closed unless their IDs are
 listed in `proxy.connectors` of `claude.toml`; listed ones get the claude.ai OAuth

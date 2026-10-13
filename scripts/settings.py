@@ -52,7 +52,7 @@ DEFAULTS = {
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
     'tode': {'enabled': False, 'extensions': []},
-    'proxy': {'ca': '', 'connectors': [], 'hosts': {}},
+    'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
 HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
@@ -61,7 +61,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -237,6 +237,7 @@ def variables(settings):
         PREFIX + 'TODE_EXTENSIONS': ' '.join(settings['tode']['extensions']),
         PREFIX + 'PROXY_CA': str(settings['proxy']['ca'] or ''),
         PREFIX + 'CONNECTORS': ','.join(settings['proxy']['connectors']),
+        PREFIX + 'WEB_SEARCH': '1' if settings['proxy']['web_search'] else '0',
     }
     # Unset, pick-networks.py chooses them in networks.env.
     for key in ('proxy', 'dind'):

@@ -134,24 +134,28 @@ def wait_and_load(content):
     # whenever the agent changes, as `up` may recreate it.
     references = images(content)
     failures = None
-    marked = started = None
+    marked = started = loaded_dind = None
     deadline = time.monotonic() + WAIT_SECONDS
     while time.monotonic() < deadline:
         try:
             agent = find('agent')
-            if agent and failures is None and agent != started:
+            if agent and agent != started:
                 finish(agent, content)
                 started = agent
-            if agent and failures is None:
+            if agent:
                 dind = find('dind')
-                if dind and in_dind(dind, 'docker info >/dev/null 2>&1', check=False).returncode == 0:
+                if dind and dind != loaded_dind and in_dind(dind, 'docker info >/dev/null 2>&1', check=False).returncode == 0:
                     failures = load(dind, references)
+                    loaded_dind = dind
+                    marked = None
                     for failure in failures:
                         print(time.strftime('%F %T'), failure, flush=True)
-                    deadline = min(deadline, time.monotonic() + 60)
-            if agent and failures is not None and agent != marked:
-                finish(agent, content, failures)
-                marked = agent
+                # Keep watching for the whole startup window. An old agent may
+                # still run during a build taking more than a minute, before
+                # Compose replaces it and discards its tmpfs markers.
+                if dind and dind == loaded_dind and failures is not None and agent != marked:
+                    finish(agent, content, failures)
+                    marked = agent
         except subprocess.CalledProcessError:
             pass  # Not ready yet.
         time.sleep(1)
