@@ -14,14 +14,14 @@ spec = importlib.util.spec_from_file_location('nix_env', ROOT / '.devcontainer/c
 nix_env = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(nix_env)
 
-BASE = {'PATH': '/usr/bin:/bin', 'HOME': '/home/node', 'KEPT': 'as is', 'GONE': 'here'}
+BASE = {'PATH': os.environ['PATH'], 'HOME': '/home/node', 'KEPT': 'as is', 'GONE': 'here'}
 
 
 def run(env_rc, before='', after=''):
     """Source env_rc in Bash between the two snippets; return the output."""
     script = before + '\n' + env_rc + after
     return subprocess.run(['bash', '--norc', '--noprofile', '-c', script],
-                          stdout=subprocess.PIPE, text=True, check=True, env={}).stdout
+                          stdout=subprocess.PIPE, text=True, check=True, env={'PATH': BASE['PATH']}).stdout
 
 
 class DevShellTest(unittest.TestCase):
@@ -95,9 +95,9 @@ class EnvRcTest(unittest.TestCase):
         self.assertEqual(nix_env.env_rc(dict(BASE, BASH_ENV='/etc/bash-env.sh'), dev_env), '')
 
     def test_prepends_where_the_dev_shell_prepended(self):
-        dev_env = dict(BASE, PATH='/nix/store/a/bin:/usr/bin:/bin')
-        self.assertEqual(run(nix_env.env_rc(BASE, dev_env), before='PATH=/usr/local/bin', after='echo $PATH'),
-                         '/nix/store/a/bin:/usr/local/bin\n')
+        dev_env = dict(BASE, PATH=f'/nix/store/a/bin:{BASE["PATH"]}')
+        self.assertEqual(run(nix_env.env_rc(BASE, dev_env), before='PATH="/agent/bin:$PATH"', after='echo "$PATH"'),
+                         f'/nix/store/a/bin:/agent/bin:{BASE["PATH"]}\n')
 
     def test_quotes_values(self):
         dev_env = dict(BASE, FOO="it's $HOME `x`")
