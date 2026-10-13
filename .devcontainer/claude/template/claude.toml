@@ -20,7 +20,7 @@
 [acp]
 # Install claude-agent-acp for host ACP clients (agent-shell, Avante, etc.).
 # Connect through scripts/acp-agent.py. Changes need an image rebuild.
-# enable = false
+# enabled = false
 # Exact package version; tags such as "latest" and ranges are not accepted.
 # version = "0.90.0"
 

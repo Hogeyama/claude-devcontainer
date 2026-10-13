@@ -48,6 +48,30 @@ class BoundaryTest(unittest.TestCase):
             self.assertEqual(self.messages(self.client), [])
             self.assertEqual(self.messages(self.agent)[0]['error']['code'], -32601)
 
+    def test_client_mcp_credentials_never_reach_the_agent(self):
+        servers = [
+            {'name': 'stdio', 'command': 'gh-mcp', 'args': ['--token', 'SECRET_ARG'],
+             'env': [{'name': 'GITHUB_TOKEN', 'value': 'SECRET_ENV'}]},
+            {'name': 'http', 'type': 'http', 'url': 'https://example.com/?token=SECRET_URL',
+             'headers': [{'name': 'Authorization', 'value': 'Bearer SECRET_HEADER'}]},
+            {'name': 'sse', 'type': 'sse', 'url': 'https://example.com/sse',
+             'headers': [{'name': 'Authorization', 'value': 'SECRET_SSE'}]},
+        ]
+        for method in ('session/new', 'session/load', 'session/resume', 'session/fork'):
+            with self.subTest(method=method):
+                self.bridge.from_client({'jsonrpc': '2.0', 'id': 1, 'method': method,
+                    '_meta': {'token': 'SECRET_TOP_LEVEL'}, 'params': {
+                        'sessionId': 's', 'cwd': '/host/project space', 'mcpServers': servers,
+                        '_meta': {'claudeCode': {'options': {
+                            'mcpServers': {'private': servers[0]},
+                            'env': {'ANTHROPIC_API_KEY': 'SECRET_SDK_ENV'}}}}}})
+                self.assertNotIn(b'SECRET', self.agent.getvalue())
+                message = self.messages(self.agent)[0]
+                self.assertEqual(message['params']['mcpServers'], [])
+                self.assertEqual(message['params']['cwd'], '/workspace')
+                self.assertNotIn('_meta', message)
+                self.assertNotIn('_meta', message['params'])
+
     def test_permissions_and_updates_still_work_but_extensions_do_not(self):
         request = {'jsonrpc': '2.0', 'id': 'allow', 'method': 'session/request_permission',
                    'params': {'sessionId': 's', 'toolCall': {'title': 'Bash',
@@ -97,6 +121,27 @@ class BoundaryTest(unittest.TestCase):
         self.assertEqual(self.messages(self.client)[0]['error']['code'], -32602)
         self.assertEqual(self.messages(self.agent), [])
 
+    def test_symlink_workspace_paths_and_resource_uris(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            real = base / 'real project'
+            (real / 'sub').mkdir(parents=True)
+            alias = base / 'alias'
+            alias.symlink_to(real, target_is_directory=True)
+            for root in (real, alias):
+                bridge = acp.Bridge(root, self.client, self.agent)
+                for path in (real, alias):
+                    bridge.from_client({'jsonrpc': '2.0', 'id': 1, 'method': 'session/new',
+                                        'params': {'cwd': str(path / 'sub'), 'mcpServers': []}})
+                    self.assertEqual(self.messages(self.agent)[0]['params']['cwd'], '/workspace/sub')
+                    bridge.from_client({'jsonrpc': '2.0', 'id': 2, 'method': 'session/prompt',
+                        'params': {'sessionId': 's', 'prompt': [
+                            {'type': 'resource_link', 'uri': (path / 'sub/new file').as_uri(), 'name': 'new'}]}})
+                    prompt = self.messages(self.agent)[0]['params']['prompt']
+                    self.assertEqual(prompt[0]['uri'], 'file:///workspace/sub/new%20file')
+                with self.assertRaises(ValueError):
+                    bridge.container_path(str(base / 'other'))
+
     def test_agent_cannot_offer_host_login_commands_or_unsolicited_responses(self):
         self.bridge.pending[1] = 'initialize'
         self.bridge.from_agent({'jsonrpc': '2.0', 'id': 1, 'result': {
@@ -143,6 +188,9 @@ for line in sys.stdin:
     m = json.loads(line)
     if m.get('method') == 'initialize':
         assert m['params']['clientCapabilities'] == {}
+        if 'INVALID_JSON_NUMBER' in os.environ:
+            print('{"jsonrpc":"2.0","id":1,"result":{"number":' + os.environ['INVALID_JSON_NUMBER'] + '}}', flush=True)
+            sys.exit()
         # A malicious server tries to call back into the host anyway.
         print(json.dumps({'jsonrpc':'2.0','id':'attack','method':'terminal/create','params':{}}), flush=True)
     elif m.get('id') == 'attack':
@@ -182,6 +230,22 @@ for line in sys.stdin:
         self.assertEqual(process.stdout.read(), b'')
         process.stdout.close()
         process.stderr.close()
+
+    def test_nonfinite_numbers_are_not_forwarded_in_either_direction(self):
+        for constant in ('NaN', 'Infinity', '-Infinity', '1e999'):
+            for source in ('client', 'agent'):
+                with self.subTest(constant=constant, source=source):
+                    environment = dict(self.env)
+                    number = constant if source == 'client' else '1'
+                    if source == 'agent':
+                        environment['INVALID_JSON_NUMBER'] = constant
+                    wire = ('{"jsonrpc":"2.0","id":1,"method":"initialize",'
+                            '"params":{"protocolVersion":1,"number":' + number + '}}\n').encode()
+                    result = subprocess.run([sys.executable, str(SCRIPT)], input=wire,
+                        capture_output=True, env=environment, timeout=5)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, b'')
+                    self.assertIn(b'error:', result.stderr)
 
     def test_absent_or_ambiguous_container_fails_without_protocol_noise(self):
         for containers in ('', 'first\nsecond'):

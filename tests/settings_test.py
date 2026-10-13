@@ -47,7 +47,7 @@ class SettingsTest(unittest.TestCase):
     def test_defaults(self):
         loaded = self.load()
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000})
-        self.assertEqual(loaded['acp'], {'enable': False, 'version': '0.90.0'})
+        self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
@@ -77,7 +77,8 @@ class SettingsTest(unittest.TestCase):
             ('[agent]\nuser = 1\n', r'claude.local.toml: agent.user: unknown setting'),
             ('[dind]\nenabled = true\n', r'claude.local.toml: unknown table \[dind\]'),
             ('[docker]\nenabled = 1\n', r'docker.enabled: expected true or false'),
-            ('[acp]\nenable = 1\n', r'acp.enable: expected true or false'),
+            ('[acp]\nenabled = 1\n', r'acp.enabled: expected true or false'),
+            ('[acp]\nenable = true\n', r'acp.enable: unknown setting'),
             ('[acp]\nversion = 90\n', r'acp.version: expected a string'),
             ('[acp]\nversion = "latest"\n', r'acp.version: expected an exact version'),
             ('[acp]\nversion = "^0.90.0"\n', r'acp.version: expected an exact version'),

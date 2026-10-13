@@ -20,8 +20,12 @@ MAX_FRAME = 32 * 1024 * 1024
 
 
 def send(stream, message):
-    stream.write((json.dumps(message, ensure_ascii=True) + '\n').encode())
+    stream.write((json.dumps(message, ensure_ascii=True, allow_nan=False) + '\n').encode())
     stream.flush()
+
+
+def reject_json_constant(value):
+    raise ValueError(f'Invalid JSON constant: {value}')
 
 
 def error(message, code, detail):
@@ -57,7 +61,7 @@ def without_meta(value):
 
 class Bridge:
     def __init__(self, root, client, agent):
-        self.root = str(root)
+        self.roots = (str(Path(root).absolute()), str(Path(root).resolve()))
         self.client = client
         self.agent = agent
         self.pending = {}
@@ -66,13 +70,26 @@ class Bridge:
     def container_path(self, value):
         if not isinstance(value, str) or not value.startswith('/'):
             raise ValueError('ACP cwd must be an absolute workspace path.')
-        # Lexical normalization only: do not read agent-named paths on the host.
         path = os.path.normpath(value)
-        for prefix in (self.root, '/workspace'):
-            if path == prefix:
-                return '/workspace'
-            if path.startswith(prefix + '/'):
-                return '/workspace' + path[len(prefix):]
+        def mapped(candidate, prefixes):
+            for prefix in prefixes:
+                if candidate == prefix:
+                    return '/workspace'
+                if candidate.startswith(prefix + '/'):
+                    return '/workspace' + candidate[len(prefix):]
+            return None
+        result = mapped(path, (*self.roots, '/workspace'))
+        if result is not None:
+            return result
+        # Only client-supplied paths reach here. The host editor may use a
+        # symlink alias even when Docker's label and our root are canonical.
+        # Never resolve paths received from the agent on the host.
+        try:
+            result = mapped(str(Path(value).resolve()), self.roots)
+        except (OSError, RuntimeError):
+            result = None
+        if result is not None:
+            return result
         raise ValueError('ACP cwd must be inside this workspace.')
 
     def resource_paths(self, value):
@@ -86,11 +103,16 @@ class Bridge:
             parsed = urlsplit(uri)
             if parsed.scheme == 'file' and parsed.netloc in ('', 'localhost'):
                 path = unquote(parsed.path)
-                if path == self.root or path.startswith(self.root + '/'):
+                try:
                     result['uri'] = PurePosixPath(self.container_path(path)).as_uri()
+                except ValueError:
+                    pass  # A resource outside this workspace is unchanged.
         return result
 
     def from_client(self, message):
+        # SDK options in _meta can also carry MCP servers and credentials.
+        # Keep the boundary on standard ACP fields in both directions.
+        message = without_meta(message)
         method = message.get('method')
         if method is None:
             if message.get('id') in self.permissions:
@@ -102,6 +124,11 @@ class Bridge:
             if not isinstance(params, dict):
                 raise ValueError('ACP params must be an object.')
             params = dict(params)
+            # Clients often attach their host MCP config automatically,
+            # including env, headers and credentials in URLs or arguments.
+            # Container MCP servers must be configured inside the container.
+            if 'mcpServers' in params or method in ('session/new', 'session/load', 'session/resume', 'session/fork'):
+                params['mcpServers'] = []
             if method == 'initialize':
                 # No fs, terminal, auth terminal, URL elicitation, or extensions.
                 params['clientCapabilities'] = {}
@@ -179,7 +206,7 @@ def relay(command, root):
                         raise ValueError('ACP frame exceeds 32 MiB.')
                     if not line.strip():
                         continue
-                    message = json.loads(line)
+                    message = json.loads(line, parse_constant=reject_json_constant)
                     validate_message(message)
                     if source == 'client':
                         bridge.from_client(message)

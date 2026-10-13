@@ -112,10 +112,10 @@ class SettingsIntegrationTest(unittest.TestCase):
     def test_acp_opt_in_version_and_host_override_reach_build(self):
         for workspace, local, enabled, version in [
             ('', '', '0', '0.90.0'),
-            ('enable = true', '', '1', '0.90.0'),
-            ('enable = true\nversion = "0.89.1"', '', '1', '0.89.1'),
-            ('enable = true', 'enable = false', '0', '0.90.0'),
-            ('enable = true', 'version = "1.2.3-beta.1"', '1', '1.2.3-beta.1'),
+            ('enabled = true', '', '1', '0.90.0'),
+            ('enabled = true\nversion = "0.89.1"', '', '1', '0.89.1'),
+            ('enabled = true', 'enabled = false', '0', '0.90.0'),
+            ('enabled = true', 'version = "1.2.3-beta.1"', '1', '1.2.3-beta.1'),
         ]:
             with self.subTest(workspace=workspace, local=local):
                 self.write('claude.toml', '[acp]\n' + workspace)

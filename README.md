@@ -102,7 +102,7 @@ Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）�
 
 #### agent-shell・AvanteなどのACPクライアントを使う場合
 
-`claude.toml`の`[acp]`で`enable = true`にすると、`claude-agent-acp`をagentのimageに入れます。`version = "0.90.0"`でバージョンも指定できます。ホストのエディタからは、`.devcontainer/claude/scripts/acp-agent.py`をACPの起動コマンドに指定してください。既存のproxy認証を使い、ツールはコンテナ内で実行します。[共通の接続方法とagent-shell・Avanteの設定例](docs/usage.md#acpクライアントから使う)を参照してください。
+`claude.toml`の`[acp]`で`enabled = true`にすると、`claude-agent-acp`をagentのimageに入れます。`version = "0.90.0"`でバージョンも指定できます。ホストのエディタからは、`.devcontainer/claude/scripts/acp-agent.py`をACPの起動コマンドに指定してください。既存のproxy認証を使い、ツールはコンテナ内で実行します。[共通の接続方法とagent-shell・Avanteの設定例](docs/usage.md#acpクライアントから使う)を参照してください。
 
 #### VS Codeを使う場合
 

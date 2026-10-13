@@ -48,7 +48,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'agent': {'uid': 1000, 'gid': 1000},
-    'acp': {'enable': False, 'version': '0.90.0'},
+    'acp': {'enabled': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
@@ -233,7 +233,7 @@ def variables(settings):
     values = {
         PREFIX + 'UID': str(settings['agent']['uid']),
         PREFIX + 'GID': str(settings['agent']['gid']),
-        PREFIX + 'ACP': '1' if settings['acp']['enable'] else '0',
+        PREFIX + 'ACP': '1' if settings['acp']['enabled'] else '0',
         PREFIX + 'ACP_VERSION': settings['acp']['version'],
         PREFIX + 'DIND': '1' if settings['docker']['enabled'] else '0',
         PREFIX + 'NIX': '1' if settings['nix']['enabled'] else '0',

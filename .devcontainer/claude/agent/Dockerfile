@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code@2.1.295 \
     && npm cache clean --force
-# acp.enable / acp.version in claude.toml. Disabled builds fetch no ACP packages.
+# acp.enabled / acp.version in claude.toml. Disabled builds fetch no ACP packages.
 ARG INSTALL_ACP=0
 ARG ACP_VERSION=0.90.0
 RUN if [ "$INSTALL_ACP" = 1 ]; then \
