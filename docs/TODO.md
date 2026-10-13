@@ -37,7 +37,6 @@
 - [git-agent.py:38](.devcontainer/claude/scripts/git-agent.py#L38) が `protocol.ext.allow=always` を設定しています。`always` は submodule の初期化にも及ぶので、agent の変更をマージした後の `.gitmodules` に `ext::` の URL があると `git submodule update --init` でホスト上でコマンドが実行されます。`user` にすれば `git fetch agent` は動き、submodule 経由は拒否されます。
 - [README.md:111](.devcontainer/README.md#L111) の受け取り手順に、マージ後にホストで実行されるファイルの一覧を書くべきです。`.devcontainer/` 配下全部（`claude.toml` の `proxy.hosts` と `docker.images`、`prepare-deps.sh`、`claude/scripts/`）、`.gitmodules`、`flake.nix`、`.vscode/`、`.envrc` が対象です。独立 clone の設計により B2a はレビューで止める構造になっているので、何を見るかを明示しないと意味がありません。
 - [compose.yaml:149](.devcontainer/claude/compose.yaml#L149) の DinD が privileged です。rootless dockerd で緩和していますが、カーネルの脆弱性があればホスト root に至ります。agent 本体は seccomp 有効・capability なしで、系統3 の unconfined より良い状態です。
-- [managed-settings.json:4](.devcontainer/claude/agent/managed-settings.json#L4) は WebSearch だけを拒否しています。WebFetch は proxy と firewall で実質的に許可先に限られるので問題はありませんが、README の系統3 の記述とは違うことを文書に書いておくべきです。
 
 未検証の点が 2 つあります。credential helper が実際にホストの認証情報を返すかの確認コマンドは、auto mode の classifier に拒否されたため実行していません。`openExternal` の確認ダイアログの有無も、ホストのブラウザを開く操作になるので試していません。
 

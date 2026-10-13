@@ -35,7 +35,7 @@ agentの起動処理はfirewallとCAを設定してから一般ユーザー（�
 
 このため、Bashで実行したコマンドもClaude本体と同じくproxyを通り、`api.anthropic.com`にも届きます。proxyはその要求にも本物の認証値を付けます。proxyが拒否する上記の4種類以外の形で、Anthropicのサーバーから外部へ接続する機能が今後追加された場合、Bashのコマンドからそれを使って第三者へ送信できます。この経路は、VS Codeで人間が起動したビルドなど、agentで動くすべてのプロセスに元からあります。境界はコンテナとproxyで、Claude Codeの設定には頼りません。
 
-managed settingsではWebSearchも禁止しています。検索結果は`api.anthropic.com`の応答としてモデルに届くので、取得元を通信の検査では判定できず、未信頼のWebページの内容が入り込むためです。サーバー側のtoolはproxyでも拒否しているので、この禁止は重ねがけです。
+WebSearchはproxyがサーバー側のtoolを拒否するため使えません。同梱のmanaged settingsによるWebSearchの禁止はありません。
 
 WebFetchは禁止していません。WebFetchではagentのClaude Codeが自分でURLを取得するので、ほかの通信と同じくproxyの制限を受け、`proxy.hosts`に書いた接続先にしか届きません。なお、Claude CodeはURLを取得する前に、接続先のホスト名を`api.anthropic.com`の`/api/web/domain_info`へ問い合わせます。proxyはこの要求を通さないので、settingsで`skipWebFetchPreflight`を`true`にしていなければ、WebFetchは失敗します。
 

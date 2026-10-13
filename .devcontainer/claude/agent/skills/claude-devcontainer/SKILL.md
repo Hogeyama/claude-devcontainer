@@ -14,7 +14,7 @@ All traffic goes through the proxy in `HTTPS_PROXY`. Only these destinations are
 - `api.anthropic.com`: Claude's own traffic only. Do not call it from commands: the proxy adds the real credentials to every request.
 - What `.devcontainer/claude.toml` (and the host's `claude.local.toml`) lists under `[proxy.hosts."..."]`, usually `github.com` (Git smart HTTP: clone, fetch, push) and `api.github.com` (the REST and GraphQL APIs for repositories). `gh` works. The proxy adds the credentials named in its `inject`, so leave dummy tokens such as `GH_TOKEN=managed-by-proxy` as they are.
 
-Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. WebSearch is disabled.
+Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. WebSearch is unavailable because the proxy blocks server-side web search tools.
 
 - **HTTP 403**: the proxy refused the request. Check that the destination is one of the above. A body of `blocked: no credentials` means the proxy has no credentials yet; the human must run `python3 .devcontainer/claude/scripts/inject-credentials.py` on the host. `blocked: no secret NAME` means the host's credentials file lacks the secret that `proxy.hosts` injects; tell the human the NAME.
 - **Timeout or `Could not resolve host`**: the program did not use the proxy. Tools that ignore `HTTPS_PROXY` cannot reach anything.

@@ -144,7 +144,6 @@ RUN if [ -n "$TODE_EXTENSIONS" ]; then \
         printf '%s\n' "$listed" | grep -qixF "${id%%@*}" || { echo "error: tode.extensions: $id was not installed" >&2; exit 1; }; \
       done; \
     fi
-COPY agent/managed-settings.json /etc/claude-code/managed-settings.json
 # The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
 COPY --from=sumi /sumi /usr/local/bin/sumi
 RUN sumi init --agent claude --server /run/sumi/mask.sock --shell /bin/bash --settings /tmp/sumi/settings.json \
