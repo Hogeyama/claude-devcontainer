@@ -79,6 +79,13 @@ ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     BASH_ENV=/etc/bash-env.sh \
     SHELL=/bin/bash \
     CLAUDE_CODE_SHELL=/bin/bash
+# Dev Containers forwards the host's X11 display, and with it the host's screen
+# and keyboard, into the container unless the container's environment has
+# DISPLAY. So set it to a name that is no display, and blank it again in the
+# processes that Dev Containers starts (VS Code's server and terminals,
+# `devcontainer exec`), where Playwright, for one, takes any value for a display.
+ENV DISPLAY=none
+LABEL devcontainer.metadata='[{"remoteEnv":{"DISPLAY":""}}]'
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]
