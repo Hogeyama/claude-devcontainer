@@ -5,8 +5,6 @@ set -eu
 # Check .devcontainer/claude.toml and claude.local.toml, and write what compose,
 # the proxy build and the scripts below read to .devcontainer/.generated/.
 python3 "$(dirname "$0")/settings.py" generate
-python3 "$(dirname "$0")/workspace-source.py"
-python3 "$(dirname "$0")/git-agent.py" register
 python3 "$(dirname "$0")/settings.py" prepare-dependencies
 mkdir -p .devcontainer/.nix-env
 
@@ -15,11 +13,16 @@ setting() {
     sed -n "s/^$1='\\(.*\\)'\$/\\1/p" .devcontainer/.generated/settings.env
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND)
+if [ "$(setting CLAUDE_DEVCONTAINER_GIT_ISOLATION)" = clone ]; then
+    python3 "$(dirname "$0")/workspace-source.py"
+    python3 "$(dirname "$0")/git-agent.py" register
+fi
 
 # compose.yaml reads the internal subnets from .generated/networks.env unless
 # claude.toml sets them; a free pair is chosen once and kept.
 python3 "$(dirname "$0")/pick-networks.py" \
     "$(setting CLAUDE_DEVCONTAINER_PROXY_NET)" "$(setting CLAUDE_DEVCONTAINER_DIND_NET)"
+python3 "$(dirname "$0")/settings.py" check-shared-mounts
 
 # Export the trusted host commit's dev shell to a read-only management mount.
 # The agent's independent refs and worktree cannot change this input. It is the

@@ -29,6 +29,10 @@ compose() {
 # initializeCommand does not run here; bring .generated/ up to date with
 # claude.toml as it would.
 if python3 "$root/.devcontainer/claude/scripts/settings.py" generate; then
+    case "$1" in
+    up|create|start|restart)
+        python3 "$root/.devcontainer/claude/scripts/settings.py" check-shared-mounts ;;
+    esac
     compose "$@"
 fi
 # A setting in the environment or .devcontainer/.env, which generate refuses,

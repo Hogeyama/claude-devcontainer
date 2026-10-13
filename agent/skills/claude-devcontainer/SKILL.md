@@ -24,6 +24,10 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
+`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected when this container was created (default `clone`). In `shared`, `/workspace` is the host working tree: ordinary edits affect it immediately, but all of `.git` and `.devcontainer` are read-only mounts. Use `git status`, `git diff` and `git log`; the human performs add, commit, switch and stash on the host. Use clone to develop `.devcontainer` itself. The host's `git.shared_hidden_paths` (empty by default) and in-repository `sumi.secrets` are covered with empty read-only mounts; no directory name is treated specially. Other untracked/ignored files remain shared. Do not use the `agent` remote in shared mode. `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Network and dependency CoW restrictions still apply. Changes to mount settings take effect after the human recreates the container.
+
+The independent workspace and Git exchange rules below apply to `clone`:
+
 - `/workspace` is your own persistent clone, initialized automatically from a local copy of the host's committed HEAD (including unpublished commits), using the host's branch name at creation time. If the host has detached HEAD, the clone does too. Later starts preserve your current branch. Create a separate task branch with `git switch -c agent/task-name` when needed.
 - The host's worktree and `.git` are not mounted. Your `.devcontainer/`, Git configuration and hooks are writable; host startup uses the host's copies until the human reviews and integrates your commit.
 - Commit work on a task branch and tell the human its name and exact commit ID. No push is required: the host automatically has an `agent` remote pointing directly to this container and fetches your commits with ordinary Git. GitHub is not involved in this exchange.
@@ -47,7 +51,7 @@ Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docke
 
 ## Adding tools and dependencies
 
-Package registries are unavailable. Propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
+Package registries are unavailable. In shared mode, ask the human to edit `.devcontainer` on the host, or switch to clone for this work. In clone mode, propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
 
 | What is needed | Change for the human to make |
 |---|---|

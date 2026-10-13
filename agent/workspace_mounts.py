@@ -6,19 +6,24 @@ from pathlib import Path
 import pwd
 import re
 import sys
+import subprocess
 
 
-def dependency_mounts(workspace, mountinfo=Path('/proc/self/mountinfo')):
+def dependency_mounts(workspace, mountinfo=Path('/proc/self/mountinfo'), overlay_only=False):
     """Actual node_modules mounts, never ordinary directories or their contents."""
     mounts = []
     for line in Path(mountinfo).read_text().splitlines():
+        if overlay_only and (line.split(' - ', 1)[1].split()[0] != 'overlay' or line.split()[3] != '/'):
+            continue
         target = Path(re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), line.split()[4]))
         if target.name == 'node_modules' and target.is_relative_to(workspace):
             mounts.append(target)
     return mounts
 
 
-def prepare(workspace, uid, gid):
+def prepare(workspace, uid, gid, isolation='clone'):
+    if isolation not in ('clone', 'shared'):
+        raise ValueError(f'Unknown git isolation: {isolation}')
     workspace = Path(workspace)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     root = os.open(workspace, flags)
@@ -35,8 +40,9 @@ def prepare(workspace, uid, gid):
             raise ValueError(f'{path} is read-only and owned by {status.st_uid}:{status.st_gid}, not by the agent '
                              f'({uid}:{gid}); set agent.uid and agent.gid in claude.local.toml to its owner on the host.') from None
     try:
-        own(root, workspace)
-        for mount in dependency_mounts(workspace):
+        if isolation == 'clone':
+            own(root, workspace)
+        for mount in dependency_mounts(workspace, overlay_only=isolation == 'shared'):
             current = os.dup(root)
             path = workspace
             try:
@@ -47,18 +53,44 @@ def prepare(workspace, uid, gid):
                     os.close(current)
                     current = child
                     path /= part
-                    own(current, path)
+                    if isolation == 'clone' or path == mount:
+                        own(current, path)
             finally:
                 os.close(current)
     finally:
         os.close(root)
 
 
+def check_shared(workspace):
+    workspace = Path(workspace)
+    if not os.access(workspace, os.R_OK | os.W_OK | os.X_OK):
+        raise ValueError(f'{workspace} is not writable to {os.getuid()}:{os.getgid()}; '
+                         'set agent.uid and agent.gid in claude.local.toml to the host owner.')
+    for name in ('.git', '.devcontainer'):
+        path = workspace / name
+        if not os.statvfs(path).f_flag & os.ST_RDONLY or os.access(path, os.W_OK):
+            raise ValueError(f'{path} must be mounted read-only in shared mode; regenerate settings and recreate the container.')
+    paths = [workspace / '.devcontainer', workspace / '.git', workspace / '.git/objects', workspace / '.git/refs']
+    paths += [workspace / '.git' / name for name in ('HEAD', 'config', 'index')
+              if (workspace / '.git' / name).exists()]
+    for path in paths:
+        access = os.R_OK | (os.X_OK if path.is_dir() else 0)
+        if not os.access(path, access):
+            raise ValueError(f'{path} is not accessible to {os.getuid()}:{os.getgid()}; '
+                             'set agent.uid and agent.gid in claude.local.toml to the host owner.')
+    result = subprocess.run(['git', '-C', str(workspace), 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    if result.returncode or result.stdout.strip() != str(workspace):
+        raise ValueError(f'shared Git is unavailable: {result.stderr.strip()}; check agent.uid and agent.gid.')
+
+
 if __name__ == '__main__':
-    if os.geteuid() != 0:
-        sys.exit('error: mount preparation is an entrypoint-only root operation.')
-    node = pwd.getpwnam('node')
     try:
-        prepare('/workspace', node.pw_uid, node.pw_gid)
+        if sys.argv[1:] == ['--check-shared']:
+            check_shared('/workspace')
+        else:
+            if os.geteuid() != 0:
+                sys.exit('error: mount preparation is an entrypoint-only root operation.')
+            node = pwd.getpwnam('node')
+            prepare('/workspace', node.pw_uid, node.pw_gid, os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone'))
     except ValueError as error:
         sys.exit(f'error: {error}')
