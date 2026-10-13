@@ -25,6 +25,11 @@ class GitAgentTest(unittest.TestCase):
         self.env = dict(os.environ, GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
                         FAKE_AGENT_REPO=str(self.server), FAKE_DOCKER_LOG=str(self.root / 'calls'),
                         FAKE_CONTAINERS='abc123\n')
+        self.inspect = {'Config': {'Labels': {'com.docker.compose.project': 'fixture',
+                                             'dev.claude-devcontainer.git-isolation': 'clone'}},
+                        'Mounts': [{'Destination': '/workspace', 'Type': 'volume',
+                                    'Name': 'fixture_workspace', 'RW': True}]}
+        self.env['FAKE_INSPECT'] = json.dumps([self.inspect])
         self.git('init', '-b', 'main')
         self.git('commit', '--allow-empty', '-m', 'local')
         self.git('clone', '--bare', str(self.host), str(self.server))
@@ -40,6 +45,8 @@ with open(os.environ['FAKE_DOCKER_LOG'], 'a') as log:
     log.write(json.dumps(args) + '\\n')
 if args[0] == 'ps':
     print(os.environ['FAKE_CONTAINERS'], end='')
+elif args[0] == 'inspect':
+    print(os.environ['FAKE_INSPECT'])
 elif args[:4] == ['exec', '-i', '--user', 'node'] and args[-1] == '/workspace':
     command = args[5:-1]
     os.execvp(command[0], [*command, os.environ['FAKE_AGENT_REPO']])
@@ -160,3 +167,28 @@ else:
                                 capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'calls').exists())
+
+    def test_transport_checks_running_mode_and_mount_before_git(self):
+        self.register()
+        for mode, kind, name, allowed in [('shared', 'bind', '', False),
+                                           ('clone', 'bind', '', False),
+                                           ('unknown', 'volume', 'fixture_workspace', False),
+                                           (None, 'bind', '', False),
+                                           (None, 'volume', 'other_workspace', False),
+                                           (None, 'volume', 'fixture_workspace', True),
+                                           ('clone', 'volume', 'fixture_workspace', True)]:
+            with self.subTest(mode=mode, kind=kind, name=name):
+                labels = self.inspect['Config']['Labels']
+                labels.pop('dev.claude-devcontainer.git-isolation', None)
+                if mode is not None:
+                    labels['dev.claude-devcontainer.git-isolation'] = mode
+                self.inspect['Mounts'][0].update(Type=kind, Name=name)
+                self.env['FAKE_INSPECT'] = json.dumps([self.inspect])
+                # A TOML edit for the next container must not affect this one.
+                (self.host / '.devcontainer/claude.local.toml').write_text('[git]\nisolation = "shared"\n')
+                for args in [('fetch', 'agent'), ('push', 'agent', 'HEAD:probe')]:
+                    (self.root / 'calls').write_text('')
+                    result = self.git(*args, check=False)
+                    self.assertEqual(result.returncode == 0, allowed, result.stderr)
+                    calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
+                    self.assertEqual(any(call[0] == 'exec' for call in calls), allowed)

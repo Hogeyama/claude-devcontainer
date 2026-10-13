@@ -2,7 +2,7 @@
 # extend it here instead of editing it. Relative paths below are from
 # .devcontainer/.
 include:
-  - path: claude/compose.yaml
+  - path: [claude/compose.yaml, .generated/workspace.compose.yaml]
     # Written by initializeCommand from claude.toml and claude.local.toml;
     # settings.env wins over the subnets chosen in networks.env.
     env_file: [.generated/networks.env, .generated/settings.env]

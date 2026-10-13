@@ -15,6 +15,7 @@ they read to .devcontainer/.generated/:
   proxy.json    the merged proxy.hosts, which the proxy image build installs.
   images.txt    docker.images, one per line, for load-images.py and wait-ready.sh.
   agent.env     the dummy tokens that proxy.hosts' env names, for the agent.
+  workspace.compose.yaml  the /workspace mount selected by git.isolation.
 
 The settings come from these files only. A variable of settings.env in the
 environment or in .devcontainer/.env would win over settings.env in compose
@@ -23,6 +24,7 @@ alone, so `generate` refuses to run with one.
 Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
   settings.py prepare-dependencies  create persistent Node overlay directories
+  settings.py check-shared-mounts   validate shared mount parents before startup
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
 """
@@ -39,6 +41,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import tomllib
 
 # The workspace root: this script is .devcontainer/claude/scripts/ in it.
@@ -47,6 +50,7 @@ FILES = ('claude.toml', 'claude.local.toml')
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
+    'git': {'isolation': 'clone'},
     'agent': {'uid': 1000, 'gid': 1000},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -60,7 +64,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 # elsewhere; compose sets others, such as _PROXY_ADDRESS, in the containers.
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
-    'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
+    'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
     'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
@@ -135,6 +139,8 @@ def check(data, source):
                 raise ValueError(f'{where}: expected {type_name(default)}')
             if isinstance(value, str) and ('\n' in value or "'" in value):
                 raise ValueError(f"{where}: newlines and ' are not allowed")
+    if data.get('git', {}).get('isolation', 'clone') not in ('clone', 'shared'):
+        raise ValueError(f'{source}: git.isolation: expected "clone" or "shared"')
     agent, docker, tode, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'tode', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
@@ -224,6 +230,7 @@ def variables(settings):
     """{name: value} for settings.env."""
     secrets = settings['sumi']['secrets']
     values = {
+        PREFIX + 'GIT_ISOLATION': settings['git']['isolation'],
         PREFIX + 'UID': str(settings['agent']['uid']),
         PREFIX + 'GID': str(settings['agent']['gid']),
         PREFIX + 'DIND': '1' if settings['docker']['enabled'] else '0',
@@ -288,6 +295,68 @@ def prepare_node_modules(root=ROOT, environ=os.environ):
         Path(path).mkdir(parents=True, exist_ok=True)
 
 
+def check_shared_repository(root):
+    """Shared Git must be self-contained at the same relative container paths."""
+    root = Path(root).resolve()
+    git = root / '.git'
+    advice = 'git.isolation = "shared" needs a repository with an internal .git directory; use "clone" for linked worktrees or external Git storage.'
+    if git.is_symlink() or not git.is_dir():
+        raise ValueError(advice)
+    result = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute',
+                             '--show-toplevel', '--git-dir', '--git-common-dir', '--git-path', 'objects'],
+                            capture_output=True, text=True)
+    if result.returncode or result.stdout.splitlines() != [str(root), str(git), str(git), str(git / 'objects')]:
+        raise ValueError(advice)
+    worktree = subprocess.run(['git', '-C', str(root), 'config', '--path', '--get', 'core.worktree'],
+                             capture_output=True, text=True)
+    if worktree.returncode not in (0, 1) or (worktree.returncode == 0 and Path(worktree.stdout.strip()).is_absolute()):
+        raise ValueError(f'{advice} Absolute core.worktree paths cannot be used inside /workspace.')
+    # Alternates and symlinks may refer to paths absent from /workspace.
+    for directory, dirs, files in os.walk(git):
+        for name in dirs + files:
+            path = Path(directory) / name
+            if path.is_symlink() or (name in ('alternates', 'http-alternates') and path.stat().st_size):
+                raise ValueError(f'{advice} Unsupported Git storage: {path}')
+
+
+def workspace_compose(settings, root):
+    mode = settings['git']['isolation']
+    mount = {'type': 'volume', 'source': 'workspace', 'target': '/workspace'}
+    if mode == 'shared':
+        check_shared_repository(root)
+        mount = {'type': 'bind', 'source': str(Path(root).resolve()).replace('$', '$$'),
+                 'target': '/workspace', 'bind': {'create_host_path': False}}
+    # JSON is YAML; escape Compose interpolation separately from serialization.
+    return json.dumps({'services': {'agent': {'volumes': [mount]}}}, indent=2) + '\n'
+
+
+def check_shared_mounts(root=ROOT):
+    """Check consumer-added mounts before Docker can create host parents as root."""
+    if load(root)['git']['isolation'] != 'shared':
+        return
+    result = subprocess.run(['docker', 'compose', '-f', str(Path(root) / '.devcontainer/compose.yaml'),
+                             'config', '--format', 'json'], check=True, capture_output=True, text=True)
+    config = json.loads(result.stdout)
+    mounts = config['services']['agent'].get('volumes', [])
+    workspace = [mount for mount in mounts if mount['target'] == '/workspace']
+    if (len(workspace) != 1 or workspace[0]['type'] != 'bind'
+            or Path(workspace[0]['source']).resolve() != Path(root).resolve()):
+        raise ValueError('git.isolation = "shared" needs .generated/workspace.compose.yaml in '
+                         'compose.yaml include.path; update it from claude/template/compose.yaml.')
+    for mount in mounts:
+        target = Path(mount['target'])
+        if not target.is_relative_to('/workspace') or target == Path('/workspace'):
+            continue
+        path = Path(root)
+        for part in target.relative_to('/workspace').parts[:-1]:
+            path /= part
+            if path.is_symlink() or not path.is_dir():
+                raise ValueError(f'shared workspace mount needs an existing, non-symlink parent: {path}')
+        leaf = path / target.name
+        if leaf.is_symlink():
+            raise ValueError(f'shared workspace mount must not follow a symlink: {leaf}')
+
+
 def generate(root=ROOT, environ=os.environ):
     """Check the settings and the files they name, and write .generated/."""
     outside = outside_settings(root, environ)
@@ -298,6 +367,7 @@ def generate(root=ROOT, environ=os.environ):
             'run with them removed, as `env -u CLAUDE_DEVCONTAINER_DIND -u CLAUDE_DEVCONTAINER_NIX '
             '-u CLAUDE_DEVCONTAINER_SUMI devcontainer up`.')
     settings = load(root)
+    workspace = workspace_compose(settings, root)
     secrets = settings['sumi']['secrets']
     if settings['sumi']['enabled'] and not secrets.is_file():
         raise ValueError(f'sumi.enabled needs {secrets} (sumi.secrets), one secret per line, with mode 0600.')
@@ -313,6 +383,7 @@ def generate(root=ROOT, environ=os.environ):
     write(out / 'proxy.json', proxy_json(settings))
     write(out / 'images.txt', images_txt(settings))
     write(out / 'agent.env', header + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings)))
+    write(out / 'workspace.compose.yaml', workspace)
     return settings
 
 
@@ -322,14 +393,16 @@ def main():
             generate()
         elif sys.argv[1:] == ['prepare-dependencies']:
             prepare_node_modules()
+        elif sys.argv[1:] == ['check-shared-mounts']:
+            check_shared_mounts()
         elif len(sys.argv) == 3 and sys.argv[1] == 'proxy-json':
             path = Path(sys.argv[2])
             data = read(path)
             check(data, path.name)
             print(proxy_json(merge(copy.deepcopy(DEFAULTS), data)), end='')
         else:
-            sys.exit('usage: settings.py generate | prepare-dependencies | proxy-json FILE')
-    except ValueError as error:
+            sys.exit('usage: settings.py generate | prepare-dependencies | check-shared-mounts | proxy-json FILE')
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
         sys.exit(f'error: {error}')
 
 

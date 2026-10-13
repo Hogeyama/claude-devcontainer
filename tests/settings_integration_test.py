@@ -193,6 +193,68 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.assertEqual(options['type'], 'overlay')
         self.assertIn('lowerdir=' + str(self.root / 'node_modules'), options['o'])
 
+    def test_shared_initialization_and_switch_preserve_clone_and_git_state(self):
+        self.initialize()
+        before = (self.root / '.git/config').read_bytes()
+        generated = self.config / '.generated'
+        metadata = (generated / 'workspace.json').read_bytes()
+        clone = self.compose_config()
+        self.write('claude.local.toml', '[git]\nisolation = "shared"\n')
+        self.initialize()
+        shared = self.compose_config()
+        agent = shared['services']['agent']
+        mounts = [m for m in agent['volumes'] if m['target'] == '/workspace']
+        self.assertEqual(len(mounts), 1)
+        self.assertEqual(mounts[0]['type'], 'bind')
+        self.assertEqual(mounts[0]['source'], str(self.root))
+        self.assertFalse(mounts[0].get('bind', {}).get('create_host_path', False))
+        self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_GIT_ISOLATION'], 'shared')
+        self.assertEqual(agent['labels']['dev.claude-devcontainer.git-isolation'], 'shared')
+        self.assertEqual((generated / 'workspace.json').read_bytes(), metadata)
+        self.assertEqual((self.root / '.git/config').read_bytes(), before)
+        # Compose omits unused volume declarations; Docker keeps the detached
+        # volume. Returning to clone below must resolve the original name.
+        self.assertEqual(shared['volumes']['node-modules'], clone['volumes']['node-modules'])
+        self.write('claude.local.toml', '[git]\nisolation = "clone"\n')
+        self.initialize()
+        self.assertEqual(self.compose_config(), clone)
+
+    def test_shared_unborn_repository_skips_snapshot_and_remote_registration(self):
+        subprocess.run(['git', '-C', str(self.root), 'checkout', '--orphan', 'unborn'],
+                       check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.root), 'remote', 'add', 'agent', 'https://example.com/custom'], check=True)
+        before = (self.root / '.git/config').read_bytes()
+        self.write('claude.toml', '[git]\nisolation = "shared"\n')
+        self.initialize()
+        self.assertFalse((self.config / '.generated/workspace.json').exists())
+        self.assertEqual((self.root / '.git/config').read_bytes(), before)
+
+    def test_shared_checks_extra_mount_parents_and_keeps_consumer_mounts(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\n')
+        compose = self.config / 'compose.yaml'
+        compose.write_text(compose.read_text() + '\nservices:\n  agent:\n    volumes:\n'
+                           '      - extra:/workspace/packages/app/node_modules\nvolumes:\n  extra:\n')
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('existing, non-symlink parent', failed.stderr)
+        parent = self.root / 'packages/app'
+        parent.mkdir(parents=True)
+        before = parent.stat()
+        self.initialize()
+        self.assertEqual((parent.stat().st_uid, parent.stat().st_mode), (before.st_uid, before.st_mode))
+        mounts = self.compose_config()['services']['agent']['volumes']
+        self.assertTrue(any(m['target'] == '/workspace/packages/app/node_modules' for m in mounts))
+        self.assertEqual(sum(m['target'] == '/workspace' for m in mounts), 1)
+
+    def test_shared_requires_updated_compose_include(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\n')
+        compose = self.config / 'compose.yaml'
+        compose.write_text(compose.read_text().replace('[claude/compose.yaml, .generated/workspace.compose.yaml]',
+                                                       'claude/compose.yaml'))
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('update it from claude/template/compose.yaml', failed.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

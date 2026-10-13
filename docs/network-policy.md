@@ -47,7 +47,7 @@ agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの
 
 ## ホストが実行する設定の保護
 
-agentは専用のDocker volumeにある独立cloneで作業します。ホストの作業ツリー、index、refs、Git設定、hooksをmountしません。agentが自分のindexに`assume-unchanged`を付けても、ホストのレビューには影響しません。
+この節は既定の`git.isolation = "clone"`に適用されます。agentは専用のDocker volumeにある独立cloneで作業します。ホストの作業ツリー、index、refs、Git設定、hooksをmountしません。agentが自分のindexに`assume-unchanged`を付けても、ホストのレビューには影響しません。
 
 初回起動用のGitコピーは、ホストのローカルHEADと到達可能な履歴だけを独立したbare repositoryへ取り出します。ホストのGit設定、hooks、index、未コミット・未追跡ファイル、共有ハードリンクやalternatesは渡しません。初回取得にpushやネットワーク接続は不要です。
 
@@ -63,11 +63,17 @@ Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはな�
 
 取り込んだ後にホストで実行されるファイルの変更を確認します。対象のファイルは[ホストでレビューして取り込む](usage.md#ホストでレビューして取り込む)に挙げています。IDEで開く、別worktreeへcheckoutする、ホストでテストする場合も先にレビューします。リモートのrefが後から変わっても、レビュー対象のコミットIDは変えません。
 
+### sharedで共有されるもの
+
+`[git] isolation = "shared"`ではホストの作業ツリーと`.git`をread-writeで共有します。編集、index、refs、Git設定、hooks、`.devcontainer/`の変更はホストへ直接反映されます。ホストの`git status`や`git diff`もagentから独立したレビューの根拠にはできません。未追跡・ignoredな`.env`や`.secrets/`も共有され、sumiはこれらを自動で隠しません。
+
+proxy、firewall、認証情報の代理注入、ホストDocker socketを渡さない構成は維持します。管理用の`/run/host/generated`と`/run/host/nix-env`自体はread-onlyですが、sharedでは同じ内容を`/workspace/.devcontainer/`経由で編集できます。ホストのビルドや次回起動では変更された設定が実行され得ます。cloneへ戻すだけでホストの信頼性が回復するわけではありません。
+
 ## 保護の対象外
 
 通信制限が適用されるのはコンテナ内で実行するプログラムです。取り込んだソースコードをホスト上で実行しても、この制限では保護できません。ホストのDocker操作権限は強い権限を持つため、ホストで使うスクリプトや起動設定はレビューしてから実行してください。
 
-コミットに含まれるファイルはagentへ渡ります。未コミット・未追跡ファイルは転送しませんが、Gitに入れた秘密の読取りは防げません。ホストのホーム、Docker socket、秘密のディレクトリを追加mountしないでください。Claudeが受け取る入力元の制限も対象外です。
+コミットに含まれるファイルはagentへ渡ります。cloneでは未コミット・未追跡ファイルは転送しませんが、Gitに入れた秘密の読取りは防げません。ホストのホーム、Docker socket、秘密のディレクトリを追加mountしないでください。Claudeが受け取る入力元の制限も対象外です。
 
 VS Codeでコンテナに接続すると、VS Codeとその拡張機能が、proxyとfirewallを通らずにホストへ通じる経路をコンテナに作ります。接続している間は、コンテナで動くプロセスが、ホストでコマンドを実行し、proxyを通らずに外部と通信できます。この経路は遮断できないので、agentが動いているコンテナにはVS Codeを接続しないでください。[VS Codeで開く](usage.md#vs-codeで開く)を参照してください。
 

@@ -24,6 +24,10 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
+`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected when this container was created (default `clone`). In `shared`, `/workspace` is the host working tree and `.git`: edits, commits, branches, hooks and settings affect the host immediately, and untracked/ignored files are visible too. Do not use the `agent` remote for fetch/push in shared mode. `/run/host/generated` and `/run/host/nix-env` remain read-only mounts, but their contents are writable through `/workspace/.devcontainer/`. Network and dependency CoW restrictions still apply. Changing TOML takes effect only after the human recreates the container.
+
+The independent workspace and Git exchange rules below apply to `clone`:
+
 - `/workspace` is your own persistent clone, initialized automatically from a local copy of the host's committed HEAD (including unpublished commits), using the host's branch name at creation time. If the host has detached HEAD, the clone does too. Later starts preserve your current branch. Create a separate task branch with `git switch -c agent/task-name` when needed.
 - The host's worktree and `.git` are not mounted. Your `.devcontainer/`, Git configuration and hooks are writable; host startup uses the host's copies until the human reviews and integrates your commit.
 - Commit work on a task branch and tell the human its name and exact commit ID. No push is required: the host automatically has an `agent` remote pointing directly to this container and fetches your commits with ordinary Git. GitHub is not involved in this exchange.

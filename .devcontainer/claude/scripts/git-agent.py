@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Register and serve the host's direct Git remote to its running agent."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -40,6 +41,24 @@ def register(root=ROOT):
     git('config', '--local', 'protocol.ext.allow', 'user')
 
 
+def check_container(container):
+    """Use the running container, never the TOML edited for its next creation."""
+    result = subprocess.run(['docker', 'inspect', container], check=True, capture_output=True, text=True)
+    details = json.loads(result.stdout)[0]
+    labels = details.get('Config', {}).get('Labels') or {}
+    mode = labels.get('dev.claude-devcontainer.git-isolation')
+    if mode == 'shared':
+        raise ValueError('The agent uses git.isolation = "shared"; edit the shared repository directly, '
+                         'without git fetch/push agent.')
+    mounts = [mount for mount in details.get('Mounts', []) if mount['Destination'] == '/workspace']
+    project = labels.get('com.docker.compose.project')
+    if (mode not in (None, 'clone') or not project or len(mounts) != 1
+            or mounts[0].get('Type') != 'volume' or mounts[0].get('Name') != project + '_workspace'
+            or not mounts[0].get('RW')):
+        raise ValueError('Cannot verify the agent clone workspace mount; recreate it with devcontainer up '
+                         '--remove-existing-container.')
+
+
 def serve(service, root=ROOT):
     if service not in ('git-upload-pack', 'git-receive-pack'):
         raise ValueError('Only Git upload-pack and receive-pack are supported.')
@@ -49,6 +68,7 @@ def serve(service, root=ROOT):
         check=True, capture_output=True, text=True).stdout.split()
     if len(containers) != 1:
         raise ValueError('Expected exactly one running agent container for this workspace; run devcontainer up.')
+    check_container(containers[0])
     command = [service]
     if service == 'git-receive-pack':
         # A push to the branch checked out in /workspace also updates its work
@@ -68,5 +88,5 @@ if __name__ == '__main__':
             serve(sys.argv[1])
         else:
             raise ValueError('usage: git-agent.py register|git-upload-pack|git-receive-pack')
-    except (ValueError, OSError, subprocess.SubprocessError) as error:
+    except (ValueError, OSError, KeyError, IndexError, subprocess.SubprocessError) as error:
         sys.exit(f'error: {error}')

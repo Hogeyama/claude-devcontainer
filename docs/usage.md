@@ -2,11 +2,47 @@
 
 基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、取り込んだリポジトリのルートで実行してください。認証情報は、ホストのClaude Codeのログインと`~/.config/claude-devcontainer/credentials`から読みます。
 
-## 初回起動
+## Gitの共有と分離
+
+`.devcontainer/claude.toml`、またはホストだけの`.devcontainer/claude.local.toml`で指定する。省略時は従来どおり`clone`。ローカル設定が優先される。
+
+```toml
+[git]
+isolation = "clone" # "shared" にするとホストと共有
+```
+
+| 設定 | 作業場所 | Gitと変更の受け渡し |
+| --- | --- | --- |
+| `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストから`git fetch/push agent` |
+| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | ホストと同じ`.git`。編集・commit・ブランチ切り替えが双方に即時反映 |
+
+設定変更後はコンテナを再作成する。
+
+```sh
+devcontainer up --workspace-folder . --remove-existing-container
+```
+
+切り替えは保存先の選択だけで、自動同期は行わない。`clone → shared → clone`では以前のcloneのブランチと未コミット変更が残る。cloneが未作成なら、その時点のホストHEADから初期化する。Node/GradleのCoWは共通で、切り替えてもキャッシュを保持する。通常の切り替えで`down -v`やvolumeの削除を行わない。
+
+sharedでは初期Gitコピーと`agent`リモート登録を省略する。既存のリモート設定も削除・変更しないが、共有中のコンテナへの`git fetch/push agent`は拒否する。接続可否は実行中コンテナのlabelとmountで判定するため、設定を編集しただけなら、再作成前のcloneから成果を取得できる。
+
+sharedはルートに実体の`.git`ディレクトリがある通常リポジトリに対応する。linked worktree、外部git-dir、object alternatesなどは`clone`を使う。ホストのUID/GIDに`agent.uid`/`agent.gid`を合わせ、追加の依存mountの親ディレクトリはホストで事前に作る。起動処理はホストの作業ツリーや`.git`をchown/chmodしない。
+
+sharedでは`.env`、`.secrets/`などの未追跡・ignoredファイルもagentに見え、Git設定、hooks、起動設定も直接編集できる。通信制限は維持されるが、ホストの作業ツリーとGitは保護されない。[隔離の範囲](network-policy.md#sharedで共有されるもの)も参照する。
+
+既存の利用先を更新した場合は、`.devcontainer/compose.yaml`のincludeを次の形に変更する。コアのsubtree更新だけでは、利用先が所有するこのファイルは更新されない。
+
+```yaml
+include:
+  - path: [claude/compose.yaml, .generated/workspace.compose.yaml]
+    env_file: [.generated/networks.env, .generated/settings.env]
+```
+
+## 初回起動（clone）
 
 `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空のworkspace volumeにホストと同じブランチ名でcheckoutする。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
-## 受け渡し用リモート
+## 受け渡し用リモート（clone）
 
 起動処理がホストに`agent`リモートを自動登録する。接続先は起動中のコンテナ内の`/workspace`であり、GitHubなどの外部リポジトリは介在しない。既存の`origin`は変更しない。同名の`agent`が別用途で存在する場合は上書きせず停止するので、既存のリモートを別名にしてから起動する。
 

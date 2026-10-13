@@ -40,7 +40,17 @@ if [ "$dind" = 1 ] && [ -n "$(sed 's/#.*//' "$list" 2>/dev/null | tr -d ' \t\r\n
 fi
 
 # Git runs only after the entrypoint dropped privileges, as remoteUser node.
-python3 /usr/local/bin/clone-workspace.py
+case "${CLAUDE_DEVCONTAINER_GIT_ISOLATION:-clone}" in
+clone)
+    echo 'Git isolation: clone' >&2
+    python3 /usr/local/bin/clone-workspace.py ;;
+shared)
+    echo 'Git isolation: shared; edits and Git operations write directly to the host repository.' >&2
+    python3 /usr/local/bin/workspace_mounts.py --check-shared ;;
+*)
+    echo 'error: unknown CLAUDE_DEVCONTAINER_GIT_ISOLATION' >&2
+    exit 1 ;;
+esac
 # Like `nix develop -c claude`: run the dev shell, shellHook included, in the
 # workspace now in place, for every Bash to read what it exports.
 if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /run/host/nix-env/dev-env.sh ]; then
