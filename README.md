@@ -19,7 +19,7 @@ Claude Code用のDev Containerです。危険な操作を禁止しつつ、DinD�
 * GitHubを使う場合は、共有するリポジトリだけを対象にしたfine-grained tokenを使う前提です。
 * agentが接続できるのは、Anthropicと、`.devcontainer/claude.toml`の`proxy.hosts`に書いた接続先だけです。package registryなども、`proxy.hosts`に書かなければ使えません。
 * agentが動いているコンテナにVS Codeを接続すると、この隔離は成り立ちません。[VS Codeで開く](docs/usage.md#vs-codeで開く)を参照してください。
-* Anthropicのweb searchなど、Anthropicのサーバーから外部へ接続する機能は使えません。claude.aiのコネクタは、指定したものだけ使えます。
+* Anthropicのサーバーから外部へ接続する機能は既定で拒否します。WebSearchは[`proxy.web_search = true`](docs/network-policy.md#websearchを使う)で、claude.aiのコネクタは指定したものだけ使えます。
   * [通信ルールと隔離の範囲](docs/network-policy.md)に対応範囲を記載しています。
 * 起動時に、コンテナ内リポジトリを指す`agent`リモートをホストへ自動登録します。受け渡しはホストから直接fetch/pushし、GitHubなどの外部リポジトリは介在しません。初回起動はホストのローカルHEADからコピーするため、未pushでも起動できます。未コミット・未追跡ファイルはagentへ渡りません。
 * agentは専用volumeのcloneで作業します。ホストの作業ツリーと`.git`は共有しません。成果はホストの`git fetch agent`で受け取り、[コミットIDを固定してレビュー・取り込み](docs/usage.md#ホストでレビューして取り込む)ます。

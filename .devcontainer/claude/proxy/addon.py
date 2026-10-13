@@ -82,6 +82,10 @@ CLIENT_TOOL_TYPES = {'custom'}
 # other host. Claude Code adds the advisor for subscriptions. Each version is
 # listed: a new one may do more, and is denied (and logged) until checked.
 MODEL_TOOL_TYPES = {'advisor_20260301'}
+# The host's proxy.web_search opt-in permits the basic search used by Claude
+# Code. Later versions can also execute code, so do not allow them implicitly.
+WEB_SEARCH = os.environ.get('CLAUDE_DEVCONTAINER_WEB_SEARCH') == '1'
+WEB_SEARCH_TOOL_TYPES = {'web_search_20250305'}
 # Content sources carried in the request. A URL or file source makes
 # Anthropic's servers fetch it.
 INLINE_SOURCES = {'base64', 'text'}
@@ -143,12 +147,13 @@ def check_blocks(content):
 
 
 def check_messages(raw):
-    """Reject the ways a request can make Anthropic's servers contact other hosts."""
+    """Reject server-side external access except the host's web search opt-in."""
     body = json.loads(raw, object_pairs_hook=unique_keys)
     require(not DENIED_FIELDS & set(body), 'field ' + ','.join(sorted(DENIED_FIELDS & set(body))))
     for tool in body.get('tools', []):
         kind = tool.get('type', 'custom')
-        require(kind in CLIENT_TOOL_TYPES | MODEL_TOOL_TYPES, f'tool type {str(kind)[:40]}')
+        require(kind in CLIENT_TOOL_TYPES | MODEL_TOOL_TYPES or (WEB_SEARCH and kind in WEB_SEARCH_TOOL_TYPES),
+                f'tool type {str(kind)[:40]}')
     for message in body['messages']:
         check_blocks(message['content'])
     check_blocks(body.get('system', ''))

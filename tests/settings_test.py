@@ -51,7 +51,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
         self.assertEqual(loaded['tode'], {'enabled': False, 'extensions': []})
-        self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'hosts': {}})
+        self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}})
         # load() must not change the defaults it starts from.
         self.write('claude.toml', '[sumi]\nsecrets = "s.txt"\n')
         self.load()
@@ -82,6 +82,8 @@ class SettingsTest(unittest.TestCase):
             ('[docker]\nimages = [1]\n', r'docker.images: expected a list'),
             ('[docker]\nimages = ["a b"]\n', r'docker.images:'),
             ('[proxy]\nconnectors = ["drive"]\n', r'proxy.connectors:'),
+            ('[proxy]\nweb_search = "true"\n', r'proxy.web_search: expected true or false'),
+            ('[proxy]\nweb_search = 1\n', r'proxy.web_search: expected true or false'),
             ('[tode]\nenabled = true\nextensions = ["python"]\n', r'tode.extensions: .python. is not'),
             ('[tode]\nenabled = true\nextensions = ["a.b c"]\n', r'tode.extensions:'),
             ('[tode]\nextensions = ["ms-python.python"]\n', r'tode.extensions: needs tode.enabled'),
@@ -182,6 +184,7 @@ dind = "10.99.1"
             'CLAUDE_DEVCONTAINER_TODE_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
             'CLAUDE_DEVCONTAINER_PROXY_CA': f"'{self.root / 'ca.pem'}'",
             'CLAUDE_DEVCONTAINER_CONNECTORS': "'mcpsrv_01A,mcprs_02B'",
+            'CLAUDE_DEVCONTAINER_WEB_SEARCH': "'0'",
             # Unset, pick-networks.py chooses the proxy's.
             'CLAUDE_DEVCONTAINER_DIND_NET': "'10.99.1'",
         })
@@ -200,6 +203,15 @@ dind = "10.99.1"
         self.assertNotIn('CLAUDE_DEVCONTAINER_PROXY_NET', self.env())
         self.assertEqual((out / 'images.txt').read_text(), '')
         self.assertEqual(json.loads((out / 'proxy.json').read_text()), {'hosts': {}})
+
+    def test_web_search_opt_in_and_local_override(self):
+        for workspace, local, expected in [(None, None, '0'), ('true', None, '1'),
+                                            ('true', 'false', '0'), (None, 'true', '1')]:
+            with self.subTest(workspace=workspace, local=local):
+                for name, value in [('claude.toml', workspace), ('claude.local.toml', local)]:
+                    self.write(name, '' if value is None else f'[proxy]\nweb_search = {value}\n')
+                self.generate()
+                self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_WEB_SEARCH'], f"'{expected}'")
 
     def test_generate_checks_the_files_named(self):
         self.write('claude.toml', '[sumi]\nenabled = true\nsecrets = "missing.txt"\n')
@@ -220,6 +232,8 @@ dind = "10.99.1"
     def test_settings_outside_the_files_are_refused(self):
         with self.assertRaisesRegex(ValueError, r'CLAUDE_DEVCONTAINER_DIND in the environment.*env -u'):
             self.generate({'CLAUDE_DEVCONTAINER_DIND': '1'})
+        with self.assertRaisesRegex(ValueError, r'CLAUDE_DEVCONTAINER_WEB_SEARCH in the environment.*env -u'):
+            self.generate({'CLAUDE_DEVCONTAINER_WEB_SEARCH': '1'})
         self.write('.env', '# CLAUDE_DEVCONTAINER_UID=1\nexport CLAUDE_DEVCONTAINER_SUMI_DIR=/x\nOTHER=1\n')
         with self.assertRaisesRegex(ValueError, r'found CLAUDE_DEVCONTAINER_SUMI_DIR in .devcontainer/.env\.'):
             self.generate()

@@ -99,6 +99,16 @@ class SettingsIntegrationTest(unittest.TestCase):
                 self.assertEqual(services['agent']['environment'][FLAG], expected)
                 self.assertEqual(services['dind']['scale'], int(expected))
 
+    def test_web_search_opt_in_reaches_only_the_proxy(self):
+        for value, expected in [(None, '0'), ('true', '1'), ('false', '0')]:
+            with self.subTest(value=value):
+                self.write('claude.toml', '' if value is None else f'[proxy]\nweb_search = {value}\n')
+                self.initialize()
+                services = self.compose_config()['services']
+                name = 'CLAUDE_DEVCONTAINER_WEB_SEARCH'
+                self.assertEqual(services['proxy']['environment'][name], expected)
+                self.assertNotIn(name, services['agent']['environment'])
+
     def test_settings_outside_the_files_stop_initialization(self):
         self.env[FLAG] = '1'
         failed = self.initialize(check=False)

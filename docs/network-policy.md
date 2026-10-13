@@ -17,7 +17,7 @@ Anthropicへの通信は[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.p
 
 GitHubのarchive、LFS、release assetや、package registryには対応していません。proxyはWebSocket、SOCKS、raw TCP、平文HTTPによる外部接続も拒否します。
 
-proxyはAnthropic向けの要求では、Anthropicのサーバーから別の接続先へ通信させる指定だけを拒否します。対象はMCP connector、web search／fetchなどサーバー側で実行するtool、code executionのcontainer、URLやファイルIDで指定するcontentです。claude.aiのコネクタは、明示的に指定したものだけ例外として通します。サーバー側のtoolのうち、Anthropicのサーバー内でモデルを呼ぶだけのadvisor（`advisor_20260301`）は、他の接続先に接続しないので通します。新しい版のadvisorは、確認するまで拒否します。その間は、Claude Codeで`/advisor off`にすると推論を続けられます。それ以外の項目やbeta headerは通すため、Claude Codeの新しい機能でproxyの更新は要りません。この4種類以外の形でサーバーから外部へ接続する機能が今後追加された場合は、それも通ります。
+proxyはAnthropic向けの要求では、Anthropicのサーバーから別の接続先へ通信させる指定を既定で拒否します。対象はMCP connector、web search／fetchなどサーバー側で実行するtool、code executionのcontainer、URLやファイルIDで指定するcontentです。WebSearchは[`proxy.web_search`](#websearchを使う)を有効にした場合、claude.aiのコネクタは明示的に指定したものだけ例外として通します。サーバー側のtoolのうち、Anthropicのサーバー内でモデルを呼ぶだけのadvisor（`advisor_20260301`）は、他の接続先に接続しないので通します。新しい版のadvisorは、確認するまで拒否します。その間は、Claude Codeで`/advisor off`にすると推論を続けられます。それ以外の項目やbeta headerは通すため、Claude Codeの新しい機能でproxyの更新は要りません。この4種類以外の形でサーバーから外部へ接続する機能が今後追加された場合は、それも通ります。
 
 proxyは拒否した要求に通常HTTP 403を返します。本文付きの要求をheaderの段階で拒否した場合は、本文を受信し続けないよう接続を切断します。
 
@@ -35,7 +35,7 @@ agentの起動処理はfirewallとCAを設定してから一般ユーザー（�
 
 このため、Bashで実行したコマンドもClaude本体と同じくproxyを通り、`api.anthropic.com`にも届きます。proxyはその要求にも本物の認証値を付けます。proxyが拒否する上記の4種類以外の形で、Anthropicのサーバーから外部へ接続する機能が今後追加された場合、Bashのコマンドからそれを使って第三者へ送信できます。この経路は、VS Codeで人間が起動したビルドなど、agentで動くすべてのプロセスに元からあります。境界はコンテナとproxyで、Claude Codeの設定には頼りません。
 
-WebSearchはproxyがサーバー側のtoolを拒否するため使えません。同梱のmanaged settingsによるWebSearchの禁止はありません。
+WebSearchはproxyが既定で拒否します。[`proxy.web_search`](#websearchを使う)で許可できます。同梱のmanaged settingsによるWebSearchの禁止はありません。
 
 WebFetchは禁止していません。WebFetchではagentのClaude Codeが自分でURLを取得するので、ほかの通信と同じくproxyの制限を受け、`proxy.hosts`に書いた接続先にしか届きません。なお、Claude CodeはURLを取得する前に、接続先のホスト名を`api.anthropic.com`の`/api/web/domain_info`へ問い合わせます。proxyはこの要求を通さないので、settingsで`skipWebFetchPreflight`を`true`にしていなければ、WebFetchは失敗します。
 
@@ -150,6 +150,23 @@ ca = "/etc/ssl/certs/company-root.pem"
 proxyは起動時にこのファイルを読み取り専用でmountし、公開のルート証明書に加えて信頼します。CA証明書でないものが含まれていると、proxyは理由を表示して起動しません。imageには組み込まないので、再ビルドは要りません。ファイルを変えたら、環境を停止して`devcontainer up`で起動し直してください。
 
 信頼はホストごとに分けられず、すべての接続先に及びます。このCAの秘密鍵を持つ者は`api.github.com`などの証明書も偽造でき、proxyとの間で認証値を盗み見られます。信頼できる組織のCAだけを指定してください。
+
+### WebSearchを使う
+
+`.devcontainer/claude.toml`またはホスト専用の`.devcontainer/claude.local.toml`に次を書きます。既定は`false`です。
+
+```toml
+[proxy]
+web_search = true
+```
+
+READMEの停止手順で環境を停止し、`devcontainer up`で起動し直してください。設定はホストがproxyの環境変数へ渡します。agent内のファイルを編集しても、稼働中のproxyには反映されません。初めてこの機能を取り込むときはproxyのimageも更新されますが、その後の設定の切替えだけではimageの再ビルドは要りません。
+
+許可するのはClaude Codeが使う`web_search_20250305`です。コード実行を伴う新しい版や未知の版は、この設定では許可しません。Claude Code側や組織の設定でWebSearchを禁止している場合は、その制限も受けます。
+
+検索はAnthropicのサーバーで実行されるため、検索に伴う外部通信は`proxy.hosts`の制限を受けません。検索語や結果の取得元をこのproxyで審査することもできません。BashなどからMessages APIを直接呼ぶ場合にも同じ許可が適用されます。
+
+auto modeの検索語の審査や、ツール結果へのprompt injection検知・警告は予防策として使えますが、proxyによる取得元の制限ではありません。WebFetch、code execution、MCP connector、URLやファイルIDで指定するcontentの許可は、この設定では増えません。
 
 ### claude.aiのコネクタを使う
 
