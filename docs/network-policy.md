@@ -65,7 +65,9 @@ Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはな�
 
 ### sharedで共有されるもの
 
-`[git] isolation = "shared"`ではホストの作業ツリーをread-writeで共有し、その上に`.git`全体と`.devcontainer`全体のread-only bindを重ねます。index、refs、Git設定、hooksと、次回起動時にホストで使う設定・スクリプトへの書き込みを防ぎます。`.git/config`だけの保護では、`.git/commondir`で別のconfigを読ませられるので不十分です。agentの通常プロセスはcapabilityを持たず、マウントを解除できません。マウントポイント自体のrenameによる差し替えもできません。commit・switch・stashはホストで行います。
+`[git] isolation = "shared"`ではホストの作業ツリーをread-writeで共有し、既定ではその上に`.git`全体と`.devcontainer`全体のread-only bindを重ねます。index、refs、Git設定、hooksと、次回起動時にホストで使う設定・スクリプトへの書き込みを防ぎます。`.git/config`だけの保護では、`.git/commondir`で別のconfigを読ませられるので不十分です。agentの通常プロセスはcapabilityを持たず、マウントを解除できません。マウントポイント自体のrenameによる差し替えもできません。既定ではcommit・switch・stashはホストで行います。
+
+`git.shared_writable = true`を明示すると、`.git`をread-writeにし、既存のhooks・config・rebase状態などだけをread-onlyにします（[対象と設定例](usage.md#gitの共有と分離)）。agentがindex・refs・objectsを更新できるため、共有Gitの状態は隔離されません。新設の`commondir`によるconfig参照先の変更、新設のrebase todoの`exec`、標準パス外のhooksやconfig include、Git履歴を経由したホストへの影響は防げません。これは既存の特定パスへの直接書き込みを防ぐ設定です。未作成のrebaseディレクトリなどを保護のために作ることはしません。Gitが処理中と誤認するのを避けるためです。
 
 `.devcontainer`の保護は無効にできません。管理用の`/run/host/generated`と`/run/host/nix-env`もread-onlyで、`/workspace/.devcontainer`経由の書き込みも防ぎます。これらの生成物はホストが書きます。`.devcontainer/claude`自体の開発にはcloneを使います。
 

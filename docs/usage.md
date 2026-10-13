@@ -14,7 +14,7 @@ isolation = "clone" # "shared" にするとホストと共有
 | 設定 | 作業場所 | Gitと変更の受け渡し |
 | --- | --- | --- |
 | `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストから`git fetch/push agent` |
-| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | `.git`はread-only。編集は即時反映、commit・switch・stashはホストで実行 |
+| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | 既定では`.git`はread-only。`shared_writable = true`でagentのGit更新を許可 |
 
 設定変更後はコンテナを再作成する。
 
@@ -28,7 +28,19 @@ sharedでは初期Gitコピーと`agent`リモート登録を省略する。既�
 
 sharedはルートに実体の`.git`ディレクトリがある通常リポジトリに対応する。linked worktree、外部git-dir、object alternatesなどは`clone`を使う。ホストのUID/GIDに`agent.uid`/`agent.gid`を合わせ、追加の依存mountの親ディレクトリはホストで事前に作る。起動処理はホストの作業ツリーや`.git`をchown/chmodしない。
 
-sharedでは`.git`と`.devcontainer`全体をread-onlyで重ねてマウントする。agentは通常ファイルの編集と`git status` / `git diff` / `git log`を行い、add・commit・switch・stashなどGitの状態を変える操作はホストで行う。`.devcontainer`の保護を無効にする設定はない。このリポジトリの`.devcontainer/claude`など、起動設定を開発するときはcloneを使う。
+sharedでは既定で`.git`と`.devcontainer`全体をread-onlyで重ねてマウントする。agentは通常ファイルの編集と`git status` / `git diff` / `git log`を行い、add・commit・switch・stashなどGitの状態を変える操作はホストで行う。`.devcontainer`の保護を無効にする設定はない。このリポジトリの`.devcontainer/claude`など、起動設定を開発するときはcloneを使う。
+
+agentから共有リポジトリにadd・commit・switch・stashしたい場合は、`.devcontainer/claude.local.toml`に次を指定してコンテナを再作成する。
+
+```toml
+[git]
+isolation = "shared"
+shared_writable = true # 既定はfalse。cloneでは効果なし
+```
+
+この場合、`.git`はread-writeとし、その中の起動時に存在する`config`、`config.worktree`、`hooks/`、`info/`、`objects/info/`、`commondir`、`gitdir`、`worktrees/`、`modules/`、`rebase-merge/`、`rebase-apply/`、`sequencer/`をread-onlyで保護する。`git-rebase-todo`は親のrebaseディレクトリごと保護する。index・refs・objectsの通常の更新はホストへ即時反映される。`.devcontainer`全体と秘密パスの保護は維持する。
+
+存在しない保護対象は作成しない。したがって起動後に新設されたrebase状態や`commondir`、別の場所を指す`core.hooksPath`やconfigのinclude先は、この保護では書き込みを防げない。Git履歴・index・refs経由でホストの後続操作に影響を与えることもできるため、`.git`全体をread-onlyにした場合と同じ隔離は提供しない。既存のrebase・sequencer状態が保護されている間は、agentからの続行・中断は失敗し得る。保護対象をホストで作成・置換した後もコンテナを再作成する。
 
 秘匿対象は`.devcontainer/claude.local.toml`の`git.shared_hidden_paths`で指定する。既定は空のリストで、`.secrets`などの名前を特別扱いしない。リポジトリ内を指す`sumi.secrets`は別途自動で隠す。ディレクトリは空のread-only tmpfs、ファイルは空ファイルのread-only bindで覆う。
 

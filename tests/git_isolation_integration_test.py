@@ -86,10 +86,11 @@ class GitIsolationIntegrationTest(unittest.TestCase):
     def execute(self, *args, check=True):
         return self.docker('exec', '--user', 'node', self.container, *args, check=check)
 
-    def start(self, mode):
+    def start(self, mode, writable=False):
         self.docker('rm', '-f', self.container, check=False)
         (self.host / '.devcontainer/claude.toml').write_text(
             f'[git]\nisolation = "{mode}"\nshared_hidden_paths = [".secrets", ".env"]\n'
+            f'shared_writable = {str(writable).lower()}\n'
             '[sumi]\nsecrets = "sumi.txt"\n')
         settings.generate(self.host, {})
         volumes = [
@@ -111,6 +112,7 @@ class GitIsolationIntegrationTest(unittest.TestCase):
                 'security_opt': ['no-new-privileges=true'],
                 'labels': {'devcontainer.local_folder': str(self.host), 'dev.claude-devcontainer.git-isolation': mode},
                 'environment': {'CLAUDE_DEVCONTAINER_GIT_ISOLATION': mode, 'CLAUDE_DEVCONTAINER_DIND': '0',
+                                'CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE': '1' if writable else '0',
                                 'CLAUDE_DEVCONTAINER_NIX': '0', 'CLAUDE_DEVCONTAINER_SUMI': '0'},
                 'volumes': volumes}},
             'volumes': {'workspace': {'external': True, 'name': self.volume},
@@ -199,6 +201,66 @@ for name in ('.git', '.devcontainer', '.secrets', '.env'):
         self.assertEqual((self.host / '.secrets/token').read_text(), 'directory-secret\n')
         self.assertEqual((self.host / '.env').read_text(), 'file-secret\n')
         self.assertEqual((self.host / '.devcontainer/sumi.txt').read_text(), 'sumi-secret\n')
+
+    def test_shared_writable_git_operations_and_sensitive_mounts(self):
+        config = (self.host / '.git/config').read_bytes()
+        self.start('shared', writable=True)
+        self.execute('git', '-C', '/workspace', 'switch', '-c', 'agent/writable')
+        self.execute('sh', '-ec', 'echo shared-commit > /workspace/tracked')
+        self.execute('git', '-C', '/workspace', 'add', 'tracked')
+        self.execute('git', '-C', '/workspace', 'commit', '-qm', 'shared commit')
+        self.assertEqual(self.git('branch', '--show-current').stdout.strip(), 'agent/writable')
+        self.assertNotEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.initial)
+        self.assertEqual(self.git('show', 'HEAD:tracked').stdout, 'shared-commit\n')
+        self.execute('sh', '-ec', 'echo stashed > /workspace/tracked')
+        self.execute('git', '-C', '/workspace', 'stash', 'push', '-qm', 'shared stash')
+        self.assertEqual((self.host / 'tracked').read_text(), 'shared-commit\n')
+        self.execute('git', '-C', '/workspace', 'stash', 'pop', '-q')
+        self.assertEqual((self.host / 'tracked').read_text(), 'stashed\n')
+        self.assertNotEqual(self.execute('git', '-C', '/workspace', 'config', '--local',
+                                        'core.hooksPath', '/tmp/hooks', check=False).returncode, 0)
+        self.execute('python3', '-c', '''
+import errno, os
+from pathlib import Path
+for name in ('.git/config', '.git/hooks/new-hook', '.git/info/attributes',
+             '.git/objects/info/alternates', '.devcontainer/claude.toml', '.secrets/new', '.env'):
+    try:
+        (Path('/workspace') / name).write_text('tampered')
+    except OSError as error:
+        assert error.errno == errno.EROFS, (name, error)
+    else:
+        raise AssertionError(name)
+for name in ('.git', '.git/config', '.git/hooks', '.devcontainer'):
+    path = '/workspace/' + name
+    try:
+        os.rename(path, path + '-moved')
+    except OSError as error:
+        assert error.errno in (errno.EBUSY, errno.EROFS), (name, error)
+    else:
+        raise AssertionError(name)
+assert Path('/workspace/.env').read_bytes() == b''
+assert list(Path('/workspace/.secrets').iterdir()) == []
+''')
+        self.assertEqual((self.host / '.git/config').read_bytes(), config)
+        self.start('shared')
+        self.assertNotEqual(self.execute('git', '-C', '/workspace', 'add', 'tracked', check=False).returncode, 0)
+        self.assertEqual((self.host / 'tracked').read_text(), 'stashed\n')
+
+    def test_shared_writable_protects_existing_rebase_and_worktree_config(self):
+        for name in ('rebase-merge', 'rebase-apply', 'sequencer'):
+            (self.host / '.git' / name).mkdir()
+            (self.host / '.git' / name / 'git-rebase-todo').write_text('exec echo trusted\n')
+        (self.host / '.git/config.worktree').write_text('[user]\nname = trusted\n')
+        self.start('shared', writable=True)
+        for name in ('rebase-merge/git-rebase-todo', 'rebase-apply/git-rebase-todo',
+                     'sequencer/git-rebase-todo', 'config.worktree'):
+            original = (self.host / '.git' / name).read_bytes()
+            result = self.execute('python3', '-c',
+                                  'import sys; from pathlib import Path; Path(sys.argv[1]).write_text("tampered")',
+                                  '/workspace/.git/' + name, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Read-only file system', result.stderr)
+            self.assertEqual((self.host / '.git' / name).read_bytes(), original)
 
 
 

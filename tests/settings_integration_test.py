@@ -47,6 +47,8 @@ class SettingsIntegrationTest(unittest.TestCase):
         scripts = self.config / 'claude/scripts'
         scripts.mkdir(parents=True)
         (self.config / 'claude/proxy').mkdir()
+        (self.config / 'claude/agent').mkdir()
+        shutil.copy(CORE / 'agent/workspace_mounts.py', self.config / 'claude/agent/workspace_mounts.py')
         shutil.copy(CORE / 'compose.yaml', self.config / 'claude/compose.yaml')
         shutil.copy(CORE / 'template/compose.yaml', self.config / 'compose.yaml')
         shutil.copy(CORE / 'proxy/policy.py', self.config / 'claude/proxy/policy.py')
@@ -228,6 +230,35 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.initialize()
         self.assertFalse((self.config / '.generated/workspace.json').exists())
         self.assertEqual((self.root / '.git/config').read_bytes(), before)
+
+    def test_shared_writable_reaches_compose_and_local_override_restores_read_only(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\nshared_writable = true\n')
+        self.initialize()
+        agent = self.compose_config()['services']['agent']
+        self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE'], '1')
+        mounts = {m['target']: m for m in agent['volumes']}
+        self.assertFalse(mounts['/workspace/.git'].get('read_only', False))
+        for name in ('.devcontainer', '.git/config', '.git/hooks', '.git/info', '.git/objects/info'):
+            self.assertTrue(mounts['/workspace/' + name]['read_only'])
+        self.write('claude.local.toml', '[git]\nshared_writable = false\n')
+        self.initialize()
+        agent = self.compose_config()['services']['agent']
+        self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE'], '0')
+        mounts = {m['target']: m for m in agent['volumes']}
+        self.assertTrue(mounts['/workspace/.git']['read_only'])
+        self.assertNotIn('/workspace/.git/hooks', mounts)
+
+    def test_shared_writable_rejects_overridden_git_protections(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\nshared_writable = true\n')
+        compose = self.config / 'compose.yaml'
+        original = compose.read_text()
+        for target in ('.git/config', '.git/hooks', '.git/hooks/new-hook'):
+            with self.subTest(target=target):
+                compose.write_text(original + '\nservices:\n  agent:\n    volumes:\n'
+                                   f'      - extra:/workspace/{target}\nvolumes:\n  extra:\n')
+                failed = self.initialize(check=False)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn('shared protection', failed.stderr)
 
     def test_shared_checks_extra_mount_parents_and_keeps_consumer_mounts(self):
         self.write('claude.toml', '[git]\nisolation = "shared"\n')

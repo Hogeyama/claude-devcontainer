@@ -122,6 +122,66 @@ class GitIsolationTest(unittest.TestCase):
         self.assertFalse(generated['/workspace'].get('read_only', False))
         self.assertNotIn('/workspace/.secrets', generated)
 
+    def enable_shared_writes(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nshared_writable = true\n')
+
+    def test_shared_writable_protects_existing_sensitive_paths_without_creating_state(self):
+        self.enable_shared_writes()
+        (self.root / '.git/config.worktree').write_text('[user]\nname = fixture\n')
+        for name in ('rebase-merge', 'rebase-apply', 'sequencer', 'modules', 'worktrees'):
+            (self.root / '.git' / name).mkdir()
+        todo = self.root / '.git/rebase-merge/git-rebase-todo'
+        todo.write_text('exec echo trusted\n')
+        before = sorted(str(p.relative_to(self.root / '.git')) for p in (self.root / '.git').rglob('*'))
+        generated = self.generated_mounts()
+        self.assertFalse(generated['/workspace/.git']['read_only'])
+        self.assertTrue(generated['/workspace/.devcontainer']['read_only'])
+        for name in ('config', 'config.worktree', 'hooks', 'info', 'objects/info',
+                     'rebase-merge', 'rebase-apply', 'sequencer', 'modules', 'worktrees'):
+            mount = generated['/workspace/.git/' + name]
+            self.assertTrue(mount['read_only'])
+            self.assertEqual(mount['source'], str(self.root / '.git' / name))
+            self.assertFalse(mount['bind']['create_host_path'])
+        for name in ('HEAD', 'index', 'objects', 'refs', 'commondir', 'gitdir'):
+            self.assertNotIn('/workspace/.git/' + name, generated)
+        self.assertEqual(before, sorted(str(p.relative_to(self.root / '.git')) for p in (self.root / '.git').rglob('*')))
+        self.assertEqual(todo.read_text(), 'exec echo trusted\n')
+
+    def test_shared_writable_does_not_invent_rebase_state(self):
+        self.enable_shared_writes()
+        generated = self.generated_mounts()
+        for name in ('rebase-merge', 'rebase-apply', 'sequencer', 'config.worktree', 'commondir'):
+            self.assertNotIn('/workspace/.git/' + name, generated)
+            self.assertFalse((self.root / '.git' / name).exists())
+        self.git('status', '--short')
+
+    def test_shared_writable_startup_checks_sensitive_mounts_and_writable_git(self):
+        protected = {self.root / '.devcontainer', *mounts.git_protected_paths(self.root)}
+        def access(path, mode):
+            return not (Path(path) in protected and mode & os.W_OK)
+        def statvfs(path):
+            return SimpleNamespace(f_flag=os.ST_RDONLY if Path(path) in protected else 0)
+        with patch.object(mounts.os, 'access', side_effect=access), \
+                patch.object(mounts.os, 'statvfs', side_effect=statvfs):
+            mounts.check_shared(self.root, writable=True)
+            protected.remove(self.root / '.git/hooks')
+            with self.assertRaisesRegex(ValueError, 'hooks must be mounted read-only'):
+                mounts.check_shared(self.root, writable=True)
+            protected.add(self.root / '.git/hooks')
+            protected.add(self.root / '.git')
+            with self.assertRaisesRegex(ValueError, 'must be writable with git.shared_writable'):
+                mounts.check_shared(self.root, writable=True)
+
+    def test_shared_writable_environment_cannot_override_toml(self):
+        with self.assertRaisesRegex(ValueError, 'GIT_SHARED_WRITABLE in the environment'):
+            settings.generate(self.root, {'CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE': '1'})
+
+    def test_clone_ignores_shared_writable(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text(
+            '[git]\nisolation = "clone"\nshared_writable = true\n')
+        self.assertEqual(self.generated_mounts(), {'/workspace': {'type': 'volume', 'source': 'workspace',
+                                                               'target': '/workspace'}})
+
     def test_shared_masks_configured_paths_and_sumi(self):
         (self.root / 'vault').mkdir()
         (self.root / 'vault/secret').write_text('hidden')

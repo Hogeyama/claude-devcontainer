@@ -45,7 +45,11 @@ clone)
     echo 'Git isolation: clone' >&2
     python3 /usr/local/bin/clone-workspace.py ;;
 shared)
-    echo 'Git isolation: shared; edits reach the host; .git and .devcontainer are read-only. Commit, switch and stash on the host.' >&2
+    if [ "${CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE:-0}" = 1 ]; then
+        echo 'Git isolation: shared (shared_writable); edits and Git state changes reach the host. Only existing sensitive Git paths and .devcontainer are read-only; new Git paths are not protected.' >&2
+    else
+        echo 'Git isolation: shared; edits reach the host; .git and .devcontainer are read-only. Commit, switch and stash on the host.' >&2
+    fi
     python3 /usr/local/bin/workspace_mounts.py --check-shared ;;
 *)
     echo 'error: unknown CLAUDE_DEVCONTAINER_GIT_ISOLATION' >&2

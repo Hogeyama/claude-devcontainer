@@ -50,7 +50,7 @@ FILES = ('claude.toml', 'claude.local.toml')
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
-    'git': {'isolation': 'clone', 'shared_hidden_paths': []},
+    'git': {'isolation': 'clone', 'shared_writable': False, 'shared_hidden_paths': []},
     'agent': {'uid': 1000, 'gid': 1000},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -64,7 +64,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 # elsewhere; compose sets others, such as _PROXY_ADDRESS, in the containers.
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
-    'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
+    'GIT_ISOLATION', 'GIT_SHARED_WRITABLE', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
     'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
@@ -89,6 +89,15 @@ def _policy():
 
 
 policy = _policy()
+
+
+def git_protected_paths(root):
+    # Share the list with the container's startup check.
+    spec = importlib.util.spec_from_file_location(
+        'workspace_mounts', Path(__file__).resolve().parents[1] / 'agent/workspace_mounts.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.git_protected_paths(root)
 
 
 def type_name(default):
@@ -235,6 +244,7 @@ def variables(settings):
     secrets = settings['sumi']['secrets']
     values = {
         PREFIX + 'GIT_ISOLATION': settings['git']['isolation'],
+        PREFIX + 'GIT_SHARED_WRITABLE': '1' if settings['git']['shared_writable'] else '0',
         PREFIX + 'UID': str(settings['agent']['uid']),
         PREFIX + 'GID': str(settings['agent']['gid']),
         PREFIX + 'DIND': '1' if settings['docker']['enabled'] else '0',
@@ -344,7 +354,16 @@ def shared_mounts(settings, root):
         if not path.is_dir():
             raise ValueError(f'shared workspace mount needs a directory: {path}')
         mounts.append({'type': 'bind', 'source': str(path), 'target': '/workspace/' + name,
-                       'read_only': True, 'bind': {'create_host_path': False}})
+                       'read_only': name != '.git' or not settings['git']['shared_writable'],
+                       'bind': {'create_host_path': False}})
+    if settings['git']['shared_writable']:
+        for path in git_protected_paths(root):
+            relative = path.relative_to(root)
+            check_mount_path(root, relative)
+            if not path.is_file() and not path.is_dir():
+                raise ValueError(f'Protected Git path must be a regular file or directory: {path}')
+            mounts.append({'type': 'bind', 'source': str(path), 'target': '/workspace/' + relative.as_posix(),
+                           'read_only': True, 'bind': {'create_host_path': False}})
     candidates = {}
     secrets = settings['sumi']['secrets']
     if not secrets.is_relative_to(root):
@@ -433,9 +452,12 @@ def check_shared_mounts(root=ROOT):
     protected_targets = {m['target'] for m in protections}
     for expected in protections:
         actual = [m for m in mounts if m['target'] == expected['target']]
-        if (len(actual) != 1 or actual[0]['type'] != expected['type'] or not actual[0].get('read_only')
+        if (len(actual) != 1 or actual[0]['type'] != expected['type']
+                or actual[0].get('read_only', False) != expected['read_only']
                 or actual[0].get('source') != expected.get('source')):
             raise ValueError(f'Missing required shared protection: {expected["target"]}')
+        if not expected['read_only']:
+            continue
         for mount in mounts:
             if mount['target'] != expected['target'] and Path(mount['target']).is_relative_to(expected['target']):
                 # The generated secret masks inside .devcontainer are allowed.
