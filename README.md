@@ -100,6 +100,10 @@ Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）�
 > [!NOTE]
 > Claudeが接続できない場合は、[接続できない場合](docs/troubleshooting.md)を確認してください。
 
+#### agent-shell・AvanteなどのACPクライアントを使う場合
+
+`claude.toml`の`[acp]`で`enable = true`にすると、`claude-agent-acp`をagentのimageに入れます。`version = "0.90.0"`でバージョンも指定できます。ホストのエディタからは、`.devcontainer/claude/scripts/acp-agent.py`をACPの起動コマンドに指定してください。既存のproxy認証を使い、ツールはコンテナ内で実行します。[共通の接続方法とagent-shell・Avanteの設定例](docs/usage.md#acpクライアントから使う)を参照してください。
+
 #### VS Codeを使う場合
 
 agentが動いているコンテナには、VS Codeを接続しないでください。接続すると、コンテナで動くプロセスが、ホストでコマンドを実行したり、proxyを通らずに外部と通信したりできるようになります。agentの変更は、ホストのリポジトリへfetchし、ホストで差分を見てください。理由と、それでも接続する場合の手順は、[VS Codeで開く](docs/usage.md#vs-codeで開く)を参照してください。
@@ -139,6 +143,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | claude.aiのコネクタ | `claude.local.toml`の`proxy.connectors` | [接続先を変える](#接続先を変える) |
 | Claude Codeの設定・hook・skillなど | ホストの`~/.claude`、`extra/` | [ホストの設定を引き継ぐ](#ホストの設定を引き継ぐ) |
 | Docker（DinD） | `claude.toml`の`docker` | [Dockerを使う（DinD）](#dockerを使うdind) |
+| ACP（agent-shell・Avanteなど） | `claude.toml`の`acp` | [ACPクライアントから使う](docs/usage.md#acpクライアントから使う) |
 | nixのdev shell | `claude.toml`の`nix` | [nixのdev shellを使う](#nixのdev-shellを使う) |
 | シークレットのマスク | `claude.toml`の`sumi`、ホストの`sumi/secrets.txt` | [シークレットをマスクする](#シークレットをマスクする) |
 | agentのUID・ネットワーク | `claude.local.toml`の`agent`、`subnets` | [UIDとネットワークを変える](#uidとネットワークを変える) |
@@ -165,7 +170,7 @@ enabled = false
 
 配列も置き換えです。`claude.local.toml`に`docker.images`を書くと、`claude.toml`の一覧には足されず、その一覧だけになります。`proxy.hosts`は、同じホストの設定を丸ごと置き換えます。
 
-設定を変えたら、[終了する](#5-終了する)の手順で環境を停止し、`devcontainer up`で起動し直してください。`agent`、`docker.enabled`、`nix.enabled`、`sumi.enabled`、`tode.enabled`、`tode.extensions`を変えたときは、リポジトリのルートで次を実行してコンテナも作り直してください。
+設定を変えたら、[終了する](#5-終了する)の手順で環境を停止し、`devcontainer up`で起動し直してください。`agent`、`acp`、`docker.enabled`、`nix.enabled`、`sumi.enabled`、`tode.enabled`、`tode.extensions`を変えたときは、リポジトリのルートで次を実行してコンテナも作り直してください。
 
 ```sh
 devcontainer up --remove-existing-container

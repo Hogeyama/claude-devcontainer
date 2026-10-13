@@ -8,7 +8,7 @@
 # here as a whole.
 #
 # After a change, stop the environment and run `devcontainer up` again; for
-# agent.*, docker.enabled, nix.enabled, sumi.enabled and tode.*, with
+# agent.*, acp.*, docker.enabled, nix.enabled, sumi.enabled and tode.*, with
 # --remove-existing-container. Relative paths are from this directory, and ~ is
 # the host's home.
 
@@ -16,6 +16,13 @@
 # Owner of the agent's volumes; match the host UID/GID for dependency overlays.
 # uid = 1000
 # gid = 1000
+
+[acp]
+# Install claude-agent-acp for host ACP clients (agent-shell, Avante, etc.).
+# Connect through scripts/acp-agent.py. Changes need an image rebuild.
+# enable = false
+# Exact package version; tags such as "latest" and ranges are not accepted.
+# version = "0.90.0"
 
 [docker]
 # Run Docker in DinD for the agent.

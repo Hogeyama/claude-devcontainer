@@ -47,6 +47,7 @@ class SettingsTest(unittest.TestCase):
     def test_defaults(self):
         loaded = self.load()
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000})
+        self.assertEqual(loaded['acp'], {'enable': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
@@ -76,6 +77,11 @@ class SettingsTest(unittest.TestCase):
             ('[agent]\nuser = 1\n', r'claude.local.toml: agent.user: unknown setting'),
             ('[dind]\nenabled = true\n', r'claude.local.toml: unknown table \[dind\]'),
             ('[docker]\nenabled = 1\n', r'docker.enabled: expected true or false'),
+            ('[acp]\nenable = 1\n', r'acp.enable: expected true or false'),
+            ('[acp]\nversion = 90\n', r'acp.version: expected a string'),
+            ('[acp]\nversion = "latest"\n', r'acp.version: expected an exact version'),
+            ('[acp]\nversion = "^0.90.0"\n', r'acp.version: expected an exact version'),
+            ('[acp]\nversion = "0.90.0 --force"\n', r'acp.version: expected an exact version'),
             ('[agent]\nuid = true\n', r'agent.uid: expected an integer'),
             ('[agent]\nuid = 0\n', r'agent.uid: must be positive'),
             ('[docker]\nimages = "busybox"\n', r'docker.images: expected a list'),
@@ -173,6 +179,7 @@ dind = "10.99.1"
         out = self.generate()
         self.assertEqual({k: v for k, v in self.env().items() if '_NODE_' not in k}, {
             'CLAUDE_DEVCONTAINER_UID': "'1001'", 'CLAUDE_DEVCONTAINER_GID': "'1000'",
+            'CLAUDE_DEVCONTAINER_ACP': "'0'", 'CLAUDE_DEVCONTAINER_ACP_VERSION': "'0.90.0'",
             'CLAUDE_DEVCONTAINER_DIND': "'1'", 'CLAUDE_DEVCONTAINER_NIX': "'0'",
             'CLAUDE_DEVCONTAINER_NIX_REF': "'HEAD'",
             # Single quotes keep compose from interpolating $.

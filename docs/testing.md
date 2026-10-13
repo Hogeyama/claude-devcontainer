@@ -1,6 +1,17 @@
 # テストと動作確認の結果
 
-2026-10-12にagentの中（DinD）で行った、デモアプリのテストとcompose stackの確認結果です。
+デモアプリとACP接続の確認結果です。各節に検証範囲を記載しています。
+
+## ACP接続（2026-10-14）
+
+- `python3 -m unittest discover -s tests -p acp_agent_test.py -v`: 10件成功。双方向stdio通信、パス変換、ホストのファイル・ターミナル要求の拒否、拡張メタデータの除去、キャンセル、EOFによる終了などを確認しました。
+- 起動済みのagentに`claude-agent-acp 0.90.0`を一時配置し、ホストの中継を通して初期化、セッション作成、実際の推論を確認しました。既存のClaude Code 2.1.295とproxy認証を使い、Bashで`printf ACP_TOOL_OK; pwd`を実行して`ACP_TOOL_OK/workspace`を受け取り、応答が完了しました。
+- Avanteの公式`lua/avante/libs/acp_client.lua`をNeovimのheadlessモードで実行し、中継経由の初期化・セッション作成・終了を確認しました。ログ・設定モジュールはテスト用のものを使っています。Avanteの画面操作とEmacs agent-shellの実機操作は未確認です。agent-shellの設定例は公式の起動・認証処理に合わせています。
+- image全体の再ビルドはこの確認に含みません。導入時はagentのimageを作り直してください。
+
+ACPの任意インストール・バージョン指定は、settingsとComposeのテスト29件で既定値・有効化・ホスト側の上書き・ビルド引数を確認しました。DinDの起動処理は5件のテストで確認し、60秒を超えるビルド後のagent再作成とDinDの再作成に追従するケースを追加しています。
+
+以下は2026-10-12にagentの中（DinD）で行った、デモアプリの確認結果です。
 
 ## テスト
 

@@ -109,6 +109,23 @@ class SettingsIntegrationTest(unittest.TestCase):
                 self.assertEqual(services['proxy']['environment'][name], expected)
                 self.assertNotIn(name, services['agent']['environment'])
 
+    def test_acp_opt_in_version_and_host_override_reach_build(self):
+        for workspace, local, enabled, version in [
+            ('', '', '0', '0.90.0'),
+            ('enable = true', '', '1', '0.90.0'),
+            ('enable = true\nversion = "0.89.1"', '', '1', '0.89.1'),
+            ('enable = true', 'enable = false', '0', '0.90.0'),
+            ('enable = true', 'version = "1.2.3-beta.1"', '1', '1.2.3-beta.1'),
+        ]:
+            with self.subTest(workspace=workspace, local=local):
+                self.write('claude.toml', '[acp]\n' + workspace)
+                self.write('claude.local.toml', '[acp]\n' + local)
+                self.initialize()
+                agent = self.compose_config()['services']['agent']
+                self.assertEqual(agent['build']['args']['INSTALL_ACP'], enabled)
+                self.assertEqual(agent['build']['args']['ACP_VERSION'], version)
+                self.assertNotIn('CLAUDE_DEVCONTAINER_ACP', agent['environment'])
+
     def test_settings_outside_the_files_stop_initialization(self):
         self.env[FLAG] = '1'
         failed = self.initialize(check=False)

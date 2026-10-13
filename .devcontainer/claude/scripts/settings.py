@@ -48,6 +48,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'agent': {'uid': 1000, 'gid': 1000},
+    'acp': {'enable': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
@@ -61,7 +62,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'TODE', 'TODE_EXTENSIONS', 'ACP', 'ACP_VERSION', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -71,6 +72,10 @@ RESERVED_ENV_PREFIXES = ('TESTCONTAINERS_', PREFIX)
 CONNECTOR = re.compile(r'mcp(srv|rs)_[A-Za-z0-9]+')
 # A Marketplace extension ID, publisher.name, optionally @version.
 EXTENSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(@[0-9][0-9A-Za-z.+-]*)?')
+# Exact package versions only, including prereleases; no moving tags or ranges.
+ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
+                         r'(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+                         r'(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?')
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
 # rootlesskit in DinD maps these subordinate IDs besides the agent's UID.
 SUBORDINATE_IDS = range(100000, 165536)
@@ -135,6 +140,8 @@ def check(data, source):
                 raise ValueError(f'{where}: expected {type_name(default)}')
             if isinstance(value, str) and ('\n' in value or "'" in value):
                 raise ValueError(f"{where}: newlines and ' are not allowed")
+    if 'version' in data.get('acp', {}) and not ACP_VERSION.fullmatch(data['acp']['version']):
+        raise ValueError(f'{source}: acp.version: expected an exact version, such as "0.90.0"')
     agent, docker, tode, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'tode', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
@@ -226,6 +233,8 @@ def variables(settings):
     values = {
         PREFIX + 'UID': str(settings['agent']['uid']),
         PREFIX + 'GID': str(settings['agent']['gid']),
+        PREFIX + 'ACP': '1' if settings['acp']['enable'] else '0',
+        PREFIX + 'ACP_VERSION': settings['acp']['version'],
         PREFIX + 'DIND': '1' if settings['docker']['enabled'] else '0',
         PREFIX + 'NIX': '1' if settings['nix']['enabled'] else '0',
         PREFIX + 'NIX_REF': settings['nix']['ref'],
