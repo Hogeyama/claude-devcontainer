@@ -8,36 +8,36 @@ import re
 import sys
 import subprocess
 
-
-# Protect existing execution/configuration inputs without inventing Git state.
-# In particular, creating empty rebase directories would make Git think a
-# rebase is in progress. Absent paths remain unprotected in writable mode.
-GIT_PROTECTED_PATHS = (
-    'config', 'config.worktree', 'hooks', 'info', 'objects/info',
-    'commondir', 'gitdir', 'worktrees', 'modules',
-    'rebase-merge', 'rebase-apply', 'sequencer',
-)
+# The modes that mount the host's working tree as /workspace.
+SHARED_MODES = ('shared', 'worktree')
+# Where worktree mode shows the agent the host's Git, read-only.
+HOST_GIT = Path('/run/host/git')
+MOUNTINFO = Path('/proc/self/mountinfo')
 
 
-def git_protected_paths(workspace):
-    git = Path(workspace) / '.git'
-    return [git / name for name in GIT_PROTECTED_PATHS if (git / name).exists()]
+def mount_points(mountinfo=MOUNTINFO):
+    """{target: (root within the source, filesystem type)} of this mount namespace."""
+    points = {}
+    for line in Path(mountinfo).read_text().splitlines():
+        fields = line.split()
+        target = Path(re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), fields[4]))
+        points[target] = (fields[3], line.split(' - ', 1)[1].split()[0])
+    return points
 
 
-def dependency_mounts(workspace, mountinfo=Path('/proc/self/mountinfo'), overlay_only=False):
+def dependency_mounts(workspace, mountinfo=MOUNTINFO, overlay_only=False):
     """Actual node_modules mounts, never ordinary directories or their contents."""
     mounts = []
-    for line in Path(mountinfo).read_text().splitlines():
-        if overlay_only and (line.split(' - ', 1)[1].split()[0] != 'overlay' or line.split()[3] != '/'):
+    for target, (root, kind) in mount_points(mountinfo).items():
+        if overlay_only and (kind != 'overlay' or root != '/'):
             continue
-        target = Path(re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), line.split()[4]))
         if target.name == 'node_modules' and target.is_relative_to(workspace):
             mounts.append(target)
     return mounts
 
 
-def prepare(workspace, uid, gid, isolation='clone'):
-    if isolation not in ('clone', 'shared'):
+def prepare(workspace, uid, gid, isolation='clone', mountinfo=MOUNTINFO):
+    if isolation not in ('clone', *SHARED_MODES):
         raise ValueError(f'Unknown git isolation: {isolation}')
     workspace = Path(workspace)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -57,7 +57,18 @@ def prepare(workspace, uid, gid, isolation='clone'):
     try:
         if isolation == 'clone':
             own(root, workspace)
-        for mount in dependency_mounts(workspace, overlay_only=isolation == 'shared'):
+        if isolation == 'worktree':
+            # Docker creates the agent's Git volume root-owned. Without that
+            # mount, .git would be the host's, bound read-write beneath it.
+            if Path(workspace / '.git') not in mount_points(mountinfo):
+                raise ValueError(f'{workspace / ".git"} is not the agent-git volume; '
+                                 'regenerate settings and recreate the container.')
+            git = os.open('.git', flags, dir_fd=root)
+            try:
+                own(git, workspace / '.git')
+            finally:
+                os.close(git)
+        for mount in dependency_mounts(workspace, mountinfo, overlay_only=isolation in SHARED_MODES):
             current = os.dup(root)
             path = workspace
             try:
@@ -76,30 +87,31 @@ def prepare(workspace, uid, gid, isolation='clone'):
         os.close(root)
 
 
-def check_shared(workspace, writable=False):
+def check_shared(workspace, isolation='shared', mountinfo=MOUNTINFO):
+    """As node, before Git runs: the host's tree is usable and its protections are in place."""
     workspace = Path(workspace)
     if not os.access(workspace, os.R_OK | os.W_OK | os.X_OK):
         raise ValueError(f'{workspace} is not writable to {os.getuid()}:{os.getgid()}; '
                          'set agent.uid and agent.gid in claude.local.toml to the host owner.')
-    protected = [workspace / '.devcontainer']
-    protected += git_protected_paths(workspace) if writable else [workspace / '.git']
-    for path in protected:
+    host_git = HOST_GIT if isolation == 'worktree' else workspace / '.git'
+    for path in (workspace / '.devcontainer', host_git):
         if not os.statvfs(path).f_flag & os.ST_RDONLY or os.access(path, os.W_OK):
-            raise ValueError(f'{path} must be mounted read-only in shared mode; regenerate settings and recreate the container.')
-    paths = [workspace / '.devcontainer', workspace / '.git', workspace / '.git/objects', workspace / '.git/refs']
-    paths += [workspace / '.git' / name for name in ('HEAD', 'config', 'index')
-              if (workspace / '.git' / name).exists()]
+            raise ValueError(f'{path} must be mounted read-only in {isolation} mode; regenerate settings and recreate the container.')
+    paths = [workspace / '.devcontainer', host_git, host_git / 'objects', host_git / 'refs']
+    paths += [host_git / name for name in ('HEAD', 'config', 'index') if (host_git / name).exists()]
     for path in paths:
         access = os.R_OK | (os.X_OK if path.is_dir() else 0)
         if not os.access(path, access):
             raise ValueError(f'{path} is not accessible to {os.getuid()}:{os.getgid()}; '
                              'set agent.uid and agent.gid in claude.local.toml to the host owner.')
-    if writable:
-        for name in ('.git', '.git/objects', '.git/refs'):
-            path = workspace / name
-            if os.statvfs(path).f_flag & os.ST_RDONLY or not os.access(path, os.W_OK | os.X_OK):
-                raise ValueError(f'{path} must be writable with git.shared_writable; '
-                                 'check agent.uid and agent.gid, regenerate settings and recreate the container.')
+    if isolation == 'worktree':
+        git = workspace / '.git'
+        if (git not in mount_points(mountinfo) or os.statvfs(git).f_flag & os.ST_RDONLY
+                or not os.access(git, os.R_OK | os.W_OK | os.X_OK)):
+            raise ValueError(f'{git} must be the writable agent-git volume in worktree mode; '
+                             'check agent.uid and agent.gid, regenerate settings and recreate the container.')
+        # Git is usable once clone-workspace.py has initialized the volume.
+        return
     result = subprocess.run(['git', '-C', str(workspace), 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     if result.returncode or result.stdout.strip() != str(workspace):
         raise ValueError(f'shared Git is unavailable: {result.stderr.strip()}; check agent.uid and agent.gid.')
@@ -108,7 +120,7 @@ def check_shared(workspace, writable=False):
 if __name__ == '__main__':
     try:
         if sys.argv[1:] == ['--check-shared']:
-            check_shared('/workspace', os.environ.get('CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE', '0') == '1')
+            check_shared('/workspace', os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'shared'))
         else:
             if os.geteuid() != 0:
                 sys.exit('error: mount preparation is an entrypoint-only root operation.')

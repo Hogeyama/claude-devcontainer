@@ -14,15 +14,14 @@
 
 [git]
 # "clone": independent workspace volume (default).
-# "shared": edit the host's working tree; .git and .devcontainer are read-only by default.
-# Commit, switch and stash on the host; use clone to develop .devcontainer.
+# "shared": edit the host's working tree; .git and .devcontainer are read-only.
+# Commit, switch and stash on the host.
+# "worktree": edit the host's working tree with the agent's own .git in a
+# volume; the host's .git is read-only at /run/host/git. The agent commits
+# there, and the host reviews with `git fetch agent` and moves HEAD and the
+# index with `scripts/git-agent.py accept COMMIT`.
+# Use clone to develop .devcontainer. Recreate the container after changing it.
 # isolation = "clone"
-# Allow add/commit/switch/stash in shared mode (no effect in clone).
-# Only existing sensitive Git paths (config, hooks, rebase state, etc.) stay
-# read-only. New paths, custom hooks/config includes and malicious Git history
-# are not contained by this protection. .devcontainer stays read-only.
-# Set in claude.local.toml and recreate the container after changing it.
-# shared_writable = false
 # Existing files/directories to hide in shared mode, relative to the repository
 # root. Default: [] (no paths). In-repository sumi.secrets is also hidden.
 # Set these paths in claude.local.toml. Recreate after changing this.
