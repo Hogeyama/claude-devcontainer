@@ -1,0 +1,179 @@
+{
+  "phases": {
+    "control": {
+      "browser": {
+        "passed": true,
+        "error": null,
+        "mode": "control",
+        "events": [
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=11648",
+          "navigation-completed success=True status=Unknown",
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=11648",
+          "new-window-contained",
+          "navigation-completed success=True status=Unknown",
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=11648",
+          "new-window-contained",
+          "navigation-completed success=True status=Unknown",
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=11648",
+          "new-window-contained",
+          "navigation-completed success=True status=Unknown",
+          "navigation-completed success=True status=Unknown",
+          "navigation-blocked",
+          "navigation-completed success=False status=OperationCanceled"
+        ],
+        "dpi": 144,
+        "perMonitorV2": true
+      },
+      "receiverEvents": [
+        {
+          "method": "POST",
+          "path": "/form",
+          "body": "marker=DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "GET",
+          "path": "/favicon.ico",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "GET",
+          "path": "/link",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "GET",
+          "path": "/favicon.ico",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "GET",
+          "path": "/redirected",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "GET",
+          "path": "/favicon.ico",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "POST",
+          "path": "/fetch",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "POST",
+          "path": "/beacon",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "POST",
+          "path": "/fetch",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "POST",
+          "path": "/auto-beacon",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "GET",
+          "path": "/image?marker=DEMO_ONLY",
+          "body": "",
+          "origin": null
+        }
+      ],
+      "count": 11
+    },
+    "restricted": {
+      "browser": {
+        "passed": true,
+        "error": null,
+        "mode": "restricted",
+        "events": [
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=19904",
+          "navigation-completed success=True status=Unknown",
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=19904",
+          "new-window-contained",
+          "navigation-completed success=False status=Unknown",
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=19904",
+          "new-window-contained",
+          "navigation-completed success=False status=Unknown",
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=19904",
+          "new-window-contained",
+          "navigation-completed success=False status=Unknown",
+          "navigation-completed success=True status=Unknown",
+          "navigation-blocked",
+          "navigation-completed success=False status=OperationCanceled"
+        ],
+        "dpi": 144,
+        "perMonitorV2": true
+      },
+      "receiverEvents": [],
+      "count": 0
+    },
+    "ide-control": {
+      "browser": {
+        "passed": true,
+        "error": null,
+        "mode": "ide-control",
+        "events": [
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=13084",
+          "navigation-completed success=True status=Unknown",
+          "markdown-preview-verified",
+          "terminal-command-sent",
+          "extension-webview-post-triggered"
+        ],
+        "dpi": 144,
+        "perMonitorV2": true
+      },
+      "receiverEvents": [
+        {
+          "method": "POST",
+          "path": "/webview",
+          "body": "DEMO_ONLY",
+          "origin": "http://ide.localhost:8000"
+        }
+      ],
+      "count": 1
+    },
+    "ide-restricted": {
+      "browser": {
+        "passed": true,
+        "error": null,
+        "mode": "ide-restricted",
+        "events": [
+          "dpi=144 perMonitorV2=True",
+          "ready runtime=155.0.4283.45 browserPid=1800",
+          "navigation-completed success=True status=Unknown",
+          "markdown-preview-verified",
+          "terminal-command-sent",
+          "extension-webview-post-triggered"
+        ],
+        "dpi": 144,
+        "perMonitorV2": true
+      },
+      "receiverEvents": [],
+      "count": 0
+    }
+  },
+  "passed": true
+}

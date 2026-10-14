@@ -1,0 +1,53 @@
+name: browser-ide-demo
+services:
+  ide:
+    image: ${AGENT_IMAGE:-claude-devcontainer_devcontainer-agent:latest}
+    user: "1000:1000"
+    entrypoint: ["/bin/sh", "/demo/ide.sh"]
+    environment:
+      HOME: /tmp/home
+    volumes:
+      - .:/demo:ro
+      - ./workspace:/workspace
+    tmpfs:
+      - /tmp:mode=1777
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [backend]
+  preview:
+    image: ${AGENT_IMAGE:-claude-devcontainer_devcontainer-agent:latest}
+    user: "1000:1000"
+    entrypoint: ["python3", "/demo/preview.py"]
+    volumes: [".:/demo:ro"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [backend]
+  receiver:
+    image: ${AGENT_IMAGE:-claude-devcontainer_devcontainer-agent:latest}
+    user: "1000:1000"
+    entrypoint: ["python3", "/demo/receiver.py"]
+    volumes: [".:/demo:ro"]
+    tmpfs: [/tmp]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [backend]
+  proxy:
+    image: mitmproxy/mitmproxy:11
+    entrypoint: ["mitmdump", "--listen-port", "8080", "--set", "block_global=false", "--set", "connection_strategy=lazy", "-s", "/demo/proxy.py"]
+    environment:
+      DEMO_CONTROL: ${DEMO_CONTROL:-0}
+    volumes: [".:/demo:ro"]
+    tmpfs: [/root/.mitmproxy]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "127.0.0.1:${DEMO_PROXY_PORT:-18081}:8080"
+    networks: [backend, ingress]
+networks:
+  backend:
+    internal: true
+  ingress: {}

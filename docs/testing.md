@@ -64,3 +64,48 @@ frontendの実行時に`node_modules are out of sync with your lockfile`のWARN�
 共有ファイルへの直接書き込みではなく、コンテナ内の拡張機能からVS Codeを通じてホストのユーザー権限でPythonを実行できました。コマンド送信後に、人間がターミナルでEnterを押す操作は行っていません。
 
 この試行で確認したのは、`node`権限で配置した検証用拡張機能からの実行です。既存の第三者拡張機能の書き換え、Restricted Modeの回避、Windows上での実行は試していません。
+
+## ローカルブラウザからcode-serverを使う境界検証
+
+2026-10-15（JST）に、[browser-ideデモ](../demos/browser-ide/README.md)をLinuxのheadless Chromiumで検証しました。noVNCは使わず、ブラウザをbubblewrapのnetwork/mount/PID namespace内で起動し、固定宛先のUnix socket中継経由でmitmproxyに接続しています。[実測結果](../demos/browser-ide/evidence/linux-headless.json)を保存しています。
+
+| 観測点 | 結果 |
+| --- | --- |
+| Markdownプレビュー・統合ターミナル | 表示・コンテナ内のNode実行に成功 |
+| リモート拡張からの`newLocal` | コマンドが存在せず失敗 |
+| ホストだけに作った検証ファイルの読み取り | ENOENT |
+| フォーム、fetch、beacon、画像、別タブ、リダイレクト、webviewからの通信 | receiver許可時9件、拒否時0件 |
+| ブラウザとホストのnetwork namespace | 異なる |
+| 直接TCP、UDP DNS、IPv6 UDPの検証用宛先への接続・送信 | 失敗 |
+| 隔離内の`xdg-open` | 拒否用プログラムが終了コード126を返す |
+| Chromium自身のsandbox | namespaceとSeccomp-BPFが有効 |
+
+これはLinux側の上記経路についての動作試験です。外部プロトコル全種類やブラウザの脆弱性を網羅した検証ではありません。このheadless試験自体は日本語IMEの検証を含みません。Windowsで別途行った検証は次節に記録しています。元のデスクトップVS Codeの実験結果が無効になったこととは扱いません。
+
+## Windows標準機能でのネイティブブラウザ検証
+
+2026-10-15（JST）に、Windows 11 Home（10.0.26200）＋NixOS on WSLで、
+[専用WebView2ブラウザ](../demos/browser-ide/windows/README.md)をAppContainer内で動かしました。
+Sandboxie、追加カーネルドライバ、noVNCは使用していません。Windows IMEについては
+利用者から候補位置・インライン変換・再変換が「普段どおり動く」との実操作結果を得ています。
+
+- WebView2 runtimeは155.0.4283.45、SDKは1.0.4258.31です。
+- ブラウザ本体・GPU・ネットワーク・renderer等の子プロセスで同一のAppContainer SIDを確認しました。
+- ネットワークcapabilityは付けず、同SIDのloopback例外と四つの永続WFP遮断ルールを設定しました。
+  起動時にSIDと遮断条件を照合し、proxyのTCP `127.0.0.1:18081`だけを通します。
+- 通常実行では接続できるTCP/UDP待受に対し、隔離内からはproxy以外の受信が0件でした。
+  UDPの送信APIは成功を返す場合があるため、受信側の記録も検査しています。
+- ホストだけの無害な検証ファイルの読み取り・書き込みは`UnauthorizedAccessException`でした。
+- 一時登録した外部プロトコルは通常実行でホスト側マーカーを作成し、隔離内からの試行では作成されませんでした。
+  ブラウザ自身でも外部スキームへのナビゲーションを取り消します。全プロトコルを網羅した結果ではありません。
+- プレビューページのフォームPOST・fetch・beacon・画像・別ウィンドウ・リダイレクトは、
+  receiver許可時11件（faviconを含む）、拒否時0件でした。フォームのPOST本文も検査しました。
+- 実際のリモート拡張webviewのPOSTは許可時1件、拒否時0件でした。
+  Windows側ブラウザでMarkdownプレビューと統合ターミナルのNode実行も確認しました。
+- 最初の試作は96 DPI扱いで拡大表示がぼやけました。Per-Monitor V2に修正し、144 DPIを記録しました。
+
+証跡は[ブラウザ試験](../demos/browser-ide/evidence/windows-browser.json)と
+[OS境界試験](../demos/browser-ide/evidence/windows-os-boundary.json)です。
+これは実測した経路のデモであり、全Windowsサービスの代理通信やCOMインターフェース、
+ブラウザ・OSの脆弱性を網羅する保証ではありません。元のデスクトップVS Codeでの
+ホスト実行結果を取り消すものでもありません。DebianのFcitx5／IBusによるGUI実機検証は未完了です。

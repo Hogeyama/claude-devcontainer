@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-14T15:09:23.714Z",
+  "phases": {
+    "control": {
+      "receiverEvents": [
+        {
+          "method": "POST",
+          "path": "/form",
+          "body": "marker=DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "GET",
+          "path": "/link",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "GET",
+          "path": "/redirected",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "POST",
+          "path": "/fetch",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "POST",
+          "path": "/beacon",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "GET",
+          "path": "/image?marker=DEMO_ONLY",
+          "body": "",
+          "origin": null
+        },
+        {
+          "method": "POST",
+          "path": "/fetch",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "POST",
+          "path": "/auto-beacon",
+          "body": "DEMO_ONLY",
+          "origin": "http://preview.localhost:8001"
+        },
+        {
+          "method": "POST",
+          "path": "/webview",
+          "body": "DEMO_ONLY",
+          "origin": "http://ide.localhost:8000"
+        }
+      ],
+      "count": 9
+    },
+    "restricted": {
+      "receiverEvents": [],
+      "count": 0
+    }
+  },
+  "limitations": [
+    "IME needs native manual verification; automation is not an IME test."
+  ],
+  "markdownPreview": true,
+  "terminal": "Hello from the isolated code-server terminal",
+  "chromiumSandbox": "Sandbox Status\nLayer 1 Sandbox\tNamespace\nPID namespaces\tYes\nNetwork namespaces\tYes\nSeccomp-BPF sandbox\tYes\nSeccomp-BPF sandbox supports TSYNC\tYes\nPtrace Protection with Yama LSM (Broker)\tYes\nPtrace Protection with Yama LSM (Non-broker)\tNo\n\nYou are adequately sandboxed.",
+  "remoteExtension": {
+    "uiKind": 2,
+    "remoteName": "ide.localhost:8000",
+    "newLocalRegistered": false,
+    "newLocal": "Error: command 'workbench.action.terminal.newLocal' not found",
+    "localFile": "EntryNotFound (FileSystemError): Error: ENOENT: no such file or directory, open '/tmp/browser-ide-host-sentinel'"
+  },
+  "osBoundary": {
+    "network_namespace": "net:[4026532866]",
+    "session_bus_present": false,
+    "host_home_present": false,
+    "host_sentinel_present": false,
+    "proxy": "connected",
+    "host_loopback": "ConnectionRefusedError",
+    "direct_external": "OSError",
+    "direct_dns": "OSError",
+    "udp_dns": "OSError",
+    "ipv6_direct": "OSError",
+    "external_opener_exit": 126
+  },
+  "launcher": {
+    "host_network_namespace": "net:[4026531840]",
+    "runtime": "/tmp/browser-ide-local-headless",
+    "test_control_port": 19222,
+    "headless": true,
+    "chromium": "/nix/store/agamzskapmh5018k98bqfwrrb738bgpv-chromium-153.0.8010.52/bin/chromium"
+  },
+  "passed": true
+}
