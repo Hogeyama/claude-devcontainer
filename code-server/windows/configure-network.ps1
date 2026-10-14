@@ -9,7 +9,7 @@
 # exemption goes before the filters are removed; on failure the filters stay.
 param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
-# prepare.ps1 and launch.ps1 read the status file; SUCCESS lets launch.ps1 run.
+# launch.ps1 runs only when this file says SUCCESS.
 $status = Join-Path $PSScriptRoot 'network-setup.status'
 Start-Transcript -Path (Join-Path $PSScriptRoot 'network-setup.log') -Force | Out-Null
 try {
