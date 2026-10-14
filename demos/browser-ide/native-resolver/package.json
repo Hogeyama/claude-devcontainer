@@ -1,0 +1,1 @@
+{"name":"native-resolver","publisher":"local-demo","version":"0.0.1","engines":{"vscode":"^1.100.0"},"main":"./extension.js","activationEvents":["onResolveRemoteAuthority:isolated-demo"],"extensionKind":["ui"],"enabledApiProposals":["resolvers"]}

@@ -7,6 +7,8 @@ ROUTES = {
     ('ide.localhost', 8000): ('ide', 8080),
     ('preview.localhost', 8001): ('preview', 8001),
 }
+if os.environ.get('DEMO_NATIVE') == '1':
+    ROUTES[('native.localhost', 8002)] = ('native', 8002)
 if os.environ.get('DEMO_CONTROL') == '1':
     # Positive control: only a disposable local receiver, never the Internet.
     ROUTES[('receiver.localhost', 9000)] = ('receiver', 9000)
