@@ -162,23 +162,33 @@ RUN if [ -n "$TODE_EXTENSIONS" ]; then \
         printf '%s\n' "$listed" | grep -qixF "${id%%@*}" || { echo "error: tode.extensions: $id was not installed" >&2; exit 1; }; \
       done; \
     fi
-# codeServer.extensions uses the same build-time Marketplace as tode, with
-# separate extension/user-data directories. No runtime egress is added.
+# codeServer.extensions in claude.toml, space-separated, each optionally
+# @version. Installed like tode.extensions, at build time from the Marketplace
+# (the agent has no runtime access to it), but into code-server's own
+# directories. The build fails if an extension is not installed afterwards,
+# compared as publisher.name, or as publisher.name@version when pinned.
 ARG CODE_SERVER_EXTENSIONS=""
 RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
       data=/home/node/.local/share/code-server \
+      && gallery='{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","cacheUrl":"https://vscode.blob.core.windows.net/gallery/index","controlUrl":""}' \
+      && code_server() { \
+        HOME=/home/node EXTENSIONS_GALLERY="$gallery" runuser -u node -- /opt/code-server/bin/code-server \
+          --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" "$@"; \
+      } \
       && install -d -o node -g node "$data/extensions" \
       && set -- \
       && for id in $CODE_SERVER_EXTENSIONS; do set -- "$@" --install-extension "$id"; done \
-      && HOME=/home/node EXTENSIONS_GALLERY='{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","cacheUrl":"https://vscode.blob.core.windows.net/gallery/index","controlUrl":""}' \
-        runuser -u node -- /opt/code-server/bin/code-server \
-        --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" "$@" \
-      && listed=$(HOME=/home/node runuser -u node -- /opt/code-server/bin/code-server \
-        --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" --list-extensions --show-versions) \
+      && code_server "$@" \
+      && installed=$(code_server --list-extensions --show-versions) \
       && for id in $CODE_SERVER_EXTENSIONS; do \
-        case "$id" in *@*) expected="$id"; actual="$listed" ;; \
-          *) expected="$id"; actual=$(printf '%s\n' "$listed" | cut -d@ -f1) ;; esac \
-        && printf '%s\n' "$actual" | grep -qixF "$expected" || { echo "error: codeServer.extensions: $id was not installed" >&2; exit 1; }; \
+        case "$id" in \
+          *@*) listed="$installed" ;; \
+          *) listed=$(printf '%s\n' "$installed" | cut -d@ -f1) ;; \
+        esac \
+        && if ! printf '%s\n' "$listed" | grep -qixF "$id"; then \
+          echo "error: codeServer.extensions: $id was not installed" >&2; \
+          exit 1; \
+        fi; \
       done; \
     fi
 # The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
