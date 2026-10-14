@@ -21,6 +21,9 @@ if [ "${1:-}" != --as-node ]; then
         "$0" --as-node "$@"
 fi
 shift
+if [ "${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}" = 1 ]; then
+    /usr/local/bin/start-code-server.sh </dev/null >>/run/claude-devcontainer/code-server.log 2>&1 &
+fi
 if [ "${CLAUDE_DEVCONTAINER_DIND:-0}" != 1 ]; then
     exec "$@"
 fi

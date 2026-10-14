@@ -1,5 +1,6 @@
 # tode.enabled in claude.toml: 1 installs terminal-code (tode) below.
 ARG INSTALL_TODE=0
+ARG INSTALL_CODE_SERVER=${INSTALL_TODE}
 # sumi masks secrets in what Claude's tools return (sumi.enabled in
 # claude.toml). Its broker and the agent must run the same version.
 FROM scratch AS sumi-amd64
@@ -21,16 +22,23 @@ ENTRYPOINT ["/sumi", "serve"]
 FROM scratch AS tode-amd64
 ADD --checksum=sha256:a8aae8c31c649781ee4fb3b174da08163830cc10e1dcee58465cc184a152cb25 \
     https://tode-releases.zenbu-labs.workers.dev/dl/stable/v0.4.2/tode-linux-x64.tar.gz /tode.tar.gz
-ADD --checksum=sha256:a38d26f4cb81f768feddff79e2937fd3f39c83d3da8be3da7225e1087e62e4ed \
-    https://github.com/coder/code-server/releases/download/v4.132.0/code-server-4.132.0-linux-amd64.tar.gz /code-server.tar.gz
+
 FROM scratch AS tode-arm64
 ADD --checksum=sha256:ab59e0aab3e1d171288699c3fbba508b5cf5f214f0c0db2ec42e35baf5396156 \
     https://tode-releases.zenbu-labs.workers.dev/dl/stable/v0.4.2/tode-linux-arm64.tar.gz /tode.tar.gz
+
+FROM scratch AS code-server-amd64
+ADD --checksum=sha256:a38d26f4cb81f768feddff79e2937fd3f39c83d3da8be3da7225e1087e62e4ed \
+    https://github.com/coder/code-server/releases/download/v4.132.0/code-server-4.132.0-linux-amd64.tar.gz /code-server.tar.gz
+FROM scratch AS code-server-arm64
 ADD --checksum=sha256:ade569a677d1c04ee66ef153382b7e15bf261f955407663c7ddc6b87f9ee29fc \
     https://github.com/coder/code-server/releases/download/v4.132.0/code-server-4.132.0-linux-arm64.tar.gz /code-server.tar.gz
 FROM tode-${TARGETARCH} AS tode-1
 FROM scratch AS tode-0
 FROM tode-${INSTALL_TODE} AS tode
+FROM code-server-${TARGETARCH} AS code-server-1
+FROM scratch AS code-server-0
+FROM code-server-${INSTALL_CODE_SERVER} AS code-server
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
 # Only agent-setup.sh from the workspace's .devcontainer/, if there is one. A
 # mount of the whole directory would rerun the setup whenever any file in it
@@ -77,6 +85,20 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
+# code-server is independently selectable; enabling it does not install Electron/tode.
+RUN --mount=type=bind,from=code-server,target=/tmp/code-server \
+    if [ -f /tmp/code-server/code-server.tar.gz ]; then \
+      mkdir -p /opt/code-server \
+      && tar -xzf /tmp/code-server/code-server.tar.gz -C /opt/code-server --strip-components 1 --no-same-owner \
+      && chmod -R u-s,g-s,go-w /opt/code-server \
+      && test -x /opt/code-server/bin/code-server; \
+    fi
+RUN install -d -o node -g node /home/node/.local/share/code-server \
+    /home/node/.local/share/code-server/extensions /home/node/.local/share/code-server/user-data \
+    /home/node/.local/share/code-server/user-data/User \
+    /home/node/.local/share/code-server/user-data/Machine \
+    && printf '%s\n' '{"terminal.integrated.profiles.linux":{"bash":{"path":"/bin/bash"}},"terminal.integrated.defaultProfile.linux":"bash"}' \
+       > /home/node/.local/share/code-server/user-data/Machine/settings.json
 # tode runs inside this container, Chromium and code-server included, and sends
 # the terminal only pixels; see docs/usage.md. Chromium's own sandbox needs user
 # namespaces or a setuid helper, which seccomp and no-new-privileges deny here,
@@ -100,10 +122,6 @@ RUN --mount=type=bind,from=tode,target=/tmp/tode \
       && mkdir -p /opt/tode \
       && tar -xzf /tmp/tode/tode.tar.gz -C /opt/tode --strip-components 1 --no-same-owner \
       && chmod -R u-s,g-s,go-w /opt/tode \
-      && mkdir -p /opt/code-server \
-      && tar -xzf /tmp/tode/code-server.tar.gz -C /opt/code-server --strip-components 1 --no-same-owner \
-      && chmod -R u-s,g-s,go-w /opt/code-server \
-      && test -x /opt/code-server/bin/code-server \
       && electron=/opt/tode/node_modules/@zenbu-labs/pixel/electron/dist/pixel \
       && mv "$electron" "$electron.bin" \
       && if ldd "$electron.bin" | grep 'not found' >&2; then exit 1; fi \
@@ -144,6 +162,25 @@ RUN if [ -n "$TODE_EXTENSIONS" ]; then \
         printf '%s\n' "$listed" | grep -qixF "${id%%@*}" || { echo "error: tode.extensions: $id was not installed" >&2; exit 1; }; \
       done; \
     fi
+# codeServer.extensions uses the same build-time Marketplace as tode, with
+# separate extension/user-data directories. No runtime egress is added.
+ARG CODE_SERVER_EXTENSIONS=""
+RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
+      data=/home/node/.local/share/code-server \
+      && install -d -o node -g node "$data/extensions" \
+      && set -- \
+      && for id in $CODE_SERVER_EXTENSIONS; do set -- "$@" --install-extension "$id"; done \
+      && HOME=/home/node EXTENSIONS_GALLERY='{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","cacheUrl":"https://vscode.blob.core.windows.net/gallery/index","controlUrl":""}' \
+        runuser -u node -- /opt/code-server/bin/code-server \
+        --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" "$@" \
+      && listed=$(HOME=/home/node runuser -u node -- /opt/code-server/bin/code-server \
+        --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" --list-extensions --show-versions) \
+      && for id in $CODE_SERVER_EXTENSIONS; do \
+        case "$id" in *@*) expected="$id"; actual="$listed" ;; \
+          *) expected="$id"; actual=$(printf '%s\n' "$listed" | cut -d@ -f1) ;; esac \
+        && printf '%s\n' "$actual" | grep -qixF "$expected" || { echo "error: codeServer.extensions: $id was not installed" >&2; exit 1; }; \
+      done; \
+    fi
 # The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
 COPY --from=sumi /sumi /usr/local/bin/sumi
 RUN sumi init --agent claude --server /run/sumi/mask.sock --shell /bin/bash --settings /tmp/sumi/settings.json \
@@ -159,7 +196,7 @@ COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # ~/.claude/skills does not replace them.
 COPY agent/skills/ /etc/claude-code/.claude/skills/
 COPY agent/bash-env.sh /etc/bash-env.sh
-COPY --chmod=755 agent/entrypoint.sh agent/init-firewall.sh agent/wait-ready.sh agent/clone-workspace.py agent/workspace_mounts.py agent/nix-env.py /usr/local/bin/
+COPY --chmod=755 agent/entrypoint.sh agent/start-code-server.sh agent/init-firewall.sh agent/wait-ready.sh agent/clone-workspace.py agent/workspace_mounts.py agent/nix-env.py /usr/local/bin/
 # Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
 # reach anything (a Next.js server calling an API, for one).
 ENV NODE_USE_ENV_PROXY=1

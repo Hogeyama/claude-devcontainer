@@ -8,18 +8,16 @@
 # here as a whole.
 #
 # After a change, stop the environment and run `devcontainer up` again; for
-# git.*, agent.*, docker.enabled, nix.enabled, sumi.enabled and tode.*, with
+# git.*, agent.*, docker.enabled, nix.enabled, sumi.enabled, tode.* and codeServer.*, with
 # --remove-existing-container. Relative paths are from this directory (except
 # git.shared_hidden_paths, from the repository root), and ~ is the host's home.
 
 [git]
 # "clone": independent workspace volume (default).
-# "shared": edit the host's working tree; .git and .devcontainer are read-only.
-# Commit, switch and stash on the host.
-# "worktree": edit the host's working tree with the agent's own .git in a
+# "shared": edit the host's working tree with the agent's own .git in a
 # volume; the host's .git is read-only at /run/host/git. The agent commits
 # there, and the host reviews with `git fetch agent` and moves HEAD and the
-# index with `scripts/git-agent.py accept COMMIT`.
+# index with `git reset --mixed COMMIT`.
 # Use clone to develop .devcontainer. Recreate the container after changing it.
 # isolation = "clone"
 # Existing files/directories to hide in shared mode, relative to the repository
@@ -124,3 +122,13 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # up` picks a free pair in 10.231.x and keeps it.
 # proxy = "10.231.70"
 # dind = "10.231.71"
+
+[codeServer]
+# Browser-based editor in the agent, opened by the isolated Windows WebView2
+# client. Independent of tode. Rebuild after changing this setting.
+# From WSL: claude/scripts/code-server.sh prepare (initial Windows setup/UAC),
+# then claude/scripts/code-server.sh open. See claude/code-server/README.md.
+enabled = false
+# Marketplace IDs, optionally @version. Installed at build time, independently
+# of tode.extensions. Rebuild/recreate the agent after changing this list.
+extensions = [] # e.g. ["anthropic.claude-code"]

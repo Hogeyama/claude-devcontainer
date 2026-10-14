@@ -24,15 +24,15 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
-`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected when this container was created (default `clone`). In `shared`, `/workspace` is the host working tree: ordinary edits affect it immediately, but all of `.git` and `.devcontainer` are read-only mounts. Use `git status`, `git diff` and `git log`; the human performs add, commit, switch and stash on the host. Use clone to develop `.devcontainer` itself. The host's `git.shared_hidden_paths` (empty by default) and in-repository `sumi.secrets` are covered with empty read-only mounts; no directory name is treated specially. Other untracked/ignored files remain shared. Do not use the `agent` remote in shared mode. `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Network and dependency CoW restrictions still apply. Changes to mount settings take effect after the human recreates the container.
+`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected at container creation (default `clone`). In `shared`, `/workspace` is the host working tree, and ordinary edits reach the host immediately, but `/workspace/.git` is this container's own Git. add and commit update only this Git metadata. The host's `.git` is read-only at `/run/host/git`. `.devcontainer` is read-only; use clone to develop it. `git.shared_hidden_paths` and in-repository `sumi.secrets` are covered by empty read-only mounts. Other untracked/ignored files remain shared; tracked files among the hidden paths carry the skip-worktree flag in this index, so they stay out of status and commits even though they read as empty here.
 
-In `worktree`, `/workspace` is also the host working tree, and ordinary edits reach the host immediately, but `/workspace/.git` is this container's own Git. add, commit, switch and stash change nothing on the host, whose `.git` is read-only at `/run/host/git`. `.devcontainer` and the hidden paths are protected as in shared; tracked files among the hidden paths carry the skip-worktree flag in this index, so they stay out of status and commits even though they read as empty here.
+The management inputs `/run/host/generated` and `/run/host/nix-env` are read-only. Network and dependency CoW restrictions still apply. Mount changes require container recreation.
 
 - Work on the branch you started on, or on an `agent/<task>` branch created from it. Do not use switch, stash or checkout to replace the files of the working tree: they are the human's files, possibly being edited.
 - Commit, then tell the human the branch name and the exact commit ID. The host fetches it through the `agent` remote, reviews it, and moves its HEAD and index to it. Edits you leave uncommitted stay in the working tree and appear in the host's `git status`.
 - When the host has new commits, run `git fetch /run/host/git <branch>` and then `git reset --mixed FETCH_HEAD` (the files are already the host's) or a rebase. `git push agent` is not available in this mode. At container start, HEAD follows the host's branch automatically when no commit here is still unaccepted.
 - `/run/host/git` is read-only; never try to write there or to reconfigure Git around it.
-- Do not create a `.git` directory or file anywhere below `/workspace`: the host refuses to accept while one exists.
+- Do not create a `.git` directory or file anywhere below `/workspace`: Git run by the host inside that directory would use its config and hooks.
 
 The independent workspace and Git exchange rules below apply to `clone`:
 
@@ -59,7 +59,7 @@ Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docke
 
 ## Adding tools and dependencies
 
-Package registries are unavailable. In shared and worktree mode, ask the human to edit `.devcontainer` on the host, or switch to clone for this work. In clone mode, propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
+Package registries are unavailable. In shared mode, ask the human to edit `.devcontainer` on the host, or switch to clone for this work. In clone mode, propose changes through a commit; the human reviews and integrates them into the host's `.devcontainer/`, then applies them with `devcontainer up --remove-existing-container`.
 
 | What is needed | Change for the human to make |
 |---|---|

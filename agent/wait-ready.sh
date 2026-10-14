@@ -45,10 +45,7 @@ clone)
     echo 'Git isolation: clone' >&2
     python3 /usr/local/bin/clone-workspace.py ;;
 shared)
-    echo 'Git isolation: shared; edits reach the host; .git and .devcontainer are read-only. Commit, switch and stash on the host.' >&2
-    python3 /usr/local/bin/workspace_mounts.py --check-shared ;;
-worktree)
-    echo 'Git isolation: worktree; edits reach the host; .git is this container'"'"'s own, with the host'"'"'s read-only at /run/host/git. Commit here; the host fetches and accepts.' >&2
+    echo 'Git isolation: shared; edits reach the host; .git is this container'"'"'s own, with the host'"'"'s read-only at /run/host/git. Commit here; the host fetches, reviews, and runs git reset --mixed.' >&2
     python3 /usr/local/bin/workspace_mounts.py --check-shared
     python3 /usr/local/bin/clone-workspace.py ;;
 *)
@@ -60,4 +57,11 @@ esac
 if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /run/host/nix-env/dev-env.sh ]; then
     python3 /usr/local/bin/nix-env.py ||
         echo "warning: the nix dev shell could not be loaded; Bash runs without it." >&2
+fi
+
+if [ "${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}" = 1 ]; then
+    if ! timeout 30 sh -c 'until curl --fail --silent --noproxy "*" http://127.0.0.1:8088/healthz >/dev/null; do sleep 0.5; done'; then
+        echo 'error: code-server did not start; see /run/claude-devcontainer/code-server.log' >&2
+        exit 1
+    fi
 fi

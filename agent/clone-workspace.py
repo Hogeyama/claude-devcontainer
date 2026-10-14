@@ -2,7 +2,7 @@
 """Initialize the agent's Git once, without replacing user work.
 
 In clone mode /workspace is an empty volume that receives the host's
-committed HEAD. In worktree mode /workspace is the host's working tree and
+committed HEAD. In shared mode /workspace is the host's working tree and
 only /workspace/.git, the agent's own volume, is built, from the same local
 snapshot; the files already there are never written.
 """
@@ -208,7 +208,7 @@ if __name__ == '__main__':
     if os.geteuid() == 0:
         sys.exit('error: run workspace initialization as node, never root.')
     try:
-        if os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone') == 'worktree':
+        if os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone') == 'shared':
             attach('/run/host/generated/workspace.json', '/workspace')
         else:
             clone('/run/host/generated/workspace.json', '/workspace')
