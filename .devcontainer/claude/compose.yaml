@@ -19,7 +19,9 @@ services:
       args:
         AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
+        INSTALL_CODE_SERVER: ${CLAUDE_DEVCONTAINER_INSTALL_CODE_SERVER:-0}
         INSTALL_TODE: ${CLAUDE_DEVCONTAINER_TODE:-0}
+        CODE_SERVER_EXTENSIONS: ${CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS:-}
         TODE_EXTENSIONS: ${CLAUDE_DEVCONTAINER_TODE_EXTENSIONS:-}
     command: ["sleep", "infinity"]
     # sleep as PID 1 reaps nothing, so processes orphaned by devcontainer exec
@@ -53,6 +55,8 @@ services:
       TESTCONTAINERS_HOST_OVERRIDE: 127.0.0.1
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock
       CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
+      CLAUDE_DEVCONTAINER_CODE_SERVER: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
+      CLAUDE_DEVCONTAINER_CODE_SERVER_PROXY_ADDRESS: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.30
       CLAUDE_DEVCONTAINER_NIX: ${CLAUDE_DEVCONTAINER_NIX:-0}
       CLAUDE_DEVCONTAINER_SUMI: ${CLAUDE_DEVCONTAINER_SUMI:-0}
       # A dummy that the proxy replaces with the real credential. Claude takes
@@ -78,6 +82,8 @@ services:
       - sumi-run:/run/sumi:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
+      # code-server user settings persist separately from tode.
+      - code-server-user:/home/node/.local/share/code-server/user-data/User
       # tode's VS Code user settings, keybindings and extension state, kept
       # across rebuilds. Extensions and Machine settings stay in the image, so
       # that an image change reaches them and the agent cannot persist code.
@@ -103,6 +109,9 @@ services:
       dind-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_DIND_NET:-10.231.71}.20
     depends_on:
+      code-server-proxy:
+        condition: service_started
+        required: false
       proxy:
         condition: service_healthy
       dind:
@@ -113,6 +122,22 @@ services:
         condition: service_started
         # Absent unless sumi.enabled.
         required: false
+  code-server-proxy:
+    pull_policy: build
+    scale: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
+    build:
+      context: code-server
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges=true]
+    tmpfs: ["/home/mitmproxy/.mitmproxy:uid=1000,gid=1000,mode=0700"]
+    ports: ["127.0.0.1:18086:8080"]
+    extra_hosts:
+      - agent-code-server:${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
+    networks:
+      proxy-internal:
+        ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.30
+      code-server-ingress: {}
   proxy:
     # Build on every `up`: `devcontainer build` builds only the agent, and the
     # policy (addon.py, the workspace's .generated/proxy.json) would otherwise
@@ -231,6 +256,8 @@ networks:
     ipam:
       config:
         - subnet: ${CLAUDE_DEVCONTAINER_DIND_NET:-10.231.71}.0/24
+  code-server-ingress:
+    enable_ipv6: false
   proxy-external:
     enable_ipv6: false
 
@@ -245,6 +272,7 @@ volumes:
       o: lowerdir=${CLAUDE_DEVCONTAINER_NODE_LOWER:?Run initialize.sh},upperdir=${CLAUDE_DEVCONTAINER_NODE_UPPER:?Run initialize.sh},workdir=${CLAUDE_DEVCONTAINER_NODE_WORK:?Run initialize.sh}
   claude-projects:
   tode-user:
+  code-server-user:
   public-ca:
   proxy-private-ca:
   dind-data:

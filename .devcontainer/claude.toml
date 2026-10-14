@@ -5,7 +5,7 @@
 # reviews with `git fetch agent` and takes a commit with
 # `git reset --mixed COMMIT`. .devcontainer is
 # read-only in the container, so switch to "clone" to develop claude/ itself.
-isolation = "shared"
+isolation = "clone"
 
 [docker]
 enabled = true
@@ -23,6 +23,10 @@ enabled = true
 secrets = "../.secrets/sumi/secrets.txt"
 
 [tode]
+enabled = true
+extensions = ["anthropic.claude-code"]
+
+[codeServer]
 enabled = true
 extensions = ["anthropic.claude-code"]
 

@@ -288,6 +288,13 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
+## Windows IMEでcode-serverを使う（WebView2）
+
+Windows + WSLでは、`[codeServer] enabled = true` でagent内のcode-serverを有効にできます。
+専用のローカルWebView2ウィンドウで表示するので、Windows IMEを直接使えます。
+AppContainerとWFPでブラウザの通信を専用proxyに限定し、外部アプリへの引き渡しも拒否します。
+todeとは独立した機能です。セットアップ・制約は[code-serverの手順](../.devcontainer/claude/code-server/README.md)を参照してください。
+
 ## ターミナルでVS Codeを使う（tode）
 
 agentのコンテナでVS Codeを使いたい場合は、VS Codeを接続する代わりに、[terminal-code](https://github.com/zenbu-labs/terminal-code)（`tode`）をコンテナの中で動かしてください。`tode`は、code-serverと、それを表示するChromium（Electron）をまとめて動かし、描いた画面をkitty graphics protocolでターミナルへ送ります。

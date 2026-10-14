@@ -57,6 +57,7 @@ DEFAULTS = {
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
     'tode': {'enabled': False, 'extensions': []},
+    'codeServer': {'enabled': False, 'extensions': []},
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
@@ -71,7 +72,7 @@ HOST_GIT = '/run/host/git'
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'TODE', 'TODE_EXTENSIONS', 'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'INSTALL_CODE_SERVER', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -151,16 +152,17 @@ def check(data, source):
         path = Path(value)
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
             raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
-    agent, docker, tode, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'tode', 'proxy', 'subnets'))
+    agent, docker, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
             raise ValueError(f'{source}: agent.{key}: must be positive')
     for image in docker.get('images', []):
         if not image or re.search(r'[\s#]', image):
             raise ValueError(f'{source}: docker.images: {image!r} is not an image name')
-    for item in tode.get('extensions', []):
-        if not EXTENSION.fullmatch(item):
-            raise ValueError(f'{source}: tode.extensions: {item!r} is not an extension ID (publisher.name)')
+    for editor in ('tode', 'codeServer'):
+        for item in data.get(editor, {}).get('extensions', []):
+            if not EXTENSION.fullmatch(item):
+                raise ValueError(f'{source}: {editor}.extensions: {item!r} is not an extension ID (publisher.name)')
     for item in proxy.get('connectors', []):
         if not CONNECTOR.fullmatch(item):
             raise ValueError(f'{source}: proxy.connectors: {item!r} is not a connector ID (mcpsrv_...)')
@@ -212,8 +214,9 @@ def load(root=ROOT):
     if settings['docker']['enabled'] and settings['agent']['uid'] in SUBORDINATE_IDS:
         raise ValueError(f'agent.uid: {settings["agent"]["uid"]} is used by DinD; with docker.enabled it must be '
                          f'outside {SUBORDINATE_IDS.start}-{SUBORDINATE_IDS.stop - 1}')
-    if settings['tode']['extensions'] and not settings['tode']['enabled']:
-        raise ValueError('tode.extensions: needs tode.enabled')
+    for editor in ('tode', 'codeServer'):
+        if settings[editor]['extensions'] and not settings[editor]['enabled']:
+            raise ValueError(f'{editor}.extensions: needs {editor}.enabled')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
@@ -250,6 +253,9 @@ def variables(settings):
         PREFIX + 'SUMI': '1' if settings['sumi']['enabled'] else '0',
         PREFIX + 'SUMI_DIR': str(secrets.parent),
         PREFIX + 'SUMI_FILE': secrets.name,
+        PREFIX + 'CODE_SERVER_EXTENSIONS': ' '.join(settings['codeServer']['extensions']),
+        PREFIX + 'CODE_SERVER': '1' if settings['codeServer']['enabled'] else '0',
+        PREFIX + 'INSTALL_CODE_SERVER': '1' if settings['codeServer']['enabled'] or settings['tode']['enabled'] else '0',
         PREFIX + 'TODE': '1' if settings['tode']['enabled'] else '0',
         PREFIX + 'TODE_EXTENSIONS': ' '.join(settings['tode']['extensions']),
         PREFIX + 'PROXY_CA': str(settings['proxy']['ca'] or ''),

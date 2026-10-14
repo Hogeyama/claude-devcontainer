@@ -52,6 +52,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
         self.assertEqual(loaded['tode'], {'enabled': False, 'extensions': []})
+        self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': []})
         self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}})
         # load() must not change the defaults it starts from.
         self.write('claude.toml', '[sumi]\nsecrets = "s.txt"\n')
@@ -91,6 +92,10 @@ class SettingsTest(unittest.TestCase):
             ('[tode]\nenabled = true\nextensions = ["python"]\n', r'tode.extensions: .python. is not'),
             ('[tode]\nenabled = true\nextensions = ["a.b c"]\n', r'tode.extensions:'),
             ('[tode]\nextensions = ["ms-python.python"]\n', r'tode.extensions: needs tode.enabled'),
+            ('[codeServer]\nenabled = true\nextensions = ["python"]\n', r'codeServer.extensions: .python. is not'),
+            ('[codeServer]\nenabled = true\nextensions = ["a.b c"]\n', r'codeServer.extensions:'),
+            ('[codeServer]\nextensions = ["ms-python.python"]\n', r'codeServer.extensions: needs codeServer.enabled'),
+            ('[codeServer]\nenabled = true\nextensions = "a.b"\n', r'codeServer.extensions: expected a list'),
             ('[subnets]\nproxy = "10.0.256"\n', r'subnets.proxy:'),
             ('[subnets]\nproxy = "10.0"\n', r'subnets.proxy:'),
             ('[nix]\nshell = "a\'b"\n', r"nix.shell: newlines and '"),
@@ -185,6 +190,9 @@ dind = "10.99.1"
             'CLAUDE_DEVCONTAINER_SUMI': "'1'",
             'CLAUDE_DEVCONTAINER_SUMI_DIR': f"'{self.root / '.secrets'}'",
             'CLAUDE_DEVCONTAINER_SUMI_FILE': "'list.txt'",
+            'CLAUDE_DEVCONTAINER_CODE_SERVER': "'0'",
+            'CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS': "''",
+            'CLAUDE_DEVCONTAINER_INSTALL_CODE_SERVER': "'1'",
             'CLAUDE_DEVCONTAINER_TODE': "'1'",
             'CLAUDE_DEVCONTAINER_TODE_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
             'CLAUDE_DEVCONTAINER_PROXY_CA': f"'{self.root / 'ca.pem'}'",
@@ -201,6 +209,30 @@ dind = "10.99.1"
                                'inject': {'Authorization': {'basic': 'x-access-token:${GITHUB_TOKEN}'}}},
             'github.com': {'routes': ['/']}}})
         self.assertEqual((out / '.gitignore').read_text(), '*\n')
+
+    def test_code_server_independent_from_tode(self):
+        for editor, tode in [(False, False), (True, False), (False, True), (True, True)]:
+            with self.subTest(editor=editor, tode=tode):
+                self.write('claude.toml', f'[codeServer]\nenabled = {str(editor).lower()}\n[tode]\nenabled = {str(tode).lower()}\n')
+                values = settings.variables(self.load())
+                self.assertEqual(values['CLAUDE_DEVCONTAINER_CODE_SERVER'], str(int(editor)))
+                self.assertEqual(values['CLAUDE_DEVCONTAINER_INSTALL_CODE_SERVER'], str(int(editor or tode)))
+                self.assertEqual(values['CLAUDE_DEVCONTAINER_TODE'], str(int(tode)))
+        self.write('claude.local.toml', '[codeServer]\nenabled = false\n')
+        self.assertFalse(self.load()['codeServer']['enabled'])
+        self.write('claude.local.toml', '[codeServer]\nenabled = "true"\n')
+        with self.assertRaisesRegex(ValueError, 'codeServer.enabled: expected true or false'):
+            self.load()
+
+    def test_code_server_extension_override_is_independent(self):
+        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n'
+                   '[tode]\nenabled = true\nextensions = ["golang.go"]\n')
+        self.write('claude.local.toml', '[codeServer]\nextensions = ["vscodevim.vim@1.27.3", "a.b"]\n')
+        self.generate()
+        self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS'], "'vscodevim.vim@1.27.3 a.b'")
+        self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_TODE_EXTENSIONS'], "'golang.go'")
+        self.write('claude.local.toml', '[codeServer]\nextensions = []\n')
+        self.assertEqual(self.load()['codeServer']['extensions'], [])
 
     def test_generate_with_defaults(self):
         out = self.generate()

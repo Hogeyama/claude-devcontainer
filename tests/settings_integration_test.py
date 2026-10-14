@@ -101,6 +101,32 @@ class SettingsIntegrationTest(unittest.TestCase):
                 self.assertEqual(services['agent']['environment'][FLAG], expected)
                 self.assertEqual(services['dind']['scale'], int(expected))
 
+    def test_code_server_opt_in(self):
+        for value, expected in [('false', '0'), ('true', '1')]:
+            with self.subTest(value=value):
+                self.write('claude.toml', f'[codeServer]\nenabled = {value}\n')
+                self.initialize()
+                services = self.compose_config()['services']
+                agent = services['agent']
+                self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_CODE_SERVER'], expected)
+                self.assertEqual(agent['build']['args']['INSTALL_CODE_SERVER'], expected)
+                self.assertEqual(agent['build']['args']['INSTALL_TODE'], '0')
+                self.assertNotIn('ports', agent)
+                proxy = services['code-server-proxy']
+                self.assertEqual(proxy['scale'], int(expected))
+                self.assertEqual(proxy['ports'][0]['host_ip'], '127.0.0.1')
+                self.assertNotIn('volumes', proxy)
+
+    def test_code_server_extensions_reach_build_only(self):
+        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n'
+                   '[tode]\nenabled = true\nextensions = ["golang.go"]\n')
+        self.write('claude.local.toml', '[codeServer]\nextensions = ["vscodevim.vim@1.27.3"]\n')
+        self.initialize()
+        agent = self.compose_config()['services']['agent']
+        self.assertEqual(agent['build']['args']['CODE_SERVER_EXTENSIONS'], 'vscodevim.vim@1.27.3')
+        self.assertEqual(agent['build']['args']['TODE_EXTENSIONS'], 'golang.go')
+        self.assertNotIn('CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS', agent['environment'])
+
     def test_web_search_opt_in_reaches_only_the_proxy(self):
         for value, expected in [(None, '0'), ('true', '1'), ('false', '0')]:
             with self.subTest(value=value):
