@@ -41,43 +41,58 @@ def register(root=ROOT):
     git('config', '--local', 'protocol.ext.allow', 'user')
 
 
-def check_container(container):
-    """Use the running container, never the TOML edited for its next creation."""
+def check_container(container, root=ROOT):
+    """The mode of the running container, never the TOML edited for its next creation."""
     result = subprocess.run(['docker', 'inspect', container], check=True, capture_output=True, text=True)
     details = json.loads(result.stdout)[0]
     labels = details.get('Config', {}).get('Labels') or {}
     mode = labels.get('dev.claude-devcontainer.git-isolation')
-    if mode == 'shared':
-        raise ValueError('The agent uses git.isolation = "shared"; edit the shared repository directly, '
-                         'without git fetch/push agent.')
-    mounts = [mount for mount in details.get('Mounts', []) if mount['Destination'] == '/workspace']
+    mounts = {mount['Destination']: mount for mount in details.get('Mounts', [])}
+    workspace = mounts.get('/workspace', {})
     project = labels.get('com.docker.compose.project')
-    if (mode not in (None, 'clone') or not project or len(mounts) != 1
-            or mounts[0].get('Type') != 'volume' or mounts[0].get('Name') != project + '_workspace'
-            or not mounts[0].get('RW')):
+    if mode == 'shared':
+        git = mounts.get('/workspace/.git', {})
+        if (not project or workspace.get('Type') != 'bind' or not workspace.get('RW')
+                or Path(workspace.get('Source', '')) != Path(root).resolve()
+                or git.get('Type') != 'volume' or git.get('Name') != project + '_agent-git' or not git.get('RW')):
+            raise ValueError('Cannot verify the agent shared mounts; recreate it with devcontainer up '
+                             '--remove-existing-container.')
+        return mode
+    if (mode not in (None, 'clone') or not project
+            or workspace.get('Type') != 'volume' or workspace.get('Name') != project + '_workspace'
+            or not workspace.get('RW')):
         raise ValueError('Cannot verify the agent clone workspace mount; recreate it with devcontainer up '
                          '--remove-existing-container.')
+    return 'clone'
 
 
-def serve(service, root=ROOT):
-    if service not in ('git-upload-pack', 'git-receive-pack'):
-        raise ValueError('Only Git upload-pack and receive-pack are supported.')
+def running_container(root=ROOT):
     containers = subprocess.run(
         ['docker', 'ps', '--filter', f'label=devcontainer.local_folder={root}',
          '--filter', 'label=com.docker.compose.service=agent', '--format', '{{.ID}}'],
         check=True, capture_output=True, text=True).stdout.split()
     if len(containers) != 1:
         raise ValueError('Expected exactly one running agent container for this workspace; run devcontainer up.')
-    check_container(containers[0])
+    return containers[0]
+
+
+def serve(service, root=ROOT):
+    if service not in ('git-upload-pack', 'git-receive-pack'):
+        raise ValueError('Only Git upload-pack and receive-pack are supported.')
+    container = running_container(root)
+    mode = check_container(container, root)
     command = [service]
     if service == 'git-receive-pack':
+        if mode == 'shared':
+            raise ValueError('The agent uses git.isolation = "shared"; a push would rewrite the shared '
+                             'working tree. The agent fetches host commits from /run/host/git itself.')
         # A push to the branch checked out in /workspace also updates its work
         # tree. Git refuses the push while the work tree or index has changes,
         # or when it would overwrite an untracked file.
         command = ['git', '-c', 'receive.denyCurrentBranch=updateInstead', 'receive-pack']
     # stdout/stdin belong exclusively to Git's wire protocol. No shell, TTY,
     # root Git process, host-side checkout, or exposed TCP listener is involved.
-    os.execvp('docker', ['docker', 'exec', '-i', '--user', 'node', containers[0], *command, '/workspace'])
+    os.execvp('docker', ['docker', 'exec', '-i', '--user', 'node', container, *command, '/workspace'])
 
 
 if __name__ == '__main__':

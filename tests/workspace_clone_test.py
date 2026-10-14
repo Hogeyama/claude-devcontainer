@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -372,3 +373,142 @@ class WorkspaceCloneTest(unittest.TestCase):
                 patch.object(mounts.os, 'fchown', side_effect=fchown):
             with self.assertRaisesRegex(ValueError, f'{mount} is read-only.*agent.uid and agent.gid'):
                 mounts.prepare(self.agent, os.getuid() + 1, os.getgid())
+
+class WorktreeAttachTest(unittest.TestCase):
+    """The agent's own Git under the host's working tree, built without writing its files."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.host = self.root / 'host'
+        config = self.root / 'gitconfig'
+        config.write_text('[user]\n name = fixture\n email = fixture@example.com\n'
+                          '[maintenance]\n auto = false\n')
+        environment = patch.dict(os.environ, {
+            'GIT_CONFIG_GLOBAL': str(config), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0'})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.host.mkdir()
+        self.git(self.host, 'init', '-b', 'main')
+        (self.host / 'tracked').write_text('committed\n')
+        self.git(self.host, 'add', 'tracked')
+        self.git(self.host, 'commit', '-m', 'initial')
+        self.start = self.git(self.host, 'rev-parse', 'HEAD')
+        self.metadata = self.host / '.devcontainer/.generated/workspace.json'
+        source.write(self.host)
+        # As in the container: the host's files, with the agent's Git volume
+        # over .git and the host's .git read-only elsewhere.
+        self.workspace = self.root / 'workspace'
+        shutil.copytree(self.host, self.workspace, ignore=shutil.ignore_patterns('.git', '.devcontainer'))
+        (self.workspace / '.git').mkdir()
+        self.host_git = self.host / '.git'
+        (self.workspace / 'tracked').write_text('host dirty\n')
+        (self.workspace / 'untracked').write_text('host untracked\n')
+
+    def git(self, directory, *args):
+        return subprocess.run(['git', '-C', str(directory), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def attach(self):
+        clone.attach(self.metadata, self.workspace, self.host_git)
+
+    def files(self):
+        return {p.name: p.read_text() for p in self.workspace.iterdir() if p.is_file()}
+
+    def test_first_start_builds_head_and_index_without_touching_files(self):
+        before = self.files()
+        self.attach()
+        self.assertEqual(self.files(), before)
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'HEAD'), self.start)
+        self.assertEqual(self.git(self.workspace, 'branch', '--show-current'), 'main')
+        self.assertEqual(self.git(self.workspace, 'diff', '--name-only'), 'tracked')
+        self.assertEqual(self.git(self.workspace, 'ls-files', '--others'), 'untracked')
+        self.assertEqual(self.git(self.workspace, 'rev-parse', '--show-toplevel'), str(self.workspace))
+        self.assertFalse((self.workspace / '.git/claude-bootstrap.json').exists())
+        self.assertFalse((self.workspace / '.git/objects/info/alternates').exists())
+
+    def test_detached_host_head_is_followed(self):
+        self.git(self.host, 'switch', '--detach')
+        source.write(self.host)
+        self.attach()
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'HEAD'), self.start)
+        self.assertEqual(self.git(self.workspace, 'branch', '--show-current'), '')
+
+    def test_interrupted_initialization_resumes(self):
+        marker = self.workspace / '.git/claude-bootstrap.json'
+        marker.write_text(self.metadata.read_text())
+        self.metadata.write_text('{}')
+        self.attach()
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'HEAD'), self.start)
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.workspace / 'tracked').read_text(), 'host dirty\n')
+
+    def test_restart_follows_host_commits_and_branch_when_nothing_is_pending(self):
+        self.attach()
+        (self.host / 'tracked').write_text('host dirty\n')
+        self.git(self.host, 'switch', '-c', 'feature')
+        self.git(self.host, 'commit', '-am', 'host commit')
+        advanced = self.git(self.host, 'rev-parse', 'HEAD')
+        (self.workspace / 'tracked').write_text('host dirty\n')
+        self.attach()
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'HEAD'), advanced)
+        self.assertEqual(self.git(self.workspace, 'branch', '--show-current'), 'feature')
+        self.assertEqual(self.git(self.workspace, 'status', '--porcelain'), '?? untracked')
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'main'), self.start)
+
+    def test_restart_keeps_unaccepted_agent_commits(self):
+        self.attach()
+        self.git(self.workspace, 'add', 'tracked')
+        self.git(self.workspace, 'commit', '-m', 'agent work')
+        pending = self.git(self.workspace, 'rev-parse', 'HEAD')
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'host moved on')
+        with patch('sys.stderr') as stderr:
+            self.attach()
+        self.assertIn('not accepted yet', str(stderr.write.call_args_list))
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'HEAD'), pending)
+
+    def test_restart_keeps_staged_changes(self):
+        self.attach()
+        self.git(self.workspace, 'add', 'tracked')
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'host moved on')
+        with patch('sys.stderr') as stderr:
+            self.attach()
+        self.assertIn('staged changes', str(stderr.write.call_args_list))
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'HEAD'), self.start)
+        self.assertEqual(self.git(self.workspace, 'diff', '--cached', '--name-only'), 'tracked')
+
+    def test_agent_can_fetch_host_commits_from_the_read_only_git(self):
+        self.attach()
+        self.git(self.workspace, 'commit', '--allow-empty', '-m', 'agent work')
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'host work')
+        self.git(self.workspace, 'fetch', str(self.host_git), 'main')
+        self.assertEqual(self.git(self.workspace, 'rev-parse', 'FETCH_HEAD'), self.git(self.host, 'rev-parse', 'HEAD'))
+
+    def test_incomplete_git_without_marker_is_refused(self):
+        (self.workspace / '.git/HEAD').write_text('ref: refs/heads/main\n')
+        with self.assertRaisesRegex(ValueError, 'Incomplete'):
+            self.attach()
+
+    def test_masked_tracked_paths_are_skipped_in_status_and_add(self):
+        (self.host / 'secret').write_text('real\n')
+        (self.host / 'vault').mkdir()
+        (self.host / 'vault/key').write_text('real\n')
+        self.git(self.host, 'add', 'secret', 'vault')
+        self.git(self.host, 'commit', '-m', 'tracked secrets')
+        source.write(self.host)
+        (self.metadata.parent / 'hidden.txt').write_text('secret\nvault\n')
+        # As the container sees them: an empty file and an empty directory.
+        (self.workspace / 'secret').write_text('')
+        (self.workspace / 'vault').mkdir()
+        self.attach()
+        self.assertEqual(self.git(self.workspace, 'status', '--porcelain', '--', 'secret', 'vault'), '')
+        self.assertEqual(sorted(self.git(self.workspace, 'ls-files', '-v', '--', 'secret', 'vault').splitlines()),
+                         ['S secret', 'S vault/key'])
+        result = subprocess.run(['git', '-C', str(self.workspace), 'add', 'secret'], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git(self.workspace, 'diff', '--cached', '--name-only'), '')
+        # Still skipped after a restart that follows a host commit.
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'host moved on')
+        self.attach()
+        self.assertTrue(self.git(self.workspace, 'ls-files', '-v', '--', 'secret').startswith('S '))

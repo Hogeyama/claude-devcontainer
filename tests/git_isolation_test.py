@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -65,20 +66,6 @@ class GitIsolationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unsupported Git storage'):
             settings.generate(self.root, {})
 
-    def test_shared_chown_only_touches_dependency_mount_root(self):
-        dependency = self.root / 'packages/app/node_modules'
-        dependency.mkdir(parents=True)
-        before = [(p, p.stat()) for p in [self.root, self.root / '.git', dependency.parent, dependency.parent.parent]]
-        changed = []
-        def record(fd, uid, gid):
-            changed.append(os.fstat(fd).st_ino)
-        with patch.object(mounts, 'dependency_mounts', return_value=[dependency]), patch.object(mounts.os, 'fchown', record):
-            mounts.prepare(self.root, os.getuid() + 1, os.getgid(), 'shared')
-        self.assertEqual(changed, [dependency.stat().st_ino])
-        for path, status in before:
-            self.assertEqual((path.stat().st_uid, path.stat().st_gid, path.stat().st_mode),
-                             (status.st_uid, status.st_gid, status.st_mode))
-
     def test_shared_rejects_symlink_dependency_ancestors(self):
         outside = self.root.parent / 'outside'
         outside.mkdir()
@@ -86,7 +73,7 @@ class GitIsolationTest(unittest.TestCase):
         with patch.object(mounts, 'dependency_mounts', return_value=[self.root / 'packages/node_modules']), \
                 patch.object(mounts.os, 'fchown') as chown:
             with self.assertRaises(OSError):
-                mounts.prepare(self.root, os.getuid() + 1, os.getgid(), 'shared')
+                mounts.prepare(self.root, os.getuid(), os.getgid(), 'shared', self.mountinfo(self.root / '.git'))
         chown.assert_not_called()
 
     def test_shared_access_error_explains_uid_configuration(self):
@@ -94,93 +81,86 @@ class GitIsolationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'agent.uid and agent.gid'):
                 mounts.check_shared(self.root)
 
-    def test_shared_requires_read_only_management_mounts(self):
-        with self.assertRaisesRegex(ValueError, 'must be mounted read-only'):
-            mounts.check_shared(self.root)
-        def access(path, mode):
-            return not (Path(path) != self.root and mode & os.W_OK)
-        with patch.object(mounts.os, 'access', side_effect=access), \
-                patch.object(mounts.os, 'statvfs', return_value=SimpleNamespace(f_flag=os.ST_RDONLY)):
-            mounts.check_shared(self.root)
-        # chmod alone is insufficient, even when W_OK is false.
-        with patch.object(mounts.os, 'access', side_effect=access):
-            with self.assertRaisesRegex(ValueError, 'must be mounted read-only'):
-                mounts.check_shared(self.root)
-
     def generated_mounts(self):
         settings.generate(self.root, {})
         data = json.loads((self.root / '.devcontainer/.generated/workspace.compose.yaml').read_text())
         return {m['target']: m for m in data['services']['agent']['volumes']}
 
-    def test_shared_protects_whole_management_directories(self):
-        generated = self.generated_mounts()
-        for name in ('.git', '.devcontainer'):
-            mount = generated['/workspace/' + name]
-            self.assertEqual(mount, {'type': 'bind', 'source': str(self.root / name),
-                                    'target': '/workspace/' + name, 'read_only': True,
-                                    'bind': {'create_host_path': False}})
-        self.assertFalse(generated['/workspace'].get('read_only', False))
-        self.assertNotIn('/workspace/.secrets', generated)
+    def use_shared(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nisolation = "shared"\n')
 
-    def enable_shared_writes(self):
-        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nshared_writable = true\n')
-
-    def test_shared_writable_protects_existing_sensitive_paths_without_creating_state(self):
-        self.enable_shared_writes()
-        (self.root / '.git/config.worktree').write_text('[user]\nname = fixture\n')
-        for name in ('rebase-merge', 'rebase-apply', 'sequencer', 'modules', 'worktrees'):
-            (self.root / '.git' / name).mkdir()
-        todo = self.root / '.git/rebase-merge/git-rebase-todo'
-        todo.write_text('exec echo trusted\n')
-        before = sorted(str(p.relative_to(self.root / '.git')) for p in (self.root / '.git').rglob('*'))
+    def test_shared_gives_the_agent_its_own_git_volume(self):
+        self.use_shared()
         generated = self.generated_mounts()
-        self.assertFalse(generated['/workspace/.git']['read_only'])
+        self.assertEqual(generated['/workspace'], {'type': 'bind', 'source': str(self.root), 'target': '/workspace',
+                                                   'bind': {'create_host_path': False}})
+        self.assertEqual(generated['/workspace/.git'], {'type': 'volume', 'source': 'agent-git',
+                                                        'target': '/workspace/.git', 'volume': {'nocopy': True}})
+        self.assertEqual(generated['/run/host/git'], {'type': 'bind', 'source': str(self.root / '.git'),
+                                                      'target': '/run/host/git', 'read_only': True,
+                                                      'bind': {'create_host_path': False}})
         self.assertTrue(generated['/workspace/.devcontainer']['read_only'])
-        for name in ('config', 'config.worktree', 'hooks', 'info', 'objects/info',
-                     'rebase-merge', 'rebase-apply', 'sequencer', 'modules', 'worktrees'):
-            mount = generated['/workspace/.git/' + name]
-            self.assertTrue(mount['read_only'])
-            self.assertEqual(mount['source'], str(self.root / '.git' / name))
-            self.assertFalse(mount['bind']['create_host_path'])
-        for name in ('HEAD', 'index', 'objects', 'refs', 'commondir', 'gitdir'):
-            self.assertNotIn('/workspace/.git/' + name, generated)
-        self.assertEqual(before, sorted(str(p.relative_to(self.root / '.git')) for p in (self.root / '.git').rglob('*')))
-        self.assertEqual(todo.read_text(), 'exec echo trusted\n')
+        self.assertTrue((self.root / '.devcontainer/.generated/empty-secret').is_file())
 
-    def test_shared_writable_does_not_invent_rebase_state(self):
-        self.enable_shared_writes()
-        generated = self.generated_mounts()
-        for name in ('rebase-merge', 'rebase-apply', 'sequencer', 'config.worktree', 'commondir'):
-            self.assertNotIn('/workspace/.git/' + name, generated)
-            self.assertFalse((self.root / '.git' / name).exists())
-        self.git('status', '--short')
+    def test_shared_rejects_the_same_git_layouts_as_shared(self):
+        self.use_shared()
+        (self.root / '.git/objects/info/alternates').write_text('/outside/objects\n')
+        with self.assertRaisesRegex(ValueError, 'git.isolation = "shared".*Unsupported Git storage'):
+            settings.generate(self.root, {})
 
-    def test_shared_writable_startup_checks_sensitive_mounts_and_writable_git(self):
-        protected = {self.root / '.devcontainer', *mounts.git_protected_paths(self.root)}
+    def test_shared_writable_is_no_longer_a_setting(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nshared_writable = true\n')
+        with self.assertRaisesRegex(ValueError, 'git.shared_writable: unknown setting'):
+            settings.generate(self.root, {})
+        (self.root / '.devcontainer/claude.local.toml').unlink()
+        self.assertNotIn('CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE', settings.variables(settings.load(self.root)))
+
+    def mountinfo(self, *targets, overlay=()):
+        """A mount table with these targets, as volumes unless listed in overlay."""
+        info = self.root.parent / 'mountinfo'
+        info.write_text(''.join(
+            f'{n} 0 0:{n} / {target} rw - ' + ('overlay overlay rw\n' if target in overlay else 'ext4 /dev/sda rw\n')
+            for n, target in enumerate(targets, 1)))
+        return info
+
+    def test_shared_prepare_owns_only_the_git_volume_and_dependency_roots(self):
+        dependency = self.root / 'packages/app/node_modules'
+        dependency.mkdir(parents=True)
+        info = self.mountinfo(self.root / '.git', dependency, overlay=(dependency,))
+        changed = []
+        def record(fd, uid, gid):
+            changed.append(os.fstat(fd).st_ino)
+        with patch.object(mounts.os, 'fchown', record):
+            mounts.prepare(self.root, os.getuid() + 1, os.getgid(), 'shared', info)
+        self.assertEqual(changed, [(self.root / '.git').stat().st_ino, dependency.stat().st_ino])
+
+    def test_shared_prepare_refuses_to_own_the_host_git(self):
+        info = self.mountinfo(self.root / 'elsewhere')
+        with patch.object(mounts.os, 'fchown') as chown:
+            with self.assertRaisesRegex(ValueError, 'not the agent-git volume'):
+                mounts.prepare(self.root, os.getuid() + 1, os.getgid(), 'shared', info)
+        chown.assert_not_called()
+
+    def test_shared_startup_checks_host_git_read_only_and_agent_git_writable(self):
+        host_git = self.root.parent / 'host-git'
+        shutil.copytree(self.root / '.git', host_git)
+        read_only = {self.root / '.devcontainer', host_git}
         def access(path, mode):
-            return not (Path(path) in protected and mode & os.W_OK)
+            return not (Path(path) in read_only and mode & os.W_OK)
         def statvfs(path):
-            return SimpleNamespace(f_flag=os.ST_RDONLY if Path(path) in protected else 0)
-        with patch.object(mounts.os, 'access', side_effect=access), \
+            return SimpleNamespace(f_flag=os.ST_RDONLY if Path(path) in read_only else 0)
+        info = self.mountinfo(self.root / '.git')
+        with patch.object(mounts, 'HOST_GIT', host_git), patch.object(mounts.os, 'access', side_effect=access), \
                 patch.object(mounts.os, 'statvfs', side_effect=statvfs):
-            mounts.check_shared(self.root, writable=True)
-            protected.remove(self.root / '.git/hooks')
-            with self.assertRaisesRegex(ValueError, 'hooks must be mounted read-only'):
-                mounts.check_shared(self.root, writable=True)
-            protected.add(self.root / '.git/hooks')
-            protected.add(self.root / '.git')
-            with self.assertRaisesRegex(ValueError, 'must be writable with git.shared_writable'):
-                mounts.check_shared(self.root, writable=True)
-
-    def test_shared_writable_environment_cannot_override_toml(self):
-        with self.assertRaisesRegex(ValueError, 'GIT_SHARED_WRITABLE in the environment'):
-            settings.generate(self.root, {'CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE': '1'})
-
-    def test_clone_ignores_shared_writable(self):
-        (self.root / '.devcontainer/claude.local.toml').write_text(
-            '[git]\nisolation = "clone"\nshared_writable = true\n')
-        self.assertEqual(self.generated_mounts(), {'/workspace': {'type': 'volume', 'source': 'workspace',
-                                                               'target': '/workspace'}})
+            mounts.check_shared(self.root, 'shared', info)
+            with self.assertRaisesRegex(ValueError, 'agent-git volume'):
+                mounts.check_shared(self.root, 'shared', self.mountinfo())
+            read_only.add(self.root / '.git')
+            with self.assertRaisesRegex(ValueError, 'agent-git volume'):
+                mounts.check_shared(self.root, 'shared', info)
+            read_only.remove(host_git)
+            with self.assertRaisesRegex(ValueError, 'must be mounted read-only in shared mode'):
+                mounts.check_shared(self.root, 'shared', info)
 
     def test_shared_masks_configured_paths_and_sumi(self):
         (self.root / 'vault').mkdir()
@@ -203,6 +183,8 @@ class GitIsolationTest(unittest.TestCase):
             self.assertFalse(mount['bind']['create_host_path'])
             self.assertEqual(Path(mount['source']).read_bytes(), b'')
         self.assertEqual((self.root / '.env').read_text(), 'hidden')
+        self.assertEqual((self.root / '.devcontainer/.generated/hidden.txt').read_text(),
+                         '.env\nvault\nprivate/sumi.txt\n')
 
     def test_shared_rejects_missing_extra_and_reserved_paths(self):
         for path in ('missing', '.git/config', '.devcontainer', '.devcontainer/.generated/key',

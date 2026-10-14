@@ -16,6 +16,7 @@ they read to .devcontainer/.generated/:
   images.txt    docker.images, one per line, for load-images.py and wait-ready.sh.
   agent.env     the dummy tokens that proxy.hosts' env names, for the agent.
   workspace.compose.yaml  the /workspace mount selected by git.isolation.
+  hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
 The settings come from these files only. A variable of settings.env in the
 environment or in .devcontainer/.env would win over settings.env in compose
@@ -24,7 +25,7 @@ alone, so `generate` refuses to run with one.
 Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
   settings.py prepare-dependencies  create persistent Node overlay directories
-  settings.py check-shared-mounts   validate shared mount parents before startup
+  settings.py check-shared-mounts   validate the host working tree's mounts before startup
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
 """
@@ -50,7 +51,7 @@ FILES = ('claude.toml', 'claude.local.toml')
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
-    'git': {'isolation': 'clone', 'shared_writable': False, 'shared_hidden_paths': []},
+    'git': {'isolation': 'clone', 'shared_hidden_paths': []},
     'agent': {'uid': 1000, 'gid': 1000},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -60,11 +61,16 @@ DEFAULTS = {
     'subnets': {'proxy': '', 'dind': ''},
 }
 HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
+ISOLATION_MODES = ('clone', 'shared')
+# The modes that mount the host's working tree as /workspace.
+SHARED_MODES = ('shared',)
+# Where shared mode shows the agent the host's Git, read-only.
+HOST_GIT = '/run/host/git'
 # compose's names, which settings.env writes. Only these may not come from
 # elsewhere; compose sets others, such as _PROXY_ADDRESS, in the containers.
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
-    'GIT_ISOLATION', 'GIT_SHARED_WRITABLE', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
+    'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
     'TODE', 'TODE_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
@@ -89,15 +95,6 @@ def _policy():
 
 
 policy = _policy()
-
-
-def git_protected_paths(root):
-    # Share the list with the container's startup check.
-    spec = importlib.util.spec_from_file_location(
-        'workspace_mounts', Path(__file__).resolve().parents[1] / 'agent/workspace_mounts.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.git_protected_paths(root)
 
 
 def type_name(default):
@@ -148,7 +145,7 @@ def check(data, source):
                 raise ValueError(f'{where}: expected {type_name(default)}')
             if isinstance(value, str) and ('\n' in value or "'" in value):
                 raise ValueError(f"{where}: newlines and ' are not allowed")
-    if data.get('git', {}).get('isolation', 'clone') not in ('clone', 'shared'):
+    if data.get('git', {}).get('isolation', 'clone') not in ISOLATION_MODES:
         raise ValueError(f'{source}: git.isolation: expected "clone" or "shared"')
     for value in data.get('git', {}).get('shared_hidden_paths', []):
         path = Path(value)
@@ -244,7 +241,6 @@ def variables(settings):
     secrets = settings['sumi']['secrets']
     values = {
         PREFIX + 'GIT_ISOLATION': settings['git']['isolation'],
-        PREFIX + 'GIT_SHARED_WRITABLE': '1' if settings['git']['shared_writable'] else '0',
         PREFIX + 'UID': str(settings['agent']['uid']),
         PREFIX + 'GID': str(settings['agent']['gid']),
         PREFIX + 'DIND': '1' if settings['docker']['enabled'] else '0',
@@ -309,11 +305,11 @@ def prepare_node_modules(root=ROOT, environ=os.environ):
         Path(path).mkdir(parents=True, exist_ok=True)
 
 
-def check_shared_repository(root):
+def check_shared_repository(root, mode='shared'):
     """Shared Git must be self-contained at the same relative container paths."""
     root = Path(root).resolve()
     git = root / '.git'
-    advice = 'git.isolation = "shared" needs a repository with an internal .git directory; use "clone" for linked worktrees or external Git storage.'
+    advice = f'git.isolation = "{mode}" needs a repository with an internal .git directory; use "clone" for linked worktrees or external Git storage.'
     if git.is_symlink() or not git.is_dir():
         raise ValueError(advice)
     result = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute',
@@ -348,22 +344,34 @@ def check_mount_path(root, relative):
 def shared_mounts(settings, root):
     """Mandatory protections and existing secret paths; no host files are created."""
     root = Path(root).resolve()
-    mounts = []
     for name in ('.git', '.devcontainer'):
-        path = check_mount_path(root, Path(name))
-        if not path.is_dir():
-            raise ValueError(f'shared workspace mount needs a directory: {path}')
-        mounts.append({'type': 'bind', 'source': str(path), 'target': '/workspace/' + name,
-                       'read_only': name != '.git' or not settings['git']['shared_writable'],
-                       'bind': {'create_host_path': False}})
-    if settings['git']['shared_writable']:
-        for path in git_protected_paths(root):
-            relative = path.relative_to(root)
-            check_mount_path(root, relative)
-            if not path.is_file() and not path.is_dir():
-                raise ValueError(f'Protected Git path must be a regular file or directory: {path}')
-            mounts.append({'type': 'bind', 'source': str(path), 'target': '/workspace/' + relative.as_posix(),
-                           'read_only': True, 'bind': {'create_host_path': False}})
+        if not check_mount_path(root, Path(name)).is_dir():
+            raise ValueError(f'shared workspace mount needs a directory: {root / name}')
+
+    def read_only(name, target):
+        return {'type': 'bind', 'source': str(root / name), 'target': target,
+                'read_only': True, 'bind': {'create_host_path': False}}
+    mounts = [read_only('.devcontainer', '/workspace/.devcontainer')]
+    # The agent's own Git. Docker seeds a new volume from the image, never
+    # from the host's .git bound beneath it; nocopy states that.
+    mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
+                   'volume': {'nocopy': True}})
+    mounts.append(read_only('.git', HOST_GIT))
+    for relative in hidden_paths(settings, root):
+        path = root / relative
+        target = '/workspace/' + relative.as_posix()
+        if path.is_dir():
+            mounts.append({'type': 'tmpfs', 'target': target, 'read_only': True,
+                           'tmpfs': {'size': 4096, 'mode': 0o555}})
+        else:
+            mounts.append({'type': 'bind', 'source': str(root / '.devcontainer/.generated/empty-secret'),
+                           'target': target, 'read_only': True, 'bind': {'create_host_path': False}})
+    return mounts
+
+
+def hidden_paths(settings, root):
+    """The existing files and directories to mask, relative to the root, parents first."""
+    root = Path(root).resolve()
     candidates = {}
     secrets = settings['sumi']['secrets']
     if not secrets.is_relative_to(root):
@@ -396,24 +404,16 @@ def shared_mounts(settings, root):
         check_mount_path(root, relative)
         if any(relative.is_relative_to(parent) for parent in hidden):
             continue
-        target = '/workspace/' + relative.as_posix()
-        if path.is_dir():
-            mount = {'type': 'tmpfs', 'target': target, 'read_only': True,
-                     'tmpfs': {'size': 4096, 'mode': 0o555}}
-        elif path.is_file():
-            mount = {'type': 'bind', 'source': str(root / '.devcontainer/.generated/empty-secret'),
-                     'target': target, 'read_only': True, 'bind': {'create_host_path': False}}
-        else:
+        if not path.is_dir() and not path.is_file():
             raise ValueError(f'Hidden shared path must be a regular file or directory: {relative}')
-        mounts.append(mount)
         hidden.append(relative)
-    return mounts
+    return hidden
 
 
 def workspace_compose(settings, root):
     mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
-    if settings['git']['isolation'] == 'shared':
-        check_shared_repository(root)
+    if settings['git']['isolation'] in SHARED_MODES:
+        check_shared_repository(root, settings['git']['isolation'])
         mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),
                    'target': '/workspace', 'bind': {'create_host_path': False}}]
         mounts += shared_mounts(settings, root)
@@ -424,7 +424,8 @@ def workspace_compose(settings, root):
 def check_shared_mounts(root=ROOT):
     """Check all destinations and mandatory protections before container startup."""
     settings = load(root)
-    if settings['git']['isolation'] != 'shared':
+    mode = settings['git']['isolation']
+    if mode not in SHARED_MODES:
         return
     result = subprocess.run(['docker', 'compose', '-f', str(Path(root) / '.devcontainer/compose.yaml'),
                              'config', '--format', 'json'], check=True, capture_output=True, text=True)
@@ -436,7 +437,7 @@ def check_shared_mounts(root=ROOT):
     workspace = [mount for mount in mounts if mount['target'] == '/workspace']
     if (len(workspace) != 1 or workspace[0]['type'] != 'bind'
             or Path(workspace[0]['source']).resolve() != Path(root).resolve()):
-        raise ValueError('git.isolation = "shared" needs .generated/workspace.compose.yaml in '
+        raise ValueError(f'git.isolation = "{mode}" needs .generated/workspace.compose.yaml in '
                          'compose.yaml include.path; update it from claude/template/compose.yaml.')
     for mount in mounts:
         target = Path(mount['target'])
@@ -453,10 +454,10 @@ def check_shared_mounts(root=ROOT):
     for expected in protections:
         actual = [m for m in mounts if m['target'] == expected['target']]
         if (len(actual) != 1 or actual[0]['type'] != expected['type']
-                or actual[0].get('read_only', False) != expected['read_only']
+                or actual[0].get('read_only', False) != expected.get('read_only', False)
                 or actual[0].get('source') != expected.get('source')):
             raise ValueError(f'Missing required shared protection: {expected["target"]}')
-        if not expected['read_only']:
+        if not expected.get('read_only', False):
             continue
         for mount in mounts:
             if mount['target'] != expected['target'] and Path(mount['target']).is_relative_to(expected['target']):
@@ -485,9 +486,10 @@ def generate(root=ROOT, environ=os.environ):
     out = Path(root) / '.devcontainer/.generated'
     out.mkdir(parents=True, exist_ok=True)
     (out / '.gitignore').write_text('*\n')
-    if settings['git']['isolation'] == 'shared':
+    if settings['git']['isolation'] in SHARED_MODES:
         write(out / 'empty-secret', '')
         (out / 'empty-secret').chmod(0o444)
+        write(out / 'hidden.txt', ''.join(p.as_posix() + '\n' for p in hidden_paths(settings, root)))
     header = '# Written by scripts/settings.py from claude.toml and claude.local.toml; do not edit.\n'
     values = variables(settings) | node_modules_paths(root, environ)
     write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in values.items()))

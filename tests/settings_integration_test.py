@@ -221,41 +221,36 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.initialize()
         self.assertEqual(self.compose_config(), clone)
 
-    def test_shared_unborn_repository_skips_snapshot_and_remote_registration(self):
-        subprocess.run(['git', '-C', str(self.root), 'checkout', '--orphan', 'unborn'],
-                       check=True, capture_output=True)
-        subprocess.run(['git', '-C', str(self.root), 'remote', 'add', 'agent', 'https://example.com/custom'], check=True)
-        before = (self.root / '.git/config').read_bytes()
+    def test_shared_mounts_resolve_through_compose(self):
         self.write('claude.toml', '[git]\nisolation = "shared"\n')
         self.initialize()
-        self.assertFalse((self.config / '.generated/workspace.json').exists())
-        self.assertEqual((self.root / '.git/config').read_bytes(), before)
-
-    def test_shared_writable_reaches_compose_and_local_override_restores_read_only(self):
-        self.write('claude.toml', '[git]\nisolation = "shared"\nshared_writable = true\n')
-        self.initialize()
-        agent = self.compose_config()['services']['agent']
-        self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE'], '1')
+        config = self.compose_config()
+        agent = config['services']['agent']
+        self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_GIT_ISOLATION'], 'shared')
+        self.assertNotIn('CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE', agent['environment'])
+        self.assertEqual(agent['labels']['dev.claude-devcontainer.git-isolation'], 'shared')
         mounts = {m['target']: m for m in agent['volumes']}
-        self.assertFalse(mounts['/workspace/.git'].get('read_only', False))
-        for name in ('.devcontainer', '.git/config', '.git/hooks', '.git/info', '.git/objects/info'):
-            self.assertTrue(mounts['/workspace/' + name]['read_only'])
-        self.write('claude.local.toml', '[git]\nshared_writable = false\n')
-        self.initialize()
-        agent = self.compose_config()['services']['agent']
-        self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE'], '0')
-        mounts = {m['target']: m for m in agent['volumes']}
-        self.assertTrue(mounts['/workspace/.git']['read_only'])
-        self.assertNotIn('/workspace/.git/hooks', mounts)
+        self.assertEqual((mounts['/workspace']['type'], mounts['/workspace']['source']), ('bind', str(self.root)))
+        git = mounts['/workspace/.git']
+        self.assertEqual((git['type'], git['source'], git.get('read_only', False)), ('volume', 'agent-git', False))
+        self.assertTrue(git['volume']['nocopy'])
+        self.assertEqual(config['volumes']['agent-git']['name'], config['name'] + '_agent-git')
+        for target in ('/run/host/git', '/workspace/.devcontainer'):
+            self.assertTrue(mounts[target]['read_only'])
+        self.assertEqual(mounts['/run/host/git']['source'], str(self.root / '.git'))
+        # Seeded and registered as clone is.
+        self.assertTrue((self.config / '.generated/workspace.json').exists())
+        self.assertIn('remote.agent.url', subprocess.run(['git', '-C', str(self.root), 'config', '--list'],
+                                                        capture_output=True, text=True).stdout)
 
-    def test_shared_writable_rejects_overridden_git_protections(self):
-        self.write('claude.toml', '[git]\nisolation = "shared"\nshared_writable = true\n')
+    def test_shared_rejects_overridden_git_protections(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\n')
         compose = self.config / 'compose.yaml'
         original = compose.read_text()
-        for target in ('.git/config', '.git/hooks', '.git/hooks/new-hook'):
+        for target in ('/workspace/.git', '/run/host/git', '/run/host/git/hooks'):
             with self.subTest(target=target):
                 compose.write_text(original + '\nservices:\n  agent:\n    volumes:\n'
-                                   f'      - extra:/workspace/{target}\nvolumes:\n  extra:\n')
+                                   f'      - extra:{target}\nvolumes:\n  extra:\n')
                 failed = self.initialize(check=False)
                 self.assertNotEqual(failed.returncode, 0)
                 self.assertIn('shared protection', failed.stderr)
@@ -292,7 +287,8 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.write('claude.local.toml', '[git]\nisolation = "shared"\nshared_hidden_paths = [".secrets", ".env"]\n')
         self.initialize()
         mounts = {m['target']: m for m in self.compose_config()['services']['agent']['volumes']}
-        for name in ('.git', '.devcontainer', '.secrets', '.env'):
+        self.assertTrue(mounts['/run/host/git']['read_only'])
+        for name in ('.devcontainer', '.secrets', '.env'):
             self.assertTrue(mounts['/workspace/' + name]['read_only'])
         self.assertEqual(mounts['/workspace/.secrets']['type'], 'tmpfs')
         self.assertEqual(Path(mounts['/workspace/.env']['source']).read_bytes(), b'')
@@ -312,7 +308,7 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.write('claude.toml', '[git]\nisolation = "shared"\n')
         compose = self.config / 'compose.yaml'
         compose.write_text(compose.read_text() + '\nservices:\n  agent:\n    volumes:\n'
-                           '      - extra:/workspace/.git/hooks\nvolumes:\n  extra:\n')
+                           '      - extra:/run/host/git/hooks\nvolumes:\n  extra:\n')
         failed = self.initialize(check=False)
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn('Mount overrides shared protection', failed.stderr)
@@ -321,7 +317,7 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.write('claude.toml', '[git]\nisolation = "shared"\n')
         compose = self.config / 'compose.yaml'
         compose.write_text(compose.read_text() + '\nservices:\n  agent:\n    tmpfs:\n'
-                           '      - /workspace/.git/hooks\n')
+                           '      - /run/host/git/hooks\n')
         failed = self.initialize(check=False)
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn('Mount overrides shared protection', failed.stderr)

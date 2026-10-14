@@ -1,4 +1,4 @@
-"""Real mounts and Git across clone -> shared -> clone, in a disposable repository.
+"""Real mounts and Git across clone and shared, in a disposable repository.
 
 RUN_GIT_ISOLATION_DOCKER_TESTS=1 enables this; an existing agent image supplies
 Python/Git/setpriv. Current workspace scripts are mounted over its old copies.
@@ -36,6 +36,7 @@ class GitIsolationIntegrationTest(unittest.TestCase):
         self.project = 'cdc-git-isolation-' + uuid.uuid4().hex[:12]
         self.container = self.project + '-agent'
         self.volume = self.project + '_workspace'
+        self.agent_git = self.project + '_agent-git'
         self.dependencies = self.project + '_node_modules'
         temporary = tempfile.TemporaryDirectory(prefix='cdc-isolation-')
         self.addCleanup(temporary.cleanup)
@@ -68,6 +69,7 @@ class GitIsolationIntegrationTest(unittest.TestCase):
             (self.root / name).mkdir()
         self.docker('volume', 'create', self.volume)
         self.addCleanup(self.docker, 'volume', 'rm', self.volume)
+        self.addCleanup(self.docker, 'volume', 'rm', self.agent_git, check=False)
         self.docker('volume', 'create', '--driver', 'local', '--opt', 'type=overlay', '--opt', 'device=overlay',
                     '--opt', f'o=lowerdir={lower},upperdir={self.root}/upper,workdir={self.root}/work', self.dependencies)
         self.addCleanup(self.docker, 'volume', 'rm', self.dependencies)
@@ -86,11 +88,10 @@ class GitIsolationIntegrationTest(unittest.TestCase):
     def execute(self, *args, check=True):
         return self.docker('exec', '--user', 'node', self.container, *args, check=check)
 
-    def start(self, mode, writable=False):
+    def start(self, mode):
         self.docker('rm', '-f', self.container, check=False)
         (self.host / '.devcontainer/claude.toml').write_text(
             f'[git]\nisolation = "{mode}"\nshared_hidden_paths = [".secrets", ".env"]\n'
-            f'shared_writable = {str(writable).lower()}\n'
             '[sumi]\nsecrets = "sumi.txt"\n')
         settings.generate(self.host, {})
         volumes = [
@@ -112,10 +113,12 @@ class GitIsolationIntegrationTest(unittest.TestCase):
                 'security_opt': ['no-new-privileges=true'],
                 'labels': {'devcontainer.local_folder': str(self.host), 'dev.claude-devcontainer.git-isolation': mode},
                 'environment': {'CLAUDE_DEVCONTAINER_GIT_ISOLATION': mode, 'CLAUDE_DEVCONTAINER_DIND': '0',
-                                'CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE': '1' if writable else '0',
-                                'CLAUDE_DEVCONTAINER_NIX': '0', 'CLAUDE_DEVCONTAINER_SUMI': '0'},
+                                'CLAUDE_DEVCONTAINER_NIX': '0', 'CLAUDE_DEVCONTAINER_SUMI': '0',
+                                'GIT_AUTHOR_NAME': 'fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.com',
+                                'GIT_COMMITTER_NAME': 'fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.com'},
                 'volumes': volumes}},
             'volumes': {'workspace': {'external': True, 'name': self.volume},
+                        'agent-git': {},
                         'dependencies': {'external': True, 'name': self.dependencies}}}))
         self.docker('compose', '-p', self.project, '-f', str(self.generated / 'workspace.compose.yaml'),
                     '-f', str(runner), 'up', '-d', '--no-build', '--pull', 'never', 'agent')
@@ -126,50 +129,9 @@ class GitIsolationIntegrationTest(unittest.TestCase):
                     'sleep 0.1; done; exit 1')
         self.execute('sh', '/usr/local/bin/wait-ready.sh')
 
-    def test_real_shared_edits_git_and_clone_persistence(self):
-        self.start('clone')
-        self.execute('git', '-C', '/workspace', 'switch', '-c', 'agent/task')
-        self.execute('sh', '-ec', 'echo clone-only > /workspace/dirty; echo overlay-change > /workspace/node_modules/dependency')
-        self.assertFalse((self.host / 'dirty').exists())
-        self.assertEqual((self.host / 'node_modules/dependency').read_text(), 'host dependency\n')
-        self.git('fetch', 'agent')
-        (self.host / 'tracked').write_text('host dirty\n')
-        (self.host / 'untracked').write_text('host untracked\n')
-        paths = [self.host, self.host / '.git', self.host / '.devcontainer', self.host / 'node_modules']
-        before = [(p.stat().st_uid, p.stat().st_gid, p.stat().st_mode) for p in paths]
-        self.start('shared')
-        self.assertEqual(self.execute('cat', '/workspace/tracked').stdout, 'host dirty\n')
-        self.assertEqual(self.execute('cat', '/workspace/untracked').stdout, 'host untracked\n')
-        self.execute('sh', '-ec', 'echo shared-edit > /workspace/tracked')
-        for args in [('status', '--short'), ('diff',), ('log', '-1', '--oneline')]:
-            self.execute('git', '-C', '/workspace', *args)
-        for args in [('switch', '-c', 'forbidden'), ('add', 'tracked'), ('commit', '-am', 'forbidden'), ('stash',)]:
-            self.assertNotEqual(self.execute('git', '-C', '/workspace', *args, check=False).returncode, 0, args)
-        self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.initial)
-        self.assertIn('+shared-edit', self.git('diff').stdout)
-        self.assert_shared_protections()
-        self.git('switch', '-c', 'shared/task')
-        self.git('add', 'tracked')
-        self.git('commit', '-qm', 'shared edit')
-        self.assertEqual((self.host / 'tracked').read_text(), 'shared-edit\n')
-        self.assertEqual(self.git('branch', '--show-current').stdout.strip(), 'shared/task')
-        self.assertEqual([(p.stat().st_uid, p.stat().st_gid, p.stat().st_mode) for p in paths], before)
-        self.assertEqual(self.execute('cat', '/workspace/node_modules/dependency').stdout, 'overlay-change\n')
-        for args in [('fetch', 'agent'), ('push', 'agent', 'HEAD:probe')]:
-            result = self.git(*args, check=False)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('shared', result.stderr)
-        self.start('clone')
-        self.assertEqual(self.execute('git', '-C', '/workspace', 'branch', '--show-current').stdout.strip(), 'agent/task')
-        self.assertEqual(self.execute('git', '-C', '/workspace', 'rev-parse', 'HEAD').stdout.strip(), self.initial)
-        self.assertEqual(self.execute('cat', '/workspace/dirty').stdout, 'clone-only\n')
-        self.assertEqual(self.execute('cat', '/workspace/node_modules/dependency').stdout, 'overlay-change\n')
-        self.assertEqual((self.host / 'node_modules/dependency').read_text(), 'host dependency\n')
-        self.assertEqual(self.git('branch', '--show-current').stdout.strip(), 'shared/task')
-
     def assert_shared_protections(self):
         self.execute('python3', '-c', '''
-import ctypes, errno, os
+import ctypes, errno, os, sys
 from pathlib import Path
 status = Path('/proc/self/status').read_text()
 assert int(next(line.split()[1] for line in status.splitlines() if line.startswith('CapEff:')), 16) == 0
@@ -177,8 +139,7 @@ assert list(Path('/workspace/.secrets').iterdir()) == []
 for name in ('.env', '.devcontainer/sumi.txt'):
     assert (Path('/workspace') / name).read_bytes() == b''
 assert not Path('/workspace/.secrets/token').exists()
-for name in ('.git/config', '.git/commondir', '.git/hooks/evil', '.git/objects/evil',
-             '.devcontainer/claude.toml', '.devcontainer/new', '.devcontainer/.generated/empty-secret',
+for name in ('.devcontainer/claude.toml', '.devcontainer/new', '.devcontainer/.generated/empty-secret',
              '.secrets/new', '.env', '.devcontainer/sumi.txt'):
     try:
         (Path('/workspace') / name).write_text('tampered')
@@ -202,66 +163,66 @@ for name in ('.git', '.devcontainer', '.secrets', '.env'):
         self.assertEqual((self.host / '.env').read_text(), 'file-secret\n')
         self.assertEqual((self.host / '.devcontainer/sumi.txt').read_text(), 'sumi-secret\n')
 
-    def test_shared_writable_git_operations_and_sensitive_mounts(self):
-        config = (self.host / '.git/config').read_bytes()
-        self.start('shared', writable=True)
-        self.execute('git', '-C', '/workspace', 'switch', '-c', 'agent/writable')
-        self.execute('sh', '-ec', 'echo shared-commit > /workspace/tracked')
+    def test_shared_commits_stay_private_until_accepted(self):
+        self.start('clone')
+        host_git = {p: p.read_bytes() for p in (self.host / '.git').rglob('*') if p.is_file()}
+        (self.host / 'tracked').write_text('host dirty\n')
+        self.start('shared')
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'branch', '--show-current').stdout.strip(), 'main')
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'rev-parse', 'HEAD').stdout.strip(), self.initial)
+        self.assertEqual(self.execute('cat', '/workspace/tracked').stdout, 'host dirty\n')
+        self.execute('git', '-C', '/workspace', 'switch', '-qc', 'agent/task')
+        self.execute('sh', '-ec', 'echo agent-commit > /workspace/tracked; echo agent-left > /workspace/left')
         self.execute('git', '-C', '/workspace', 'add', 'tracked')
-        self.execute('git', '-C', '/workspace', 'commit', '-qm', 'shared commit')
-        self.assertEqual(self.git('branch', '--show-current').stdout.strip(), 'agent/writable')
-        self.assertNotEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.initial)
-        self.assertEqual(self.git('show', 'HEAD:tracked').stdout, 'shared-commit\n')
-        self.execute('sh', '-ec', 'echo stashed > /workspace/tracked')
-        self.execute('git', '-C', '/workspace', 'stash', 'push', '-qm', 'shared stash')
-        self.assertEqual((self.host / 'tracked').read_text(), 'shared-commit\n')
-        self.execute('git', '-C', '/workspace', 'stash', 'pop', '-q')
-        self.assertEqual((self.host / 'tracked').read_text(), 'stashed\n')
-        self.assertNotEqual(self.execute('git', '-C', '/workspace', 'config', '--local',
-                                        'core.hooksPath', '/tmp/hooks', check=False).returncode, 0)
+        self.execute('git', '-C', '/workspace', 'commit', '-qm', 'agent commit')
+        agent_commit = self.execute('git', '-C', '/workspace', 'rev-parse', 'HEAD').stdout.strip()
+        self.execute('git', '-C', '/workspace', 'stash', 'list')
+        # The host's Git is untouched; its files carry the agent's edits.
+        self.assertEqual({p: p.read_bytes() for p in (self.host / '.git').rglob('*') if p.is_file()}, host_git)
+        self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.initial)
+        self.assertEqual((self.host / 'tracked').read_text(), 'agent-commit\n')
+        self.assert_shared_protections()
         self.execute('python3', '-c', '''
 import errno, os
 from pathlib import Path
-for name in ('.git/config', '.git/hooks/new-hook', '.git/info/attributes',
-             '.git/objects/info/alternates', '.devcontainer/claude.toml', '.secrets/new', '.env'):
+for name in ('HEAD', 'config', 'hooks/evil', 'objects/evil', 'refs/heads/main'):
     try:
-        (Path('/workspace') / name).write_text('tampered')
+        (Path('/run/host/git') / name).write_text('tampered')
     except OSError as error:
         assert error.errno == errno.EROFS, (name, error)
     else:
         raise AssertionError(name)
-for name in ('.git', '.git/config', '.git/hooks', '.devcontainer'):
-    path = '/workspace/' + name
-    try:
-        os.rename(path, path + '-moved')
-    except OSError as error:
-        assert error.errno in (errno.EBUSY, errno.EROFS), (name, error)
-    else:
-        raise AssertionError(name)
-assert Path('/workspace/.env').read_bytes() == b''
-assert list(Path('/workspace/.secrets').iterdir()) == []
+assert Path('/workspace/.git/objects').is_dir() and not Path('/workspace/.git/objects/info/alternates').exists()
 ''')
-        self.assertEqual((self.host / '.git/config').read_bytes(), config)
+        self.git('fetch', '--no-tags', 'agent', 'refs/heads/agent/task')
+        self.assertEqual(self.git('rev-parse', 'FETCH_HEAD').stdout.strip(), agent_commit)
+        self.assertIn('+agent-commit', self.git('diff', self.initial, agent_commit).stdout)
+        result = self.git('push', 'agent', 'HEAD:probe', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('shared', result.stderr)
+        scripts = self.host / '.devcontainer/claude/scripts'
+        self.git('diff', '--cached', '--quiet')
+        self.git('merge-base', '--is-ancestor', 'HEAD', agent_commit)
+        self.git('reset', '-q', '--mixed', agent_commit)
+        self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), agent_commit)
+        self.assertEqual(self.git('status', '--porcelain', '--', 'tracked', 'left').stdout, '?? left\n')
+        self.assertEqual((self.host / 'left').read_text(), 'agent-left\n')
+        # Recreated, the agent follows the host's branch once its commit is accepted.
+        self.git('switch', '-qc', 'host/next')
+        self.git('commit', '-q', '--allow-empty', '-m', 'host commit')
+        self.command(sys.executable, str(scripts / 'workspace-source.py'))
         self.start('shared')
-        self.assertNotEqual(self.execute('git', '-C', '/workspace', 'add', 'tracked', check=False).returncode, 0)
-        self.assertEqual((self.host / 'tracked').read_text(), 'stashed\n')
-
-    def test_shared_writable_protects_existing_rebase_and_worktree_config(self):
-        for name in ('rebase-merge', 'rebase-apply', 'sequencer'):
-            (self.host / '.git' / name).mkdir()
-            (self.host / '.git' / name / 'git-rebase-todo').write_text('exec echo trusted\n')
-        (self.host / '.git/config.worktree').write_text('[user]\nname = trusted\n')
-        self.start('shared', writable=True)
-        for name in ('rebase-merge/git-rebase-todo', 'rebase-apply/git-rebase-todo',
-                     'sequencer/git-rebase-todo', 'config.worktree'):
-            original = (self.host / '.git' / name).read_bytes()
-            result = self.execute('python3', '-c',
-                                  'import sys; from pathlib import Path; Path(sys.argv[1]).write_text("tampered")',
-                                  '/workspace/.git/' + name, check=False)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Read-only file system', result.stderr)
-            self.assertEqual((self.host / '.git' / name).read_bytes(), original)
-
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'branch', '--show-current').stdout.strip(), 'host/next')
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'rev-parse', 'HEAD').stdout.strip(),
+                         self.git('rev-parse', 'HEAD').stdout.strip())
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'rev-parse', 'agent/task').stdout.strip(), agent_commit)
+        self.assertEqual((self.host / 'left').read_text(), 'agent-left\n')
+        # The clone volume is untouched by shared, and the agent-git volume survives clone.
+        self.start('clone')
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'rev-parse', 'HEAD').stdout.strip(), self.initial)
+        self.assertNotEqual(self.execute('test', '-e', '/workspace/left', check=False).returncode, 0)
+        self.start('shared')
+        self.assertEqual(self.execute('git', '-C', '/workspace', 'rev-parse', 'agent/task').stdout.strip(), agent_commit)
 
 
 if __name__ == '__main__':

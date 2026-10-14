@@ -1,5 +1,12 @@
 # This repository's own settings; see claude/template/claude.toml for all of them.
 
+[git]
+# The agent edits this checkout in place and commits to its own .git; the host
+# reviews with `git fetch agent` and takes a commit with
+# `git reset --mixed COMMIT`. .devcontainer is
+# read-only in the container, so switch to "clone" to develop claude/ itself.
+isolation = "shared"
+
 [docker]
 enabled = true
 # Images needed by this repository's offline Docker probes and the demo app

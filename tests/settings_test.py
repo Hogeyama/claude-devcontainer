@@ -46,7 +46,7 @@ class SettingsTest(unittest.TestCase):
 
     def test_defaults(self):
         loaded = self.load()
-        self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_writable': False, 'shared_hidden_paths': []})
+        self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
@@ -76,8 +76,7 @@ class SettingsTest(unittest.TestCase):
         cases = [
             ('[git]\nisolation = "worktree"\n', r'git.isolation: expected "clone" or "shared"'),
             ('[git]\nisolation = true\n', r'git.isolation: expected a string'),
-            ('[git]\nshared_writable = "true"\n', r'git.shared_writable: expected true or false'),
-            ('[git]\nshared_writable = 1\n', r'git.shared_writable: expected true or false'),
+            ('[git]\nshared_writable = true\n', r'git.shared_writable: unknown setting'),
             ('[agent]\nuser = 1\n', r'claude.local.toml: agent.user: unknown setting'),
             ('[dind]\nenabled = true\n', r'claude.local.toml: unknown table \[dind\]'),
             ('[docker]\nenabled = 1\n', r'docker.enabled: expected true or false'),
@@ -178,7 +177,6 @@ dind = "10.99.1"
         out = self.generate()
         self.assertEqual({k: v for k, v in self.env().items() if '_NODE_' not in k}, {
             'CLAUDE_DEVCONTAINER_GIT_ISOLATION': "'clone'",
-            'CLAUDE_DEVCONTAINER_GIT_SHARED_WRITABLE': "'0'",
             'CLAUDE_DEVCONTAINER_UID': "'1001'", 'CLAUDE_DEVCONTAINER_GID': "'1000'",
             'CLAUDE_DEVCONTAINER_DIND': "'1'", 'CLAUDE_DEVCONTAINER_NIX': "'0'",
             'CLAUDE_DEVCONTAINER_NIX_REF': "'HEAD'",

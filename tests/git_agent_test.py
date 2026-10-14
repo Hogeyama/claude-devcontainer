@@ -192,3 +192,62 @@ else:
                     self.assertEqual(result.returncode == 0, allowed, result.stderr)
                     calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
                     self.assertEqual(any(call[0] == 'exec' for call in calls), allowed)
+
+    def use_shared(self):
+        """The running container's view in shared mode: the host tree bound, its own Git volume."""
+        self.inspect['Config']['Labels']['dev.claude-devcontainer.git-isolation'] = 'shared'
+        self.inspect['Mounts'] = [
+            {'Destination': '/workspace', 'Type': 'bind', 'Source': str(self.host), 'RW': True},
+            {'Destination': '/workspace/.git', 'Type': 'volume', 'Name': 'fixture_agent-git', 'RW': True}]
+        self.env['FAKE_INSPECT'] = json.dumps([self.inspect])
+
+    def test_shared_serves_fetch_but_refuses_push(self):
+        self.register()
+        self.use_shared()
+        self.git('fetch', 'agent')
+        self.assertEqual(self.git('rev-parse', 'agent/main').stdout, self.git('rev-parse', 'HEAD').stdout)
+        (self.root / 'calls').write_text('')
+        result = self.git('push', 'agent', 'HEAD:refs/heads/host/update', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('/run/host/git', result.stderr)
+        calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
+        self.assertFalse(any(call[0] == 'exec' for call in calls))
+
+    def test_shared_mounts_are_verified_before_git(self):
+        self.register()
+        for change in [{'Destination': '/workspace/.git', 'Type': 'bind', 'Source': str(self.host / '.git'), 'RW': True},
+                       {'Destination': '/workspace/.git', 'Type': 'volume', 'Name': 'other_agent-git', 'RW': True},
+                       {'Destination': '/workspace', 'Type': 'bind', 'Source': str(self.root), 'RW': True},
+                       {'Destination': '/workspace', 'Type': 'volume', 'Name': 'fixture_workspace', 'RW': True}]:
+            with self.subTest(change=change):
+                self.use_shared()
+                self.inspect['Mounts'] = [m for m in self.inspect['Mounts'] if m['Destination'] != change['Destination']] + [change]
+                self.env['FAKE_INSPECT'] = json.dumps([self.inspect])
+                result = self.git('fetch', 'agent', check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('shared mounts', result.stderr)
+
+    def test_shared_fetch_and_mixed_reset_preserve_files(self):
+        self.register()
+        self.use_shared()
+        agent = self.root / 'agent'
+        subprocess.run(['git', 'clone', '-q', str(self.server), str(agent)], env=self.env, check=True)
+        self.env['FAKE_AGENT_REPO'] = str(agent)
+        # The agent edits the shared tree, commits part of it, and leaves the rest.
+        (self.host / 'done').write_text('committed by the agent\n')
+        (self.host / 'extra').write_text('left in the tree\n')
+        (agent / 'done').write_text('committed by the agent\n')
+        subprocess.run(['git', '-C', str(agent), 'switch', '-qc', 'agent/task'], env=self.env, check=True)
+        subprocess.run(['git', '-C', str(agent), 'add', 'done'], env=self.env, check=True)
+        subprocess.run(['git', '-C', str(agent), 'commit', '-qm', 'agent work'], env=self.env, check=True)
+        self.git('fetch', '--no-tags', 'agent', 'refs/heads/agent/task')
+        commit = self.git('rev-parse', 'FETCH_HEAD').stdout.strip()
+        # Mixed reset changes only the host's Git; the container may already be gone.
+        self.env['FAKE_CONTAINERS'] = ''
+        self.git('diff', '--cached', '--quiet')
+        self.git('merge-base', '--is-ancestor', 'HEAD', commit)
+        self.git('reset', '-q', '--mixed', commit)
+        self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), commit)
+        self.assertEqual(self.git('status', '--porcelain', '--', 'done', 'extra').stdout, '?? extra\n')
+        self.assertEqual((self.host / 'done').read_text(), 'committed by the agent\n')
+        self.assertEqual((self.host / 'extra').read_text(), 'left in the tree\n')

@@ -4,17 +4,19 @@
 
 ## Gitの共有と分離
 
+モードは`clone`と`shared`の2種類。旧`worktree`設定は`shared`に変更する。従来のshared（ホストの`.git`を直接read-onlyで参照する方式）は廃止した。更新後はコンテナを再作成する。
+
 `.devcontainer/claude.toml`、またはホストだけの`.devcontainer/claude.local.toml`で指定する。省略時は従来どおり`clone`。ローカル設定が優先される。
 
 ```toml
 [git]
-isolation = "clone" # "shared" にするとホストと共有
+isolation = "clone" # "shared" にするとホストの作業ツリーを共有
 ```
 
 | 設定 | 作業場所 | Gitと変更の受け渡し |
 | --- | --- | --- |
 | `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストから`git fetch/push agent` |
-| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | 既定では`.git`はread-only。`shared_writable = true`でagentのGit更新を許可 |
+| `shared` | ホストの作業ツリーを`/workspace`へread-write mount | `/workspace/.git`はagent専用のvolume。ホストの`.git`は`/run/host/git`にread-only。ホストから`git fetch agent`と`git reset --mixed` |
 
 設定変更後はコンテナを再作成する。
 
@@ -22,25 +24,20 @@ isolation = "clone" # "shared" にするとホストと共有
 devcontainer up --workspace-folder . --remove-existing-container
 ```
 
-切り替えは保存先の選択だけで、自動同期は行わない。`clone → shared → clone`では以前のcloneのブランチと未コミット変更が残る。cloneが未作成なら、その時点のホストHEADから初期化する。Node/GradleのCoWは共通で、切り替えてもキャッシュを保持する。通常の切り替えで`down -v`やvolumeの削除を行わない。
-
-sharedでは初期Gitコピーと`agent`リモート登録を省略する。既存のリモート設定も削除・変更しないが、共有中のコンテナへの`git fetch/push agent`は拒否する。接続可否は実行中コンテナのlabelとmountで判定するため、設定を編集しただけなら、再作成前のcloneから成果を取得できる。
+切り替えは保存先の選択だけで、自動同期は行わない。`clone → shared → clone`では以前のcloneのブランチと未コミット変更が残る。cloneが未作成なら、その時点のホストHEADから初期化する。sharedの`agent-git` volumeも同様に、他のモードの間は取り外したまま残る。Node/GradleのCoWは共通で、切り替えてもキャッシュを保持する。通常の切り替えで`down -v`やvolumeの削除を行わない。
 
 sharedはルートに実体の`.git`ディレクトリがある通常リポジトリに対応する。linked worktree、外部git-dir、object alternatesなどは`clone`を使う。ホストのUID/GIDに`agent.uid`/`agent.gid`を合わせ、追加の依存mountの親ディレクトリはホストで事前に作る。起動処理はホストの作業ツリーや`.git`をchown/chmodしない。
-
-sharedでは既定で`.git`と`.devcontainer`全体をread-onlyで重ねてマウントする。agentは通常ファイルの編集と`git status` / `git diff` / `git log`を行い、add・commit・switch・stashなどGitの状態を変える操作はホストで行う。`.devcontainer`の保護を無効にする設定はない。このリポジトリの`.devcontainer/claude`など、起動設定を開発するときはcloneを使う。
-
-agentから共有リポジトリにadd・commit・switch・stashしたい場合は、`.devcontainer/claude.local.toml`に次を指定してコンテナを再作成する。
 
 ```toml
 [git]
 isolation = "shared"
-shared_writable = true # 既定はfalse。cloneでは効果なし
 ```
 
-この場合、`.git`はread-writeとし、その中の起動時に存在する`config`、`config.worktree`、`hooks/`、`info/`、`objects/info/`、`commondir`、`gitdir`、`worktrees/`、`modules/`、`rebase-merge/`、`rebase-apply/`、`sequencer/`をread-onlyで保護する。`git-rebase-todo`は親のrebaseディレクトリごと保護する。index・refs・objectsの通常の更新はホストへ即時反映される。`.devcontainer`全体と秘密パスの保護は維持する。
+sharedでは`/workspace/.git`に`agent-git` named volumeを重ね、ホストの`.git`は`/run/host/git`にread-onlyで置く。初回は`clone`と同じローカルコピー（`.generated/workspace-<commit>.git`）からagentの`.git`を作り、ホストと同じブランチ名でHEADとindexだけを組み立てる。作業ツリーのファイルには書かないので、ホストの未コミット変更はそのまま残る。agentはadd・commit・switch・stashを自分の`.git`に対して行い、ホストのindex・refs・設定・hooksには書けない。`.devcontainer`はread-onlyで保護する。このディレクトリ自体の開発にはcloneを使う。秘匿対象のうち追跡されているファイルは、agentからは空に見えるので、agentのindexで`skip-worktree`を付ける。`git status`に出ず、`git add`も拒否されるため、空になった版がcommitに入らない。
 
-存在しない保護対象は作成しない。したがって起動後に新設されたrebase状態や`commondir`、別の場所を指す`core.hooksPath`やconfigのinclude先は、この保護では書き込みを防げない。Git履歴・index・refs経由でホストの後続操作に影響を与えることもできるため、`.git`全体をread-onlyにした場合と同じ隔離は提供しない。既存のrebase・sequencer状態が保護されている間は、agentからの続行・中断は失敗し得る。保護対象をホストで作成・置換した後もコンテナを再作成する。
+agentのcommitはホストへ自動では乗らない。ホストで[fetchしてレビューし](#ホストでレビューして取り込む)、`git reset --mixed`でHEADとindexをそのコミットへ進める。agentへの`git push agent`は使えず、ホストの新しいコミットはagentが`git fetch /run/host/git <branch>`で取り込む。コンテナの再作成時にagentの未取り込みのコミットがなければ、agentのHEADはホストの現在のブランチとコミットに自動で追従する。あれば据え置いて警告を出す。
+
+agentの`git switch`や`stash`は共有作業ツリーのファイルを差し替える。agentにはホストと同じブランチ、またはそこから切った`agent/<task>`で作業し、作業ツリーを差し替えないよう指示している。ホストでサブディレクトリに入ってGitを実行する前に、agentが作った`.git`がないことを`find . -path ./.git -prune -o -name .git -print`で確認する（[隔離の範囲](network-policy.md#sharedで共有されるもの)）。
 
 秘匿対象は`.devcontainer/claude.local.toml`の`git.shared_hidden_paths`で指定する。既定は空のリストで、`.secrets`などの名前を特別扱いしない。リポジトリ内を指す`sumi.secrets`は別途自動で隠す。ディレクトリは空のread-only tmpfs、ファイルは空ファイルのread-only bindで覆う。
 
@@ -62,11 +59,11 @@ include:
     env_file: [.generated/networks.env, .generated/settings.env]
 ```
 
-## 初回起動（clone）
+## 初回起動（clone、shared）
 
-`devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、空のworkspace volumeにホストと同じブランチ名でcheckoutする。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
+`devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、cloneでは空のworkspace volumeにホストと同じブランチ名でcheckoutする。sharedでは同じコピーから`agent-git` volumeにHEADとindexだけを作り、ホストの作業ツリーには書かない。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
-## 受け渡し用リモート（clone）
+## 受け渡し用リモート（clone、shared）
 
 起動処理がホストに`agent`リモートを自動登録する。接続先は起動中のコンテナ内の`/workspace`であり、GitHubなどの外部リポジトリは介在しない。既存の`origin`は変更しない。同名の`agent`が別用途で存在する場合は上書きせず停止するので、既存のリモートを別名にしてから起動する。
 
@@ -111,11 +108,23 @@ git diff --stat "$base_commit" "$agent_commit" -- .devcontainer .gitmodules flak
 | `.gitmodules` | ホストの`git submodule update`が取得するURLを決める |
 | `package.json`、`build.gradle`、`gradle/wrapper/`、`Makefile`、`.husky/`など | ホストでビルド、テスト、`git commit`などを実行したときに動く |
 
-承認したら、同じコミットIDを取り込む。
+承認したら、同じコミットIDを取り込む。cloneではfast-forwardでmergeする。
 
 ```sh
 test "$(git rev-parse HEAD)" = "$base_commit" && git merge --ff-only "$agent_commit"
 ```
+
+sharedでは作業ツリーに既にagentの編集があるため、`git reset --mixed`でファイルを保持したままHEADとindexだけを進める。
+
+```sh
+test "$(git rev-parse HEAD)" = "$base_commit" &&
+  git diff --cached --quiet &&
+  git merge-base --is-ancestor "$base_commit" "$agent_commit" &&
+  git reset -q --mixed "$agent_commit" &&
+  git status --short
+```
+
+レビュー開始時からHEADが変わっていないこと、stagedな変更がないこと、取り込むコミットへfast-forwardできることを確認してから実行する。いずれかの確認に失敗すると、HEADとindexは変更しない。残った差分は取り込んだコミットに含まれない作業ツリーの変更である。fetch済みなら、コンテナが停止していても実行できる。
 
 レビュー中にエージェントが追加でcommitしたり、IDE が background fetch したりしても、変数に保存したIDは変わらない。ホストの HEAD が変わった場合は差分を確認し直す。ff できなければホストの変更を push し、エージェントに rebase を依頼して、更新後のコミットを再びレビューする。
 
@@ -129,7 +138,14 @@ git worktree add --detach ../repo.agent "$agent_commit"
 
 ## ホストの変更を渡す
 
-ホストから、コンテナの受け取り用ブランチへpushする。
+sharedでは、ホストの`.git`がコンテナの`/run/host/git`にread-onlyで見えている。agentがコンテナ内で取り込む。
+
+```sh
+git fetch /run/host/git main
+git reset --mixed FETCH_HEAD   # 作業ツリーは既にホストのもの
+```
+
+cloneでは、ホストからコンテナの受け取り用ブランチへpushする。
 
 ```sh
 git push agent HEAD:refs/heads/host/main
