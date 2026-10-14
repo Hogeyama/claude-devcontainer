@@ -5,6 +5,11 @@ from mitmproxy import http, ctx
 
 BACKEND = ('agent-code-server', 8088)
 PORT_HOST = re.compile(r'port-([1-9][0-9]{0,4})\.localhost')
+BLOCKED_PAGE = (
+    b'<!doctype html><title>Blocked by code-server proxy</title>'
+    b'<h1>Blocked by code-server proxy</h1>'
+    b'<p>This destination is outside the browser allowlist.</p>'
+)
 
 
 def target_for(host, port):
@@ -24,9 +29,8 @@ def block(flow):
     ctx.log.warn('CODE_SERVER_BLOCK ' + json.dumps({
         'method': flow.request.method, 'url': flow.request.pretty_url,
     }))
-    flow.response = http.Response.make(451,
-        b'<!doctype html><title>Blocked by code-server proxy</title><h1>Blocked by code-server proxy</h1><p>This destination is outside the browser allowlist.</p>',
-        {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'})
+    flow.response = http.Response.make(
+        451, BLOCKED_PAGE, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'})
 
 
 def http_connect(flow):
