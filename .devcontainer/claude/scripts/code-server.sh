@@ -33,12 +33,18 @@ open)
     "$scripts/compose.sh" exec -T agent sh -ec \
       'test "$CLAUDE_DEVCONTAINER_CODE_SERVER" = 1 && curl --fail --silent --noproxy "*" http://127.0.0.1:8088/healthz >/dev/null'
     "$scripts/compose.sh" up -d code-server-proxy
-    python3 - <<'PYTHON'
+    # The published port: compose takes a free one of its range per workspace.
+    port=$("$scripts/compose.sh" port code-server-proxy 8080 | sed 's/.*://')
+    case $port in
+    '' | *[!0-9]*) echo 'error: code-server-proxy has no published port; see compose.sh ps' >&2; exit 1 ;;
+    esac
+    python3 - "$port" <<'PYTHON'
 import http.client
 import sys
 import time
+port = int(sys.argv[1])
 for attempt in range(60):
-    conn = http.client.HTTPConnection('127.0.0.1', 18086, timeout=1)
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=1)
     try:
         conn.request('GET', 'http://ide.localhost:8000/healthz')
         if conn.getresponse().status == 200:
@@ -53,11 +59,16 @@ else:
 PYTHON
     case $client in
     windows)
+        # The AppContainer's WFP rules name this port and no other.
+        if [ "$port" != 18086 ]; then
+            echo "error: the proxy is on port $port, but the Windows client is allowed 18086 only; stop the other workspace's code-server-proxy first." >&2
+            exit 1
+        fi
         exec powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
           '& "$env:LOCALAPPDATA\ClaudeCodeServerSetup\launch.ps1"' ;;
     linux)
-        python3 "$linux/server.py"
-        exec python3 "$linux/client.py" ;;
+        # The lock, then the agent's server (linux/server.py), then the window.
+        exec python3 "$linux/client.py" --proxy-port "$port" --detach ;;
     esac ;;
 remove-network)
     case $client in

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +82,14 @@ class ClientTest(unittest.TestCase):
         self.assertIn(':/home/vscode:', passwd)
         self.assertIn('127.0.0.1 localhost', (self.tmp / 'etc/hosts').read_text())
 
+    def test_state_directory_is_per_workspace(self):
+        environ = {'XDG_STATE_HOME': str(self.tmp)}
+        first = client.state_directory(self.tmp / 'a', environ)
+        second = client.state_directory(self.tmp / 'b', environ)
+        self.assertTrue(first.is_relative_to(self.tmp / 'claude-devcontainer/vscode'))
+        self.assertNotEqual(first, second)
+        self.assertEqual(first, client.state_directory(self.tmp / 'a', environ))
+
     def test_code_command_is_remote_and_wayland(self):
         cmd = client.code_command(Path('/usr/bin/code'), '/workspace')
         self.assertIn('--folder-uri=vscode-remote://claude-devcontainer+agent/workspace', cmd)
@@ -126,8 +135,26 @@ class ClientTest(unittest.TestCase):
         self.assertNotEqual(found['outside'], 'connected')
         self.assertEqual(found['home_entries'], ['vscode'])
         self.assertEqual(found['relay'], 'probe')
-        self.assertTrue((state / 'claude-devcontainer/vscode/home/extensions').is_dir())
+        self.assertTrue((client.state_directory(environ=env) / 'home/extensions').is_dir())
         self.assertEqual(list(runtime.iterdir()), [])
+
+    @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap is not installed')
+    def test_detach_returns_once_started_and_logs(self):
+        state, runtime = self.tmp / 'state', self.tmp / 'runtime'
+        runtime.mkdir(mode=0o700)
+        env = os.environ | {'XDG_STATE_HOME': str(state), 'XDG_RUNTIME_DIR': str(runtime)}
+        # Nothing listens on the port: the probe still runs, with relay=''.
+        result = subprocess.run([sys.executable, str(LINUX / 'client.py'), '--probe', '--detach',
+                                 '--code', shutil.which('true'), '--proxy-port', '1'],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('client.log', result.stdout)
+        log = client.state_directory(environ=env) / 'client.log'
+        for _ in range(100):
+            if 'own_network_namespace' in log.read_text():
+                break
+            time.sleep(0.1)
+        self.assertIn('"home_entries": ["vscode"]', log.read_text())
 
 
 if __name__ == '__main__':

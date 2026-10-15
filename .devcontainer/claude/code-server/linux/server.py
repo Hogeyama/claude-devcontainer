@@ -21,6 +21,7 @@ code-server-proxy alone. The extensions are copied anew into the server's
 data directory at each start: the list is what is installed, as with the
 Windows client's code-server.
 """
+import argparse
 import hashlib
 import http.client
 from pathlib import Path
@@ -202,7 +203,8 @@ def wait_ready(commit, proxy_port=client.PROXY_PORT, attempts=120):
     fail(f'the VS Code server did not answer through code-server-proxy; see compose.sh exec agent cat {LOG}')
 
 
-def main():
+def prepare(proxy_port=client.PROXY_PORT):
+    """The server of the host's VS Code, up in the agent, with a new token in the state directory."""
     settings = client.load_settings()
     code = client.find_code(settings['vscode'])
     version, commit, arch = client.code_version(code)
@@ -213,12 +215,20 @@ def main():
     deploy(compose, extensions, f'{VOLUME}/extensions-{extensions.name}')
     new_token(compose, client.state_directory())
     start(compose, commit, f'{VOLUME}/extensions-{extensions.name}')
-    wait_ready(commit)
+    wait_ready(commit, proxy_port)
     print(f'VS Code server {version} ({commit}) is up in the agent', flush=True)
 
 
-if __name__ == '__main__':
+def main():
+    parser = argparse.ArgumentParser(description="Put the host's VS Code's server in the agent and start it.")
+    parser.add_argument('--proxy-port', type=int, default=client.PROXY_PORT,
+                        help="the host port of this workspace's code-server-proxy")
+    args = parser.parse_args()
     try:
-        main()
+        prepare(args.proxy_port)
     except (OSError, subprocess.CalledProcessError) as error:
         sys.exit(f'error: {error}')
+
+
+if __name__ == '__main__':
+    main()

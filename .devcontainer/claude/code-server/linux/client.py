@@ -31,6 +31,7 @@ Usage:  client.py [--folder /workspace]   open the window (the default)
 import argparse
 import asyncio
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,10 +41,15 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = Path(__file__).resolve().parent
-# .devcontainer/claude/scripts, for settings.py.
+# .devcontainer/claude/scripts, for settings.py. In the sandbox this file is
+# /run/code-server/client.py and has no workspace above it (workspace_root).
 SCRIPTS = HERE.parents[1] / 'scripts'
+# Inside the sandbox, where the relay listens and the resolver connects. Each
+# sandbox has its own network namespace, so the number is the same for every
+# workspace; the proxy's published port on the host is not (--proxy-port).
 PROXY_PORT = 18086
 # The resolver extension's ID (resolver/package.json) and the remote authority
 # it resolves. The server's folder is given on the command line.
@@ -56,6 +62,9 @@ SYSTEM = ('/usr', '/lib', '/lib64', '/lib32', '/bin', '/sbin', '/nix/store',
 HOME = '/home/vscode'
 # Paths in the sandbox.
 RUN = '/run/code-server'
+# In the private home: the sandbox puts it there once VS Code's process is
+# started (the window follows), which a detached parent waits for.
+LAUNCHED = '.launched'
 DENY = '''#!/bin/sh
 printf 'claude-devcontainer: opening external applications is disabled in this VS Code.\\n' >&2
 exit 126
@@ -113,10 +122,20 @@ def wayland_socket(environ=os.environ):
     return path
 
 
-def state_directory(environ=os.environ):
-    """Persistent client state: VS Code's user data and extensions, and the server's token."""
+def workspace_root():
+    return HERE.parents[3]
+
+
+def state_directory(root=None, environ=os.environ):
+    """Persistent client state of one workspace: VS Code's user data and extensions, the server's token, the log.
+
+    Per workspace, so that two can be open at once: VS Code instances must
+    not share a user data directory, and its own single-instance lock does
+    not see across PID namespaces.
+    """
+    root = Path(root or workspace_root()).resolve()
     state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
-    return state / 'claude-devcontainer/vscode'
+    return state / 'claude-devcontainer/vscode' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
 
 
 def load_settings():
@@ -277,6 +296,7 @@ async def inside(args):
         '127.0.0.1', PROXY_PORT)
     async with server:
         if args.probe:
+            Path(HOME, LAUNCHED).touch()
             found = probe(args.host_netns)
             reader, writer = await asyncio.open_connection('127.0.0.1', PROXY_PORT)
             writer.write(b'probe\n')
@@ -285,10 +305,65 @@ async def inside(args):
             print(json.dumps(found))
             return 0
         process = await asyncio.create_subprocess_exec(*code_command(Path(args.code), args.folder))
+        Path(HOME, LAUNCHED).touch()
         status = await process.wait()
         while others():
             await asyncio.sleep(1)
         return status
+
+
+def take_lock(state):
+    """One window per workspace: VS Code's own single-instance lock does not see across PID namespaces.
+
+    Taken before anything else happens to the workspace's server, so that a
+    second `open` does not restart the server under the open window. The
+    lock is the open file, which a detached child inherits.
+    """
+    home = state / 'home'
+    home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = open(state / 'lock', 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fail('the agent VS Code window is already open; close it first')
+    return lock
+
+
+def prepare_server(proxy_port):
+    """server.py: the agent's server of this VS Code, and the token for it."""
+    sys.path.insert(0, str(HERE))
+    import server
+    server.prepare(proxy_port)
+
+
+def detach(state):
+    """Fork: the child goes on as a session of its own, its output in client.log.
+
+    The parent returns once the sandbox reports (LAUNCHED in the private
+    home) that VS Code is started, or exits with the child's status and the
+    end of its log if it fails before that.
+    """
+    launched = state / 'home' / LAUNCHED
+    launched.unlink(missing_ok=True)
+    log = state / 'client.log'
+    pid = os.fork()
+    if pid == 0:
+        os.setsid()
+        with open(log, 'w') as out, open(os.devnull) as null:
+            os.dup2(null.fileno(), 0)
+            os.dup2(out.fileno(), 1)
+            os.dup2(out.fileno(), 2)
+        return True
+    for _ in range(600):
+        finished, status = os.waitpid(pid, os.WNOHANG)
+        if finished:
+            sys.stderr.write(log.read_text()[-2000:])
+            raise SystemExit(f'error: VS Code did not start; see {log}')
+        if launched.exists():
+            print(f'VS Code is open; its output goes to {log}')
+            return False
+        time.sleep(0.1)
+    raise SystemExit(f'error: VS Code is taking too long to start; see {log}')
 
 
 async def outside(args):
@@ -302,13 +377,6 @@ async def outside(args):
         return 0
     state = state_directory()
     home = state / 'home'
-    home.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # VS Code's own single-instance lock does not see across PID namespaces.
-    lock = open(state / 'lock', 'w')
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fail('the agent VS Code window is already open; close it first')
     try:
         token = (state / 'token').read_text().strip() if not args.probe else ''
     except FileNotFoundError:
@@ -344,21 +412,32 @@ async def outside(args):
                     await process.wait()
     finally:
         shutil.rmtree(runtime, ignore_errors=True)
-        lock.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description='Open the agent workspace in a sandboxed VS Code.')
     parser.add_argument('--folder', default='/workspace', help='the folder in the agent to open')
     parser.add_argument('--check', action='store_true', help='report what would be used, without opening a window')
+    parser.add_argument('--proxy-port', type=int, default=PROXY_PORT,
+                        help="the host port of this workspace's code-server-proxy")
+    parser.add_argument('--detach', action='store_true',
+                        help='return once VS Code is started; its output goes to client.log in the state directory')
     parser.add_argument('--code', help=argparse.SUPPRESS)        # tests: instead of codeServer.vscode
-    parser.add_argument('--proxy-port', type=int, default=PROXY_PORT, help=argparse.SUPPRESS)  # tests
     parser.add_argument('--probe', action='store_true', help=argparse.SUPPRESS)  # tests: report the sandbox, no window
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--host-netns', help=argparse.SUPPRESS)
     args = parser.parse_args()
     try:
-        sys.exit(asyncio.run(inside(args) if args.inside else outside(args)))
+        if args.inside:
+            sys.exit(asyncio.run(inside(args)))
+        if not args.check:
+            state = state_directory()
+            lock = take_lock(state)  # noqa: F841  held until this process and its child end
+            if not args.probe:
+                prepare_server(args.proxy_port)
+            if args.detach and not detach(state):
+                return
+        sys.exit(asyncio.run(outside(args)))
     except KeyboardInterrupt:
         sys.exit(130)
 

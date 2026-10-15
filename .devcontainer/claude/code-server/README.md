@@ -8,7 +8,8 @@ agent内の `/workspace` を、ホストの画面とIMEで編集します。画�
 | Windows x64 + WSL | 専用AppContainerのWebView2ウィンドウ | code-server（8088番） |
 | Linux（Wayland） | bubblewrapに入れたホストのVS Code | ホストのVS Codeと同じcommitの公式VS Code server（8089番） |
 
-どちらも通信は専用のproxy（`code-server-proxy`、ホストの127.0.0.1:18086）だけを通り、proxyのallowlist（`proxy.py`）が宛先を決めます。
+どちらも通信は専用のproxy（`code-server-proxy`）だけを通り、proxyのallowlist（`proxy.py`）が宛先を決めます。
+proxyはホストの127.0.0.1の18086〜18186番のうち空いている1つに公開され、`code-server.sh`がその番号をcomposeから取ります。
 
 ## 有効にする
 
@@ -70,7 +71,8 @@ WebView2 (Windows IME)
 Python 3.11以上、Waylandセッションです。X11は渡さないので、X11セッションでは起動しません。
 `prepare` はこれらを確認して表示するだけで、管理者権限は使いません。
 
-`open` は次の順で動きます（`linux/server.py`、`linux/client.py`）。
+`open` は次の順で動きます（`linux/client.py` が `linux/server.py` を呼びます）。
+同じworkspaceのウィンドウが開いている間は、serverを起動し直す前にロックで止まります。
 
 1. ホストの `code --version` のcommitに合う公式VS Code serverをホストで取得し、
    `~/.cache/claude-devcontainer/vscode-server/<commit>/` に保存します。
@@ -80,20 +82,21 @@ Python 3.11以上、Waylandセッションです。X11は渡さないので、X1
 3. serverと拡張を `docker compose cp` でagentの `vscode-server` volume（`/opt/vscode-server`）へ入れます。
    rootの所有なので、agentは書き換えられません。
 4. 接続トークンを新しく作り、agentの `/run/claude-devcontainer/vscode-token` と
-   ホストの `~/.local/state/claude-devcontainer/vscode/token` に置きます。
+   ホストのworkspaceごとの状態ディレクトリ（`~/.local/state/claude-devcontainer/vscode/<workspaceのハッシュ>/token`）に置きます。
 5. agentで `node` としてserverを8089番で起動します。拡張は起動のたびに
    `~/.vscode-server/extensions` へコピーし直すので、リストの内容に戻ります。
    データ（Machine設定、拡張の状態）は `vscode-server-data` volumeに残ります。
-6. ホストのVS Codeをbubblewrapの中で起動します。
+6. ホストのVS Codeをbubblewrapの中で起動します。`open`はウィンドウが起動した時点で戻り、
+   中継を持つプロセスは切り離されて残ります。その出力は状態ディレクトリの `client.log` に入ります。
 
 ```text
 VS Code（ホストのIME。Waylandのtext-input-v3）
   └─ bubblewrap: user/pid/net/ipc/uts namespaceを分離、capabilityなし
        ├─ /usr, /lib, /nix/store, /etc/fonts を読み取り専用で共有
-       ├─ 専用home（~/.local/state/claude-devcontainer/vscode/home）にuser-dataと拡張
+       ├─ 専用home（~/.local/state/claude-devcontainer/vscode/<workspaceのハッシュ>/home）にuser-dataと拡張
        ├─ Wayland socketだけを共有（home、D-Bus、X11、SSH agent、Docker socketは渡さない）
        └─ network namespaceはloopbackのみ
-            127.0.0.1:18086 → Unix socket → ホストの127.0.0.1:18086（code-server-proxy）
+            127.0.0.1:18086 → Unix socket → ホストの127.0.0.1:<公開ポート>（code-server-proxy）
               → vscode.localhost:8000 → agent:8089 の VS Code server → /workspace
 ```
 
@@ -106,9 +109,9 @@ VS Code（ホストのIME。Waylandのtext-input-v3）
   外部アドレスに届かないこと、ホストのhomeが見えないことを確かめ、違えば起動しません。
 - リモート拡張が開く「ローカル」ターミナルや `code --openExternal` は、このサンドボックスの中で動きます。
   `xdg-open` は拒否するスクリプトに置き換えています。
-- GPUは渡しません（`--disable-gpu`）。ホストのVS Codeの設定・拡張とは別のuser-dataを使います。
+- GPUは渡しません（`--disable-gpu`）。ホストのVS Codeの設定・拡張とは別の、workspaceごとのuser-dataを使います。
 - ホストのVS Codeを更新すると、次の `open` で新しいserverを取得します。
-- 2つ目のウィンドウは開けません（`~/.local/state/claude-devcontainer/vscode/lock`）。
+- 同じworkspaceの2つ目のウィンドウは開けません（状態ディレクトリの `lock`）。別のworkspaceは同時に開けます。
 - Linuxでもcode-server（8088番）はagentで動きますが、Linuxクライアントは使いません。
 
 ## 無効にする
@@ -123,9 +126,10 @@ VS Code（ホストのIME。Waylandのtext-input-v3）
 ## 制約
 
 - GitHubログイン・Settings Sync・実行時のMarketplaceアクセス・外部サイトのプレビューは未対応です。
-- 18086番を固定で使うため、同時に開くworkspaceは一つです。
+- Windowsクライアントは18086番だけを許可するため、同時に開くworkspaceは一つです。
   別workspaceへ切り替えるときはウィンドウを閉じ、以前の `code-server-proxy` を停止します。
-- 同じプロファイルを再利用するため、workspace同士を相互に隔離する機能ではありません。
+- Windowsでは同じプロファイルを再利用するため、workspace同士を相互に隔離する機能ではありません。
+  Linuxではuser-dataをworkspaceごとに分けますが、サンドボックスの構成は同じです。
 - proxyはローカル認証なしです。同一ホスト上の他ユーザーを敵とする環境や、
   EC2等への公開用の認証・TLS構成には対応していません。Linuxのserverの接続トークンは
   ホストの同じユーザーなら読めます。

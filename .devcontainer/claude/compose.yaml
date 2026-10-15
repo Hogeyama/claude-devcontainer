@@ -137,7 +137,10 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges=true]
     tmpfs: ["/home/mitmproxy/.mitmproxy:uid=1000,gid=1000,mode=0700"]
-    ports: ["127.0.0.1:18086:8080"]
+    # A free port of the range, so that several workspaces can be up at once;
+    # code-server.sh asks compose which. The Windows client's firewall rules
+    # name 18086, the first choice.
+    ports: ["127.0.0.1:18086-18186:8080"]
     extra_hosts:
       - agent-code-server:${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
     networks:
