@@ -1,9 +1,0 @@
-{
-  "date": "2026-10-15",
-  "platform": "Windows IME + NixOS on WSL",
-  "method": "User manual test in native AppContainer WebView2 window",
-  "question": "Candidate placement, inline composition and reconversion behave normally?",
-  "answer": "普段どおり動く",
-  "dpi_followup": "Initial DPI-unaware display reported blurry; changed to Per-Monitor V2, measured 144 DPI. User confirmed after fix: OK解像度上がりました; よさそう。",
-  "debian_fcitx5_ibus": "not tested on native desktop"
-}

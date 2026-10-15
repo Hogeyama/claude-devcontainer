@@ -67,7 +67,7 @@ frontendの実行時に`node_modules are out of sync with your lockfile`のWARN�
 
 ## ローカルブラウザからcode-serverを使う境界検証
 
-2026-10-15（JST）に、[browser-ideデモ](../demos/browser-ide/README.md)をLinuxのheadless Chromiumで検証しました。noVNCは使わず、ブラウザをbubblewrapのnetwork/mount/PID namespace内で起動し、固定宛先のUnix socket中継経由でmitmproxyに接続しています。[実測結果](../demos/browser-ide/evidence/linux-headless.json)を保存しています。
+2026-10-15（JST）に、当時のbrowser-ideデモをLinuxのheadless Chromiumで検証しました。noVNCは使わず、ブラウザをbubblewrapのnetwork/mount/PID namespace内で起動し、固定宛先のUnix socket中継経由でmitmproxyに接続しています。試作コードと証跡ファイルは削除済みで、Git履歴に残っています。以下は当時の検証記録です。
 
 | 観測点 | 結果 |
 | --- | --- |
@@ -85,7 +85,7 @@ frontendの実行時に`node_modules are out of sync with your lockfile`のWARN�
 ## Windows標準機能でのネイティブブラウザ検証
 
 2026-10-15（JST）に、Windows 11 Home（10.0.26200）＋NixOS on WSLで、
-[専用WebView2ブラウザ](../demos/browser-ide/windows/README.md)をAppContainer内で動かしました。
+当時の専用WebView2ブラウザをAppContainer内で動かしました。
 Sandboxie、追加カーネルドライバ、noVNCは使用していません。Windows IMEについては
 利用者から候補位置・インライン変換・再変換が「普段どおり動く」との実操作結果を得ています。
 
@@ -104,8 +104,7 @@ Sandboxie、追加カーネルドライバ、noVNCは使用していません。
   Windows側ブラウザでMarkdownプレビューと統合ターミナルのNode実行も確認しました。
 - 最初の試作は96 DPI扱いで拡大表示がぼやけました。Per-Monitor V2に修正し、144 DPIを記録しました。
 
-証跡は[ブラウザ試験](../demos/browser-ide/evidence/windows-browser.json)と
-[OS境界試験](../demos/browser-ide/evidence/windows-os-boundary.json)です。
+試作コードとブラウザ試験・OS境界試験の証跡ファイルは削除済みで、Git履歴に残っています。
 これは実測した経路のデモであり、全Windowsサービスの代理通信やCOMインターフェース、
 ブラウザ・OSの脆弱性を網羅する保証ではありません。元のデスクトップVS Codeでの
 ホスト実行結果を取り消すものでもありません。DebianのFcitx5／IBusによるGUI実機検証は未完了です。

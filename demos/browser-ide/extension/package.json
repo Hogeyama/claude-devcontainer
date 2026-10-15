@@ -1,1 +1,0 @@
-{"name":"boundary-probe","publisher":"demo","version":"0.0.1","engines":{"vscode":"^1.90.0"},"main":"./extension.js","extensionKind":["workspace"],"activationEvents":["onStartupFinished"],"contributes":{"commands":[{"command":"demo.boundaryProbe","title":"Demo: Open Boundary Probe"}]}}

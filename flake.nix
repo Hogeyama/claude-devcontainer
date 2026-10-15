@@ -30,15 +30,6 @@
           };
         in
         {
-          browser-ide-demo = pkgs.mkShellNoCC {
-            packages = with pkgs; [ bubblewrap chromium python3 nodejs_22 docker-client ];
-            BWRAP_BIN = "${pkgs.bubblewrap}/bin/bwrap";
-            CHROMIUM_BIN = "${pkgs.chromium}/bin/chromium";
-            PLAYWRIGHT_MODULE = "${pkgs.playwright-driver}";
-            FONTCONFIG_FILE = pkgs.makeFontsConf {
-              fontDirectories = with pkgs; [ dejavu_fonts liberation_ttf noto-fonts-cjk-sans ];
-            };
-          };
           default = pkgs.mkShellNoCC {
             packages = with pkgs; [
               python3

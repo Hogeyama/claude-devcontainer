@@ -5,14 +5,14 @@
 set -eu
 scripts=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 case "${1:-open}" in
-prepare|open|remove-network) action=${1:-open} ;;
-*) echo "usage: $0 [prepare|open|remove-network]" >&2; exit 2 ;;
+prepare|open) action=${1:-open} ;;
+*) echo "usage: $0 [prepare|open]" >&2; exit 2 ;;
 esac
-python3 - "$scripts" "$action" <<'PY'
+python3 - "$scripts" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import settings
-if sys.argv[2] != 'remove-network' and not settings.load()['codeServer']['enabled']:
+if not settings.load()['codeServer']['enabled']:
     sys.exit('error: set [codeServer] enabled = true in .devcontainer/claude.local.toml and rebuild first')
 PY
 # WSL opens the shell on Windows; any other Linux, in a Wayland or X11 session on Linux.
@@ -64,10 +64,4 @@ PYTHON
     fi
     # The lock, then Electron on the host; the launcher stays until it exits.
     exec python3 "$client" --proxy-port "$port" --detach ;;
-remove-network)
-    # The former WebView2 client's WFP rules and loopback exemption.
-    if [ "$windows" = 1 ]; then
-        exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$scripts/../code-server/windows/remove-network.ps1")"
-    fi
-    echo 'nothing to remove: the Linux client installs no host network rules.' ;;
 esac

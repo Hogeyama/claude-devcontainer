@@ -106,12 +106,6 @@ AppContainerやWFPでElectronを閉じ込めるには、ループバック免除
 そのため、Windowsで接続先を制限するのは、シェルの判定とproxyの許可リストだけです。
 レンダラーの脱出とブラウザプロセスの奪取を連鎖させる攻撃まで想定する場合は、Windows Sandboxでシェルを動かしてください。
 
-以前のWebView2クライアントを使っていた場合は、そのWFPのルールとループバック免除を次で消せます（UACの確認があります）。
-
-```sh
-.devcontainer/claude/scripts/code-server.sh remove-network
-```
-
 ## agent側のserver
 
 agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番で起動します。

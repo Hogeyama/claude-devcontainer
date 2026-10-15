@@ -142,7 +142,7 @@ Windowsでは、ホスト側スクリプト群（認証情報の注入、gitのe
 - [ ] ForgejoをSimple Browserで開き、ログインできること（`X-Frame-Options`の除去と、`SameSite=Lax`のCookie）
 - [ ] クリップボードの貼り付けが、読み取り権限を許可しなくても、実用上困らない範囲で動くこと
 - [ ] 日本語IME（WindowsのIME、Waylandのtext-input-v3）で、候補位置、インライン変換、再変換が動くこと
-- [ ] Linuxで、bubblewrapの中のElectronが、レンダラーのサンドボックスを有効にしたまま起動すること（namespaceの入れ子）。[demos/browser-ideの検証](../../testing.md#ローカルブラウザからcode-serverを使う境界検証)で、bubblewrap内のChromiumがnamespaceとseccomp-BPFのサンドボックスを有効にしたまま動くことは確認した。AppArmorが非特権user namespaceを制限するUbuntu 23.10以降では未確認である。
+- [ ] Linuxで、bubblewrapの中のElectronが、レンダラーのサンドボックスを有効にしたまま起動すること（namespaceの入れ子）。[削除済みのbrowser-ide試作の検証](../../testing.md#ローカルブラウザからcode-serverを使う境界検証)で、bubblewrap内のChromiumがnamespaceとseccomp-BPFのサンドボックスを有効にしたまま動くことは確認した。AppArmorが非特権user namespaceを制限するUbuntu 23.10以降では未確認である。
 - [ ] usage.mdの経路表にある各経路が、この構成で実際に遮断されていること
 
 このほか、Electronのセキュリティ更新に追従し続けることが、運用上の継続的なコストになる。
@@ -155,4 +155,4 @@ Linuxで共通部分（シェルとプロキシ）を完成させ、既存のbub
 2. webviewとagent内のWebアプリ：[オリジンの割り当て](#オリジンの割り当て)のとおりに、webviewのエンドポイントを自前で配信し、プロキシがポートで転送先を決めるようにする。code-serverが生成する`/proxy/<port>/...`は、信頼するproxyが`http://localhost:<port>/...`へ302で戻す。パスとクエリを保持し、code-serverのパス中継には渡さない。`VSCODE_PROXY_URI`と`--proxy-domain`は指定しない。agent内に中継のプロセスは置かず、agentのfirewallが`code-server-proxy`からの接続をすべてagentの127.0.0.1へDNATする。これには`net.ipv4.conf.all.route_localnet=1`が要る。127.0.0.1と0.0.0.0のどちらで待ち受けるアプリにも接続でき、ほかの送信元からの接続は、INPUTの既定のDROPで拒否される。route_localnetを有効にすると、ループバック宛てのパケットをほかのインターフェースからも受け取るので、INPUTの既定はDROPのまま保つ。この組み合わせは、network namespaceとveth、iptables（nf_tables）で動作を確かめた。ForgejoをSimple Browserで開き、ログインできることを確かめる。
 3. LinuxのOS層：`linux/client.py`のbubblewrap（`--unshare-net`とUNIXソケットの中継）の中で、VS Codeの代わりにElectronシェルを起動する。Waylandの入力メソッドの指定（text-input-v3）も引き継ぐ。AppArmorの前提条件を整える。
 4. Windows対応：WSL2でホスト側スクリプトとDockerを動かし、シェルをWindowsで動かす。Windows固有の検証項目（外部プロトコル、WebRTC、IME）を確認する。
-5. 置き換え：現行のWindowsクライアント（`windows/`のWebView2、AppContainer、WFP）、Linuxクライアントのresolver拡張とVS Code server（8089番）、code-server（8088番）を削除し、不要になる`codeServer.vscode`の設定も削除する。既存の利用者がWFPのルールとループバック免除を消せるよう、`code-server.sh remove-network`は移行のために残す。`[codeServer]`の設定から有効にできるようにし、`code-server/README.md`と[VS Codeで開く](../../usage.md#vs-codeで開く)を書き換えて、この構成で遮断される経路と残る経路を記載する。
+5. 置き換え：現行のWindowsクライアント（`windows/`のWebView2、AppContainer、WFP）、Linuxクライアントのresolver拡張とVS Code server（8089番）、code-server（8088番）を削除し、不要になる`codeServer.vscode`の設定も削除する。移行用に残していた旧WebView2環境のネットワーク設定削除コマンドは、試作・旧環境対応の整理に伴い削除済み。`[codeServer]`の設定から有効にできるようにし、`code-server/README.md`と[VS Codeで開く](../../usage.md#vs-codeで開く)を書き換えて、この構成で遮断される経路と残る経路を記載する。
