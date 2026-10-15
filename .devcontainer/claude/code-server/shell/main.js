@@ -128,6 +128,11 @@ app.on('web-contents-created', (event, contents) => {
     callback('');
   });
   contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+  // Closing the window closes it. VS Code's page refuses to unload when a
+  // modifier key is down, as with a compositor's close shortcut, to keep a
+  // browser tab from closing by mistake; Electron would then keep the window
+  // open, without a word.
+  contents.on('will-prevent-unload', (details) => details.preventDefault());
 });
 
 app.on('second-instance', () => {
