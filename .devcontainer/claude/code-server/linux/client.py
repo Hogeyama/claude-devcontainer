@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch the editor's Electron shell on Linux with Wayland IME support.
+"""Launch the editor's Electron shell on Linux with Wayland or X11.
 
 Electron connects directly to the workspace's code-server-proxy port.
 Chromium's renderer sandbox and the shell's network and external-launch
@@ -62,8 +62,17 @@ def wayland_socket(environ=os.environ):
     runtime = environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
     path = Path(name) if name.startswith('/') else Path(runtime) / name
     if not path.is_socket():
-        fail(f'a Wayland session is required ({path} is not a socket); the editor uses Wayland')
+        fail(f'a Wayland session is required ({path} is not a socket); check WAYLAND_DISPLAY')
     return path
+
+
+def display_backend(environ=os.environ):
+    """Prefer an explicitly selected Wayland session, otherwise use X11."""
+    if environ.get('WAYLAND_DISPLAY'):
+        return 'wayland', str(wayland_socket(environ))
+    if environ.get('DISPLAY'):
+        return 'x11', environ['DISPLAY']
+    fail('a Wayland or X11 session is required; set WAYLAND_DISPLAY or DISPLAY')
 
 
 def workspace_root():
@@ -80,12 +89,14 @@ def state_directory(root=None, environ=os.environ):
     return state / 'claude-devcontainer/vscode' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
 
 
-def shell_command(electron, shell, profile, port, folder):
+def shell_command(electron, shell, profile, port, folder, backend):
     """Connect to the host's proxy port, keeping Chromium's sandbox enabled."""
-    return [str(electron / 'electron'), str(shell), f'--proxy-port={port}', f'--folder={folder}',
-            f'--user-data-dir={profile}',
-            '--disable-gpu', '--ozone-platform=wayland', '--enable-features=WaylandWindowDecorations',
-            '--enable-wayland-ime', '--wayland-text-input-version=3']
+    command = [str(electron / 'electron'), str(shell), f'--proxy-port={port}', f'--folder={folder}',
+               f'--user-data-dir={profile}', '--disable-gpu', f'--ozone-platform={backend}']
+    if backend == 'wayland':
+        command += ['--enable-features=WaylandWindowDecorations',
+                    '--enable-wayland-ime', '--wayland-text-input-version=3']
+    return command
 
 
 def take_lock(state):
@@ -135,9 +146,9 @@ def detach(state):
     raise SystemExit(f'error: the editor is taking too long to start; see {log}')
 
 
-def report(electron, wayland):
+def report(electron, display):
     print(f'electron: {electron or "not downloaded yet; prepare or open downloads it"}\n'
-          f'wayland: {wayland}')
+          f'display: {display}')
     if userns_restricted():
         print('warning: ' + USERNS_ADVICE)
 
@@ -149,10 +160,12 @@ def open_window(args, state):
     with tempfile.TemporaryDirectory(prefix='code-server-') as runtime:
         shell = Path(runtime) / 'shell'
         shutil.copytree(SHELL, shell)
-        command = shell_command(directory, shell, profile, args.proxy_port, args.folder)
+        command = shell_command(directory, shell, profile, args.proxy_port, args.folder, args.backend)
         environ = dict(os.environ)
-        for name in ('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH', 'DISPLAY'):
+        for name in ('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH'):
             environ.pop(name, None)
+        if args.backend == 'wayland':
+            environ.pop('DISPLAY', None)
         process = subprocess.Popen(command, cwd=state, env=environ)
         try:
             (state / 'home' / LAUNCHED).touch()
@@ -175,15 +188,15 @@ def main():
     args = parser.parse_args()
     try:
         if args.prepare:
-            report(ensure_electron(), os.environ.get('WAYLAND_DISPLAY', 'not set'))
+            report(ensure_electron(), os.environ.get('WAYLAND_DISPLAY') or os.environ.get('DISPLAY') or 'not set')
             return
         if not args.check and not os.environ.get(TOKEN):
             fail(f'no connection token in {TOKEN}; open the editor with code-server.sh open')
-        wayland = wayland_socket()
+        args.backend, display = display_backend()
         if args.check:
             cache, platform = electron_directory()
             found = cache / f'{electron_module().VERSION}-{platform}'
-            report(found if found.is_dir() else None, wayland)
+            report(found if found.is_dir() else None, f'{args.backend}: {display}')
             return
         state = state_directory()
         lock = take_lock(state)  # noqa: F841 held until the launcher exits

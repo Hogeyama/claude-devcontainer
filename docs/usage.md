@@ -293,7 +293,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagent
 `[codeServer] enabled = true` で、agentの`/workspace`をホストの画面とIMEで編集できます。
 agentの中でCoderのcode-serverを動かし、ホストでは専用のElectronシェルがそれを表示します。
 シェルは、すべての通信を専用のproxyへ送り、agentのIDEとWebアプリ以外への通信、新規ウィンドウ、外部アプリケーションの起動を拒否します。
-Linux（Wayland）とWindows + WSLのどちらも、シェルをホストで直接動かします。
+Linux（Wayland／X11）とWindows + WSLのどちらも、シェルをホストで直接動かします。
 Chromiumのレンダラーsandboxは有効ですが、Electron全体を囲むOSの隔離はありません。
 [VS Codeが作る経路](#vs-codeが作る経路)はどれもできません。
 セットアップと制約は[隔離エディタの手順](../.devcontainer/claude/code-server/README.md)を参照してください。

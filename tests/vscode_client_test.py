@@ -34,6 +34,39 @@ class ClientTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'Wayland session is required'):
             client.wayland_socket({'XDG_RUNTIME_DIR': str(self.tmp), 'WAYLAND_DISPLAY': 'wayland-9'})
 
+    def test_display_selection(self):
+        socket = self.tmp / 'wayland-0'
+        os.mknod(socket, 0o600 | stat.S_IFSOCK)
+        self.assertEqual(client.display_backend({'WAYLAND_DISPLAY': str(socket), 'DISPLAY': ':0'}),
+                         ('wayland', str(socket)))
+        self.assertEqual(client.display_backend({'DISPLAY': ':0'}), ('x11', ':0'))
+        self.assertEqual(client.display_backend({'WAYLAND_DISPLAY': '', 'DISPLAY': 'localhost:10.0'}),
+                         ('x11', 'localhost:10.0'))
+        with self.assertRaisesRegex(SystemExit, 'Wayland or X11 session'):
+            client.display_backend({})
+        # A broken explicit Wayland selection is reported instead of silently changing backends.
+        with self.assertRaisesRegex(SystemExit, 'WAYLAND_DISPLAY'):
+            client.display_backend({'WAYLAND_DISPLAY': str(self.tmp / 'missing'), 'DISPLAY': ':0'})
+
+    def test_x11_launch_preserves_display_auth_and_input_method(self):
+        state = self.tmp / 'state'
+        with client.take_lock(state):
+            args = argparse.Namespace(proxy_port=18123, folder='/workspace', backend='x11')
+            env = {'DISPLAY': 'localhost:10.0', 'XAUTHORITY': '/tmp/xauth',
+                   'XMODIFIERS': '@im=fcitx', 'GTK_IM_MODULE': 'fcitx', client.TOKEN: 'test-token'}
+            with (mock.patch.dict(os.environ, env, clear=True),
+                  mock.patch.object(client, 'ensure_electron', return_value=self.tmp / 'electron'),
+                  mock.patch.object(client.subprocess, 'Popen') as popen):
+                popen.return_value.wait.return_value = 0
+                popen.return_value.poll.return_value = 0
+                self.assertEqual(client.open_window(args, state), 0)
+            command = popen.call_args.args[0]
+            self.assertIn('--ozone-platform=x11', command)
+            self.assertFalse(any('wayland' in arg.lower() for arg in command))
+            self.assertNotIn('--no-sandbox', command)
+            for name, value in env.items():
+                self.assertEqual(popen.call_args.kwargs['env'][name], value)
+
     def test_state_directory_is_per_workspace(self):
         environ = {'XDG_STATE_HOME': str(self.tmp)}
         first = client.state_directory(self.tmp / 'a', environ)
@@ -44,7 +77,7 @@ class ClientTest(unittest.TestCase):
 
     def test_shell_command_uses_host_proxy_and_existing_profile(self):
         cmd = client.shell_command(self.tmp / 'electron', self.tmp / 'shell',
-                                   self.tmp / 'home/shell', 18123, '/workspace')
+                                   self.tmp / 'home/shell', 18123, '/workspace', 'wayland')
         self.assertEqual(cmd[:2], [str(self.tmp / 'electron/electron'), str(self.tmp / 'shell')])
         self.assertIn('--proxy-port=18123', cmd)
         self.assertIn('--folder=/workspace', cmd)
@@ -89,7 +122,7 @@ class ClientTest(unittest.TestCase):
             profile = state / 'home/shell'
             profile.mkdir()
             (profile / 'existing').write_text('settings')
-            args = argparse.Namespace(proxy_port=18123, folder='/workspace/project')
+            args = argparse.Namespace(proxy_port=18123, folder='/workspace/project', backend='wayland')
             with (mock.patch.object(client, 'ensure_electron', return_value=self.tmp / 'electron'),
                   mock.patch.object(client.subprocess, 'Popen') as popen,
                   mock.patch.dict(os.environ, {client.TOKEN: 'test-token', 'ELECTRON_RUN_AS_NODE': '1',
@@ -118,7 +151,7 @@ class ClientTest(unittest.TestCase):
             f'spec = importlib.util.spec_from_file_location("client", {str(LINUX / "client.py")!r})\n'
             'client = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(client)\n'
             f'client.ensure_electron = lambda: Path({str(self.tmp)!r})\n'
-            'client.wayland_socket = lambda: Path("/unused")\nclient.main()\n')
+            'client.display_backend = lambda: ("x11", ":0")\nclient.main()\n')
         env = os.environ | {'XDG_STATE_HOME': str(self.tmp / 'state'), client.TOKEN: 'test-token'}
         result = subprocess.run([sys.executable, str(wrapper), '--detach', '--proxy-port', '18123'],
                                 env=env, capture_output=True, text=True, timeout=10)

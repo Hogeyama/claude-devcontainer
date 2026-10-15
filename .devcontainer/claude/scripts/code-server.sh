@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run on the trusted host: in WSL for the Windows client, on a Linux Wayland
+# Run on the trusted host: in WSL for the Windows client, on a Linux Wayland or X11
 # desktop for the Linux one. Both open the editor's Electron shell
 # (code-server/shell/), never an unrestricted browser or VS Code.
 set -eu
@@ -15,7 +15,7 @@ import settings
 if sys.argv[2] != 'remove-network' and not settings.load()['codeServer']['enabled']:
     sys.exit('error: set [codeServer] enabled = true in .devcontainer/claude.local.toml and rebuild first')
 PY
-# WSL opens the shell on Windows; any other Linux, in a Wayland session on Linux.
+# WSL opens the shell on Windows; any other Linux, in a Wayland or X11 session on Linux.
 if command -v wslpath >/dev/null && command -v powershell.exe >/dev/null; then
     client=$scripts/../code-server/windows/client.py
     windows=1
