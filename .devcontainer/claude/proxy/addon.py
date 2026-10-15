@@ -40,6 +40,16 @@ ROUTES = {
         (None, r'/api/artifacts/mcp(/upload/.+)?'),
     ],
 }
+# Anthropic's hosts that serve each item from its own subdomain, by suffix: the
+# host is one more DNS label and the suffix. The Artifact tool reads a page's
+# files from <slug>.frame.claudeusercontent.com after probing /_warmup there.
+# The read token is in the query (?__frame_t=), so these get no credentials.
+# The agent can put data in the label, path or query, but only Anthropic
+# receives it, as on api.anthropic.com.
+SUFFIX_ROUTES = {
+    '.frame.claudeusercontent.com': [('GET', r'/_warmup'), ('GET', r'/_f/.+')],
+}
+LABEL = re.compile(r'[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?')
 
 
 def connector_routes(value):
@@ -159,9 +169,20 @@ def check_messages(raw):
     check_blocks(body.get('system', ''))
 
 
+def host_routes(host):
+    """The routes of host, or None if the proxy reaches no such host."""
+    if host in HOSTS:
+        return ROUTES[host]
+    for suffix, routes in SUFFIX_ROUTES.items():
+        if host.endswith(suffix) and LABEL.fullmatch(host[:-len(suffix)]):
+            return routes
+    return None
+
+
 def check_request(req):
     """Check what is known from the headers and return the URL path."""
-    require(req.scheme == 'https' and req.host in HOSTS and req.port == 443, 'host')
+    routes = host_routes(req.host)
+    require(req.scheme == 'https' and routes is not None and req.port == 443, 'host')
     require('upgrade' not in req.headers, 'upgrade')
     path = urlsplit(req.path).path
     decoded = unquote(path)
@@ -171,7 +192,7 @@ def check_request(req):
     # Both spellings must match, or an encoded segment (%70erm for perm) could
     # slip past a pattern that excludes it.
     require(any(method in (None, req.method) and re.fullmatch(pattern, path) and re.fullmatch(pattern, decoded)
-                for method, pattern in ROUTES[req.host]), 'route')
+                for method, pattern in routes), 'route')
     if req.host == 'api.anthropic.com':
         # check_messages reads the body as sent.
         require(req.headers.get('content-encoding', 'identity') == 'identity', 'content-encoding')
@@ -203,7 +224,7 @@ class PolicyAddon:
         flow.metadata['denied'] = True
 
     def http_connect(self, flow):
-        if flow.request.host not in HOSTS or flow.request.port != 443:
+        if host_routes(flow.request.host) is None or flow.request.port != 443:
             self.deny(flow, error=Denied('host'))
 
     def requestheaders(self, flow):
@@ -283,7 +304,7 @@ class PolicyAddon:
     def server_connect(self, data):
         # mitmproxy logs and ignores hook exceptions, so this must not raise.
         address = data.server.address
-        if address is None or address[0] not in HOSTS or address[1] != 443:
+        if address is None or host_routes(address[0]) is None or address[1] != 443:
             data.server.error = 'upstream-denied'
 
     def responseheaders(self, flow):

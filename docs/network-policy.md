@@ -11,6 +11,7 @@ Anthropicへの通信は[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.p
 | `api.github.com` | テンプレートの`proxy.hosts`。リポジトリ向けREST API、GraphQL、`GET /user` |
 | `github.com` | テンプレートの`proxy.hosts`。Git smart HTTPによるclone、fetch、push |
 | `api.anthropic.com` | Messages API、token count、Claude Codeの起動時の接続確認（`GET /api/hello`）、remote managed settingsの取得、Artifacts（公開・読取り・一覧などの`/api/frame/`以下。ただし共有範囲を変える`/api/frame/perm/`は除く。MCPサーバー`/api/artifacts/mcp`、その利用に必要なclaude.ai MCPサーバー一覧、組織のポリシー、アカウント情報の取得） |
+| `*.frame.claudeusercontent.com` | Artifactsの本文の読取り（`GET /_f/`以下）と、その前の接続確認（`GET /_warmup`）。サブドメインはArtifactごとに異なる。読取り用のトークンはURLのクエリにあるので、proxyは認証値を付けない。agentはサブドメイン、パス、クエリに任意のデータを入れられるが、受け取るのはAnthropicのサーバーだけ |
 | `mcp-proxy.anthropic.com` | `[proxy]`の`connectors`で指定したclaude.aiのコネクタだけ。既定では許可しない。[claude.aiのコネクタを使う](#claudeaiのコネクタを使う)を参照 |
 
 テンプレートの`proxy.hosts`では、proxyはGitHubへの要求の認証を、ホストの`GITHUB_TOKEN`（fine-grained PAT）によるBasic認証で上書きします。proxyはGraphQLの本文を解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。

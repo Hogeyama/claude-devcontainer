@@ -51,6 +51,11 @@ claude.ai connectors (mcp-proxy.anthropic.com) are closed unless their IDs are
 listed in `proxy.connectors` of `claude.toml`; listed ones get the claude.ai OAuth
 token, and what they do on the connected account is not inspected.
 
+The Artifact tool reads a page's files from `<slug>.frame.claudeusercontent.com`,
+one subdomain per artifact, so `addon.py` matches that host by suffix: `GET` of
+`/_f/...` and of the `/_warmup` probe. The read token is in the query, and the
+proxy adds no credentials.
+
 Other hosts come only from the workspace's `proxy.hosts`: its routes, the
 headers the agent may pass, and the headers injected with the host's secrets,
 which replace the agent's credentials. `python /opt/proxy/workspace_config.py

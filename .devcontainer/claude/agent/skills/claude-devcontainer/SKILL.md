@@ -12,6 +12,7 @@ You run in an isolated container. Most of its limits are deliberate, and working
 All traffic goes through the proxy in `HTTPS_PROXY`. Only these destinations are allowed:
 
 - `api.anthropic.com`: Claude's own traffic only. Do not call it from commands: the proxy adds the real credentials to every request.
+- `<slug>.frame.claudeusercontent.com`: the Artifact tool's reads of a page (`GET`) only.
 - What `.devcontainer/claude.toml` (and the host's `claude.local.toml`) lists under `[proxy.hosts."..."]`, usually `github.com` (Git smart HTTP: clone, fetch, push) and `api.github.com` (the REST and GraphQL APIs for repositories). `gh` works. The proxy adds the credentials named in its `inject`, so leave dummy tokens such as `GH_TOKEN=managed-by-proxy` as they are.
 
 Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release assets, LFS and archives, and every other website are unreachable. The proxy blocks WebSearch by default; the host can opt in with `[proxy] web_search = true` in `claude.toml` or `claude.local.toml` and restart the environment. This allows server-side search, not direct access to result pages.
