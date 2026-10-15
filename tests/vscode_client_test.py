@@ -1,17 +1,12 @@
-"""The Linux client's sandbox (code-server/linux/client.py); bwrap on the host runs the probe."""
+"""Linux Electron launcher: direct proxy, profile persistence and process lifecycle."""
 import argparse
-import asyncio
 import importlib.util
-import json
 import os
 from pathlib import Path
-import shutil
-import socket
 import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from unittest import mock
@@ -39,41 +34,6 @@ class ClientTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'Wayland session is required'):
             client.wayland_socket({'XDG_RUNTIME_DIR': str(self.tmp), 'WAYLAND_DISPLAY': 'wayland-9'})
 
-    def test_sandbox_shares_nothing_of_the_host_but_the_system(self):
-        home, runtime, electron = self.tmp / 'home', self.tmp / 'runtime', self.tmp / 'electron'
-        wayland = self.tmp / 'wayland-0'
-        environ = {'LANG': 'ja_JP.UTF-8', 'DISPLAY': ':0', 'SSH_AUTH_SOCK': '/tmp/ssh', 'HOME': '/home/me'}
-        cmd = client.sandbox('/usr/bin/bwrap', electron, home, runtime, wayland, environ)
-        text = ' '.join(cmd)
-        for flag in ('--unshare-net', '--unshare-user', '--unshare-pid', '--cap-drop ALL', '--clearenv', '--die-with-parent'):
-            self.assertIn(flag, text)
-        writable = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == '--bind']
-        self.assertEqual(writable, [str(home)])
-        shared = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == '--ro-bind' and not cmd[i + 1].startswith(str(self.tmp))]
-        self.assertTrue(shared and all(path in client.SYSTEM for path in shared), shared)
-        self.assertIn(f'--ro-bind {runtime}/etc/passwd /etc/passwd', text)
-        self.assertIn(f'--bind {home} /home/vscode', text)
-        self.assertIn(f'--ro-bind {electron} /opt/electron', text)
-        self.assertIn('--ro-bind ' + str(wayland) + ' /run/user/' + str(os.getuid()) + '/wayland-0', text)
-        self.assertIn('--setenv LANG ja_JP.UTF-8', text)
-        for name in ('DISPLAY', 'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS unix:path=/run'):
-            self.assertNotIn('--setenv ' + name, text)
-        bare = ' '.join(client.sandbox('/usr/bin/bwrap', None, home, runtime, None, environ))
-        self.assertNotIn('wayland', bare)
-        self.assertNotIn('/opt/electron', bare)
-
-    def test_sandbox_refuses_a_python_in_the_home(self):
-        with mock.patch.object(client.sys, 'base_prefix', str(Path.home() / '.local/python')):
-            with self.assertRaisesRegex(SystemExit, 'home directory'):
-                client.sandbox('/usr/bin/bwrap', None, self.tmp, self.tmp, None, {})
-
-    def test_write_etc_names_the_user_and_localhost(self):
-        client.write_etc(self.tmp / 'etc')
-        passwd = (self.tmp / 'etc/passwd').read_text()
-        self.assertIn(f':x:{os.getuid()}:{os.getgid()}:', passwd)
-        self.assertIn(':/home/vscode:', passwd)
-        self.assertIn('127.0.0.1 localhost', (self.tmp / 'etc/hosts').read_text())
-
     def test_state_directory_is_per_workspace(self):
         environ = {'XDG_STATE_HOME': str(self.tmp)}
         first = client.state_directory(self.tmp / 'a', environ)
@@ -82,12 +42,13 @@ class ClientTest(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(first, client.state_directory(self.tmp / 'a', environ))
 
-    def test_shell_command_uses_the_relay_and_wayland(self):
-        cmd = client.shell_command('/workspace')
-        self.assertEqual(cmd[:2], ['/opt/electron/electron', '/run/code-server/shell'])
-        self.assertIn('--proxy-port=18086', cmd)
+    def test_shell_command_uses_host_proxy_and_existing_profile(self):
+        cmd = client.shell_command(self.tmp / 'electron', self.tmp / 'shell',
+                                   self.tmp / 'home/shell', 18123, '/workspace')
+        self.assertEqual(cmd[:2], [str(self.tmp / 'electron/electron'), str(self.tmp / 'shell')])
+        self.assertIn('--proxy-port=18123', cmd)
         self.assertIn('--folder=/workspace', cmd)
-        self.assertIn('--user-data-dir=/home/vscode/shell', cmd)
+        self.assertIn(f'--user-data-dir={self.tmp}/home/shell', cmd)
         self.assertIn('--ozone-platform=wayland', cmd)
         self.assertIn('--wayland-text-input-version=3', cmd)
         self.assertNotIn('--no-sandbox', cmd)
@@ -108,60 +69,73 @@ class ClientTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(client.TOKEN, result.stderr)
 
-    def test_diagnostic_modes_do_not_need_the_token(self):
-        for mode in ('check', 'prepare', 'probe'):
-            with self.subTest(mode=mode):
-                args = argparse.Namespace(check=False, prepare=False, probe=False)
-                setattr(args, mode, True)
-                with (mock.patch.dict(os.environ, {}, clear=True),
-                      mock.patch.object(client.shutil, 'which', return_value=None)):
-                    with self.assertRaisesRegex(SystemExit, 'bubblewrap'):
-                        asyncio.run(client.outside(args))
+    def test_prepare_needs_neither_token_nor_display(self):
+        with (mock.patch.dict(os.environ, {}, clear=True),
+              mock.patch.object(sys, 'argv', ['client.py', '--prepare']),
+              mock.patch.object(client, 'ensure_electron', return_value=self.tmp) as ensure,
+              mock.patch.object(client, 'report') as report):
+            client.main()
+        ensure.assert_called_once_with()
+        report.assert_called_once_with(self.tmp, 'not set')
 
-    @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap is not installed')
-    def test_bwrap_probe_reaches_only_the_relay(self):
-        """The real sandbox: no network, no home, and the relay ends at the given host port."""
-        echo = socket.create_server(('127.0.0.1', 0))
-        self.addCleanup(echo.close)
+    def test_lock_rejects_second_launcher(self):
+        with client.take_lock(self.tmp):
+            with self.assertRaisesRegex(SystemExit, 'already open'):
+                client.take_lock(self.tmp)
 
-        def serve():
-            try:
-                conn, _ = echo.accept()
-            except OSError:
-                return
-            with conn:
-                conn.sendall(conn.makefile('rb').readline())
-        threading.Thread(target=serve, daemon=True).start()
-        state, runtime = self.tmp / 'state', self.tmp / 'runtime'
-        runtime.mkdir(mode=0o700)
-        env = os.environ | {'XDG_STATE_HOME': str(state), 'XDG_RUNTIME_DIR': str(runtime)}
-        result = subprocess.run([sys.executable, str(LINUX / 'client.py'), '--probe',
-                                 '--proxy-port', str(echo.getsockname()[1])], env=env, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        found = json.loads(result.stdout)
-        self.assertTrue(found['own_network_namespace'])
-        self.assertNotEqual(found['outside'], 'connected')
-        self.assertEqual(found['home_entries'], ['vscode'])
-        self.assertEqual(found['relay'], 'probe')
-        self.assertTrue((client.state_directory(environ=env) / 'home').is_dir())
-        self.assertEqual(list(runtime.iterdir()), [])
+    def test_launch_passes_proxy_and_keeps_profile(self):
+        state = self.tmp / 'state'
+        with client.take_lock(state):
+            profile = state / 'home/shell'
+            profile.mkdir()
+            (profile / 'existing').write_text('settings')
+            args = argparse.Namespace(proxy_port=18123, folder='/workspace/project')
+            with (mock.patch.object(client, 'ensure_electron', return_value=self.tmp / 'electron'),
+                  mock.patch.object(client.subprocess, 'Popen') as popen,
+                  mock.patch.dict(os.environ, {client.TOKEN: 'test-token', 'ELECTRON_RUN_AS_NODE': '1',
+                                               'NODE_OPTIONS': '--require bad', 'DISPLAY': ':0'})):
+                popen.return_value.wait.return_value = 0
+                popen.return_value.poll.return_value = 0
+                self.assertEqual(client.open_window(args, state), 0)
+            command = popen.call_args.args[0]
+            env = popen.call_args.kwargs['env']
+            self.assertIn('--proxy-port=18123', command)
+            self.assertIn('--folder=/workspace/project', command)
+            self.assertIn(f'--user-data-dir={profile}', command)
+            self.assertEqual(env[client.TOKEN], 'test-token')
+            for name in ('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'DISPLAY'):
+                self.assertNotIn(name, env)
+            self.assertEqual((profile / 'existing').read_text(), 'settings')
+            self.assertFalse(Path(command[1]).exists(), 'temporary shell copy is removed after exit')
 
-    @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap is not installed')
-    def test_detach_returns_once_started_and_logs(self):
-        state, runtime = self.tmp / 'state', self.tmp / 'runtime'
-        runtime.mkdir(mode=0o700)
-        env = os.environ | {'XDG_STATE_HOME': str(state), 'XDG_RUNTIME_DIR': str(runtime)}
-        # Nothing listens on the port: the probe still runs, with relay=''.
-        result = subprocess.run([sys.executable, str(LINUX / 'client.py'), '--probe', '--detach', '--proxy-port', '1'],
-                                env=env, capture_output=True, text=True)
+    def test_detached_launcher_logs_and_cleans_up(self):
+        electron = self.tmp / 'electron'
+        electron.write_text('#!/bin/sh\necho launched\nsleep 0.4\n')
+        electron.chmod(0o755)
+        wrapper = self.tmp / 'launch.py'
+        wrapper.write_text(
+            'import importlib.util\nfrom pathlib import Path\n'
+            f'spec = importlib.util.spec_from_file_location("client", {str(LINUX / "client.py")!r})\n'
+            'client = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(client)\n'
+            f'client.ensure_electron = lambda: Path({str(self.tmp)!r})\n'
+            'client.wayland_socket = lambda: Path("/unused")\nclient.main()\n')
+        env = os.environ | {'XDG_STATE_HOME': str(self.tmp / 'state'), client.TOKEN: 'test-token'}
+        result = subprocess.run([sys.executable, str(wrapper), '--detach', '--proxy-port', '18123'],
+                                env=env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('client.log', result.stdout)
-        log = client.state_directory(environ=env) / 'client.log'
+        state = client.state_directory(environ=env)
         for _ in range(100):
-            if 'own_network_namespace' in log.read_text():
+            try:
+                lock = client.take_lock(state)
+            except SystemExit:
+                time.sleep(0.02)
+            else:
+                lock.close()
                 break
-            time.sleep(0.1)
-        self.assertIn('"home_entries": ["vscode"]', log.read_text())
+        else:
+            self.fail('launcher did not release its lock')
+        self.assertIn('launched', (state / 'client.log').read_text())
 
 
 if __name__ == '__main__':

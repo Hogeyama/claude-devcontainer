@@ -117,8 +117,8 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # An editor on the host for the agent's workspace, with the host's IME and
 # without the host's VS Code paths into the container: the agent's VS Code
 # (Coder code-server) in a dedicated Electron window that reaches nothing but
-# the agent, on Windows + WSL and on Linux (Wayland, in a bubblewrap
-# sandbox too). Rebuild after changing this setting,
+# the agent, on Windows + WSL and on Linux (Wayland).
+# Rebuild after changing this setting,
 # then open with claude/scripts/code-server.sh open; no administrator rights.
 # See claude/code-server/README.md.
 enabled = false

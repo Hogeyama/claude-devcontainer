@@ -6,8 +6,7 @@ run, with the agent's server up and its connection token in
 CLAUDE_DEVCONTAINER_VSCODE_TOKEN. The shell runs on Windows and reaches
 code-server-proxy on the 127.0.0.1 port that WSL forwards from its own. No
 administrator rights are used, so nothing outside the shell confines it: the
-shell's own enforcement is the only wall here, unlike the Linux client's
-sandbox (README.md).
+shell's own enforcement is the boundary, as on Linux (README.md).
 
 The Windows side, under %LOCALAPPDATA%\ClaudeDevcontainer, which the agent
 cannot reach:

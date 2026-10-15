@@ -8,8 +8,7 @@
 // Usage: electron <this directory> --proxy-port=<port> [--folder=/workspace]
 //          [--user-data-dir=<profile>]
 // with the server's connection token in CLAUDE_DEVCONTAINER_VSCODE_TOKEN.
-// The proxy's port is on the host's 127.0.0.1 (Windows) or the sandbox's
-// (Linux, linux/client.py).
+// The proxy's port is on the host's 127.0.0.1 on both Windows and Linux.
 const { app, BrowserWindow, Menu, session } = require('electron');
 const policy = require('./policy');
 

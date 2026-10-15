@@ -15,7 +15,7 @@ import settings
 if sys.argv[2] != 'remove-network' and not settings.load()['codeServer']['enabled']:
     sys.exit('error: set [codeServer] enabled = true in .devcontainer/claude.local.toml and rebuild first')
 PY
-# WSL opens the shell on Windows; any other Linux, in a sandbox on Linux.
+# WSL opens the shell on Windows; any other Linux, in a Wayland session on Linux.
 if command -v wslpath >/dev/null && command -v powershell.exe >/dev/null; then
     client=$scripts/../code-server/windows/client.py
     windows=1
@@ -62,12 +62,12 @@ PYTHON
     if [ "$windows" = 1 ]; then
         exec python3 "$client" --proxy-port "$port"
     fi
-    # The lock, then the window, in a sandbox that stays when this returns.
+    # The lock, then Electron on the host; the launcher stays until it exits.
     exec python3 "$client" --proxy-port "$port" --detach ;;
 remove-network)
     # The former WebView2 client's WFP rules and loopback exemption.
     if [ "$windows" = 1 ]; then
         exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$scripts/../code-server/windows/remove-network.ps1")"
     fi
-    echo 'nothing to remove: the Linux client keeps no network rules outside its sandbox.' ;;
+    echo 'nothing to remove: the Linux client installs no host network rules.' ;;
 esac

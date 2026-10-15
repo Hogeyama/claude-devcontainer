@@ -38,7 +38,7 @@ todeのサポートは削除しました。以前の設定に`[tode]`がある�
    devcontainer up --workspace-folder . --remove-existing-container
    ```
 
-3. ホストの信頼できるチェックアウトから起動します。`code-server.sh` はWSLならWindowsのシェルを、それ以外のLinuxならbubblewrapに入れたシェルを開きます。
+3. ホストの信頼できるチェックアウトから起動します。`code-server.sh` はWSLならWindowsのシェルを、それ以外のLinuxならWaylandでシェルを開きます。
 
    ```sh
    .devcontainer/claude/scripts/code-server.sh prepare  # Electronの取得だけ。省略するとopenが取得します
@@ -66,37 +66,23 @@ IDEのページはコンテナが配信するので、その中のスクリプ�
 開発者ツールとメニューはありません。
 レンダラーはChromiumのサンドボックスで動かし、`--no-sandbox`は使いません。
 
-## Linux（bubblewrap）
+## Linux（Wayland）
 
-ホストに必要なのは `bwrap`（bubblewrap）、Python 3.11以上、Waylandセッションです。
-X11は渡さないので、X11セッションでは起動しません。
-`prepare` はElectronを `~/.cache/claude-devcontainer/electron/` に取得し、これらを確認して表示します。
+ホストに必要なのはPython 3.11以上とWaylandセッションです。
+シェルはWaylandのtext-input-v3でホストのIMEを使います。X11セッションには対応していません。
+`prepare` はElectronを `~/.cache/claude-devcontainer/electron/` に取得します。
 
-`open` は、シェルをbubblewrapの中で起動して、ウィンドウが開いた時点で戻ります。
-中継を持つプロセスは切り離されて残り、その出力はworkspaceごとの状態ディレクトリ（`~/.local/state/claude-devcontainer/vscode/<workspaceのハッシュ>/`）の `client.log` に入ります。
+`open` はElectronをホストで直接起動し、専用proxyの公開ポートに接続します。
+Electronの起動後にコマンドは戻り、出力はworkspaceごとの状態ディレクトリ（`~/.local/state/claude-devcontainer/vscode/<workspaceのハッシュ>/`）の `client.log` に入ります。
 同じworkspaceのウィンドウは一つまでで、2つ目の`open`はロックで止まります。別のworkspaceは同時に開けます。
+プロファイルは従来と同じ状態ディレクトリの`home/shell`に保存し、ユーザー設定を引き継ぎます。
 
-```text
-Electronシェル（ホストのIME。Waylandのtext-input-v3）
-  └─ bubblewrap: user/pid/net/ipc/uts namespaceを分離、capabilityなし
-       ├─ /usr, /lib, /nix/store, /etc/fonts を読み取り専用で共有
-       ├─ Electronとシェルのコピーを読み取り専用で共有
-       ├─ 専用home（状態ディレクトリのhome）にシェルのプロファイル
-       ├─ Wayland socketだけを共有（home、D-Bus、X11、SSH agent、Docker socketは渡さない）
-       └─ network namespaceはloopbackのみ
-            127.0.0.1:18086 → Unix socket → ホストの127.0.0.1:<公開ポート>（code-server-proxy）
-```
+Chromiumのレンダラーsandboxは有効です。Electron全体を囲むnamespaceやファイルシステムの隔離はありません。
+接続先と外部アプリケーションの起動は、シェルの判定とproxyの許可リストで制限します。
+Electronのブラウザプロセスが乗っ取られた場合に、ホストのファイルやネットワークへのアクセスを防ぐ外側の壁はありません。
 
-- シェルの判定に加えて、OSの層でも外へ出られません。network namespaceにはループバックしかなく、ルーティングできる宛先がありません。
-- サンドボックスの中では、起動前に自分のnetwork namespaceがホストと違うこと、外部アドレスに届かないこと、ホストのhomeが見えないことを確かめ、違えば起動しません。
-- `xdg-open` は拒否するスクリプトに置き換えています。
-- GPUは渡しません（`--disable-gpu`）。
-
-Chromiumのサンドボックスは、bubblewrapのuser namespaceの中に、さらにuser namespaceを作ります。
-Ubuntu 23.10以降のように、AppArmorが非特権のuser namespaceを制限する（`kernel.apparmor_restrict_unprivileged_userns=1`）ホストでは、bubblewrapとElectronにuser namespaceを許可するAppArmorプロファイルが必要です。
-プロファイルの導入には管理者権限が要ります。
-`prepare`はこの制限を検出すると警告を表示します。
-この構成での起動は、まだ確認していません。
+AppArmorが非特権のuser namespaceを制限する（`kernel.apparmor_restrict_unprivileged_userns=1`）ホストでは、ChromiumのsandboxのためにElectronへuser namespaceを許可するAppArmorプロファイルが必要になる場合があります。
+`prepare`はこの制限を検出すると警告を表示します。`--no-sandbox`は使いません。
 
 ## Windows（WSL）
 
@@ -113,7 +99,7 @@ Windows側のファイルは `%LOCALAPPDATA%\ClaudeDevcontainer` に置きます
 | `workspaces\<workspaceのハッシュ>\profile` | シェルのプロファイル（エディタのユーザー設定と状態） |
 | `workspaces\<workspaceのハッシュ>\client.log` | シェルの出力 |
 
-Windowsには、Linuxのbubblewrapに当たるOS層がありません。
+Windowsでも、Electron全体を囲むOSの隔離はありません。
 AppContainerやWFPでElectronを閉じ込めるには、ループバック免除とWFPのルールに管理者権限が要るためです。
 そのため、Windowsで接続先を制限するのは、シェルの判定とproxyの許可リストだけです。
 レンダラーの脱出とブラウザプロセスの奪取を連鎖させる攻撃まで想定する場合は、Windows Sandboxでシェルを動かしてください。
@@ -173,7 +159,7 @@ proxyは、アプリの応答から`X-Frame-Options`とCSPの`frame-ancestors`�
 
 ## 制約
 
-- Windowsでは、シェルの判定とproxyの許可リストのほかに壁がありません。Linuxでは、その外側にbubblewrapがあります。
+- Windows・Linuxとも、Electron全体を囲むOSの隔離はありません。通信先の制限はシェルの判定とproxyの許可リストに依存します。
 - Electronのセキュリティ修正に追従するため、`electron.py`のバージョンとハッシュを更新し続ける必要があります。
 - GitHubへのログイン、Settings Sync、実行時のMarketplaceへの接続、外部サイトのプレビューは使えません。
 - Clipboard APIの読み取りを拒否しているため、右クリックメニューからの貼り付けとTerminalのCtrl-Vは動きません。TerminalのCtrl-Vは`Unable to read from the browser's clipboard`というエラーになります。通常のpasteイベントを使う操作とは別の経路です。Shift+Insertで回避できるという[code-server側の報告](https://github.com/coder/code-server/discussions/6623)はありますが、このシェルでは未確認です。
