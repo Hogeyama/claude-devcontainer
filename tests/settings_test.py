@@ -29,6 +29,35 @@ class SettingsTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         (self.root / '.devcontainer').mkdir()
+        patcher = mock.patch.object(settings, 'CONFIG', self.root / 'user-config')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_user_path_resolves_profile_links_and_quotes_shell_values(self):
+        settings.CONFIG.mkdir()
+        store_bin = self.root / 'store/package with $literal/bin'
+        store_bin.mkdir(parents=True)
+        profile = self.root / 'profile'
+        profile.symlink_to(store_bin.parent)
+        (settings.CONFIG / 'claude.toml').write_text(
+            '[agent]\nextra_path = ' + json.dumps([str(profile / 'bin'), '/container-only/bin']) + '\n')
+        out = self.generate()
+        result = subprocess.run(['bash', '--noprofile', '--norc', '-c',
+                                 '. "$1"; printf %s "$PATH"', 'bash', str(out / 'shell-path.sh')],
+                                env={'PATH': '/usr/bin:/bin'}, text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout, f'{store_bin}:/container-only/bin:/usr/bin:/bin')
+        (settings.CONFIG / 'claude.toml').unlink()
+        self.generate()
+        self.assertEqual((out / 'shell-path.sh').read_text(), '')
+
+    def test_user_path_rejects_invalid_settings(self):
+        settings.CONFIG.mkdir()
+        for content in ('paths = []', 'extra_path = "bin"', 'extra_path = [1]',
+                        'extra_path = ["relative/bin"]', 'extra_path = ["/bin:/other"]'):
+            with self.subTest(content=content):
+                (settings.CONFIG / 'claude.toml').write_text('[agent]\n' + content)
+                with self.assertRaises(ValueError):
+                    self.generate()
 
     def write(self, name, text):
         (self.root / '.devcontainer' / name).write_text(text)
@@ -47,7 +76,7 @@ class SettingsTest(unittest.TestCase):
     def test_defaults(self):
         loaded = self.load()
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
-        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000})
+        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': []})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
@@ -58,12 +87,26 @@ class SettingsTest(unittest.TestCase):
         self.load()
         self.assertIsInstance(settings.DEFAULTS['sumi']['secrets'], str)
 
+    def test_global_defaults_then_workspace_then_local(self):
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'claude.toml').write_text(
+            '[agent]\nuid = 1234\ngid = 1234\nextra_path = ["/global/bin"]\n'
+            '[proxy]\nca = "cert.pem"\n')
+        self.write('claude.toml', '[agent]\ngid = 2345\n')
+        loaded = self.load()
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin']})
+        self.assertEqual(loaded['proxy']['ca'], settings.CONFIG / 'cert.pem')
+        self.write('claude.local.toml', '[agent]\ngid = 3456\nextra_path = []\n[proxy]\nca = "local.pem"\n')
+        loaded = self.load()
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': []})
+        self.assertEqual(loaded['proxy']['ca'], self.root / '.devcontainer/local.pem')
+
     def test_local_merges_tables_and_replaces_values(self):
         self.write('claude.toml', '[docker]\nenabled = true\nimages = ["a:1", "b:1"]\n[agent]\nuid = 1001\n')
         self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
         loaded = self.load()
         self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1']})
-        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002})
+        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': []})
 
     def test_local_replaces_each_host_as_a_whole(self):
         self.write('claude.toml', GITHUB + '[proxy.hosts."other.example.com"]\nroutes = ["/"]\n')

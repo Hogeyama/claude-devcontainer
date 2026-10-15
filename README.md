@@ -149,14 +149,15 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 
 ### claude.tomlとclaude.local.toml
 
-このDev Container独自の設定は、`.devcontainer/claude.toml`と`claude.local.toml`に[TOML](https://toml.io/ja/v1.0.0)で書きます。2つのファイルの形式と項目は同じで、使い分けは次のとおりです。
+このDev Container独自の設定は、次のファイルに[TOML](https://toml.io/ja/v1.0.0)で書きます。形式と項目は共通です。
 
 | ファイル | 書く設定 | Git |
 |---|---|---|
-| `claude.toml` | リポジトリで共有する設定 | コミットする |
-| `claude.local.toml` | そのホストだけの設定 | コミットしない（テンプレートの`.gitignore`で除外済み） |
+| `~/.config/claude-devcontainer/claude.toml` | 全リポジトリ共通のユーザー設定 | リポジトリ外 |
+| `.devcontainer/claude.toml` | リポジトリで共有する設定 | コミットする |
+| `.devcontainer/claude.local.toml` | そのリポジトリ・ホストだけの設定 | コミットしない（テンプレートの`.gitignore`で除外済み） |
 
-書ける項目と既定値は、テンプレートの`.devcontainer/claude/template/claude.toml`に載っています。書かなかった項目は既定値になります。どちらのファイルも`.devcontainer/`にあるので、agentからは書き換えられません。
+書ける項目と既定値は、テンプレートの`.devcontainer/claude/template/claude.toml`に載っています。「既定値 → global → リポジトリ → local」の順に上書きします。global の場所は `XDG_CONFIG_HOME` があればその配下です。相対ファイルパスは、それを指定した設定ファイルのディレクトリを基準にします。
 
 `claude.local.toml`の値は`claude.toml`の値より優先します。テーブルは項目ごとに混ぜ、それ以外の値は丸ごと置き換えます。たとえば`claude.toml`でDinDを有効にしていても、`claude.local.toml`に次を書けば、そのホストでは無効になります。
 
@@ -173,11 +174,11 @@ enabled = false
 devcontainer up --remove-existing-container
 ```
 
-`devcontainer up`は、起動の前に2つのファイルを検査します。知らない項目や型の違う値があると、ファイル名と項目名を示して止まります。
+`devcontainer up`は、起動の前にこれらのファイルを検査します。知らない項目や型の違う値があると、ファイル名と項目名を示して止まります。
 
-設定はこの2つのファイルからだけ読みます。`CLAUDE_DEVCONTAINER_DIND`などの環境変数や`.devcontainer/.env`で指定することはできず、指定されていると`up`がエラーにします。
+設定はこれらのファイルからだけ読みます。`CLAUDE_DEVCONTAINER_DIND`などの環境変数や`.devcontainer/.env`で指定することはできず、指定されていると`up`がエラーにします。
 
-起動処理は、2つのファイルの内容からComposeとproxyが読むファイルを作り、`.devcontainer/.generated/`に置きます。このディレクトリは編集しないでください。
+起動処理は、これらのファイルの内容からComposeとproxyが読むファイルを作り、`.devcontainer/.generated/`に置きます。このディレクトリは編集しないでください。
 
 ### agentの環境を変える
 
@@ -245,6 +246,15 @@ images = ["postgres:16", "testcontainers/ryuk:0.14.0"]
 DinDは外部のregistryに接続できません。使うイメージは`images`に書いてください。`devcontainer up`のたびに、ホストがイメージを用意してDinDへ読み込みます。読み込みの詳細やポートへの接続方法は、[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。
 
 ### nixのdev shellを使う
+
+個人で使うツールの PATH は、全リポジトリ共通のホストの `~/.config/claude-devcontainer/claude.toml` で追加できます（`XDG_CONFIG_HOME` を設定している場合はその配下）。例えば、Nix のユーザープロファイルに入っている `forgejo` を使うには次を書きます。
+
+```toml
+[agent]
+extra_path = ["~/.nix-profile/bin"]
+```
+
+`devcontainer up` 時に、`~` と symlink をホストで解決し、agent の Bash の PATH の先頭に指定順で追加します。`agent.extra_path` はリポジトリや local の設定にも書けます。配列は結合せず置き換えるため、`extra_path = []` で global の指定を無効にできます。`/nix/store` のツールには、リポジトリ側で下記の `nix.enabled = true` が必要です。ディレクトリの追加マウントやファイルのコピーは行わないので、コンテナから見えるパスを指定してください。コンテナ内だけに存在する絶対パスも指定できます。設定や Nix プロファイルを変更したら、`devcontainer up` を再実行して新しい Bash を開いてください。この機能を初めて取り込む既存のコンテナは、agent イメージを再ビルドして作り直してください。
 
 ホストにnixがあれば、リポジトリのflakeが定義するdev shellのツールを、agentのBashでも使えます。flakeをコミットしてから、`claude.toml`に次を書いてください。
 

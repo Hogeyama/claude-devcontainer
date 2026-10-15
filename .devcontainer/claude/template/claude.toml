@@ -1,5 +1,7 @@
 # Settings of this workspace's container, committed with it. Every setting may
 # be left out; the values shown commented out are the defaults or examples.
+# User defaults go in ~/.config/claude-devcontainer/claude.toml (or under
+# XDG_CONFIG_HOME). Precedence: defaults < global < workspace < local.
 #
 # Settings for one host only (UID, networks, connectors, paths, hosts only some
 # users need) go in claude.local.toml next to this file, in the same form and
@@ -26,6 +28,10 @@
 # shared_hidden_paths = [".env", "private/credentials"]
 
 [agent]
+# Directories prepended to Bash's PATH in this order. ~ and symlinks are
+# resolved on the host at `devcontainer up`; no files are copied or mounted.
+# Nix profile paths need nix.enabled = true. Usually set this globally.
+# extra_path = ["~/.nix-profile/bin"]
 # Owner of the agent's volumes; match the host UID/GID for dependency overlays.
 # uid = 1000
 # gid = 1000

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The workspace's settings: .devcontainer/claude.toml, and this host's claude.local.toml.
+"""Global claude.toml, workspace claude.toml, and claude.local.toml settings.
+
+CONFIG/claude.toml supplies user defaults before the two workspace files.
 
 claude.toml is committed with the workspace; claude.local.toml, beside it and
 not committed, has the same form and overrides it. Tables merge key by key;
@@ -42,6 +44,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import tomllib
 
@@ -52,7 +55,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': []},
-    'agent': {'uid': 1000, 'gid': 1000},
+    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': []},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
@@ -151,6 +154,7 @@ def check(data, source):
         path = Path(value)
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
             raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
+    shell_path(data.get('agent', {}).get('extra_path', []), str(source))
     agent, docker, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
@@ -202,9 +206,14 @@ def load(root=ROOT):
     """The checked settings of root's workspace, with the defaults and paths resolved."""
     directory = Path(root) / '.devcontainer'
     settings = copy.deepcopy(DEFAULTS)
-    for name in FILES:
-        data = read(directory / name)
-        check(data, name)
+    for source in (CONFIG / 'claude.toml', *(directory / name for name in FILES)):
+        data = read(source)
+        check(data, str(source))
+        # Resolve relative file paths against the file that supplied them.
+        for table, key in (('sumi', 'secrets'), ('proxy', 'ca')):
+            value = data.get(table, {}).get(key)
+            if value:
+                data[table][key] = str(resolve(value, source.parent))
         settings = merge(settings, data)
     subnets = settings['subnets']
     if subnets['proxy'] and subnets['proxy'] == subnets['dind']:
@@ -471,11 +480,12 @@ def generate(root=ROOT, environ=os.environ):
     outside = outside_settings(root, environ)
     if outside:
         raise ValueError(
-            'the settings come only from .devcontainer/claude.toml and claude.local.toml, but found '
+            'the settings come only from global claude.toml, .devcontainer/claude.toml and claude.local.toml, but found '
             + ', '.join(outside) + '. Move them there. Inside the agent, compose sets some of them; '
             'run with them removed, as `env -u CLAUDE_DEVCONTAINER_DIND -u CLAUDE_DEVCONTAINER_NIX '
             '-u CLAUDE_DEVCONTAINER_SUMI devcontainer up`.')
     settings = load(root)
+    path_script = shell_path(settings['agent']['extra_path'])
     workspace = workspace_compose(settings, root)
     secrets = settings['sumi']['secrets']
     if settings['sumi']['enabled'] and not secrets.is_file():
@@ -490,14 +500,34 @@ def generate(root=ROOT, environ=os.environ):
         write(out / 'empty-secret', '')
         (out / 'empty-secret').chmod(0o444)
         write(out / 'hidden.txt', ''.join(p.as_posix() + '\n' for p in hidden_paths(settings, root)))
-    header = '# Written by scripts/settings.py from claude.toml and claude.local.toml; do not edit.\n'
+    header = '# Written by scripts/settings.py from global and workspace claude.toml and claude.local.toml; do not edit.\n'
     values = variables(settings) | node_modules_paths(root, environ)
     write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in values.items()))
     write(out / 'proxy.json', proxy_json(settings))
     write(out / 'images.txt', images_txt(settings))
     write(out / 'agent.env', header + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings)))
     write(out / 'workspace.compose.yaml', workspace)
+    write(out / 'shell-path.sh', path_script)
     return settings
+
+
+def shell_path(paths, source='agent.extra_path'):
+    """Resolve only configured directories on the host and prepend them in Bash."""
+    resolved = []
+    for value in paths:
+        path = Path(value).expanduser()
+        if not path.is_absolute() or any(char in value for char in ':\n\r'):
+            raise ValueError(f'{source}: agent.extra_path: expected an absolute path or ~/path without colons or newlines')
+        # ~/.nix-profile/bin points into the store mounted at the same path.
+        # Paths that only exist in the container are allowed too.
+        directory = str(path.resolve())
+        if any(char in directory for char in ':\n\r'):
+            raise ValueError(f'{source}: agent.extra_path: resolved path contains colons or newlines')
+        if directory not in resolved:
+            resolved.append(directory)
+    if not resolved:
+        return ''
+    return 'export PATH=' + shlex.quote(':'.join(resolved)) + '"${PATH:+:$PATH}"\n'
 
 
 def main():
