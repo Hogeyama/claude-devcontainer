@@ -75,12 +75,23 @@ def extract(archive, target):
                 path.chmod(stat.S_IMODE(mode) & 0o755)
 
 
+def runnable(path):
+    """path with its execute bits set.
+
+    Windows's zip gives electron.exe no execute bit, and WSL refuses to run
+    a .exe without one on a drive mounted with metadata.
+    """
+    path.chmod(stat.S_IMODE(path.stat().st_mode) | 0o111)
+    return path
+
+
 def ensure(cache, platform, fetch=download):
     """The directory of Electron for platform under cache, downloaded and checked the first time."""
     if platform not in SHA256:
         fail(f'no Electron for {platform}')
     target = Path(cache) / f'{VERSION}-{platform}'
     if (target / executable(platform)).is_file():
+        runnable(target / executable(platform))
         return target
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target.parent) as temporary:
@@ -90,5 +101,6 @@ def ensure(cache, platform, fetch=download):
         if found != SHA256[platform]:
             fail(f'Electron {VERSION} for {platform} has SHA-256 {found}, not {SHA256[platform]}')
         extract(archive, Path(temporary) / 'electron')
+        runnable(Path(temporary) / 'electron' / executable(platform))
         os.rename(Path(temporary) / 'electron', target)
     return target

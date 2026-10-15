@@ -51,6 +51,21 @@ class ElectronTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((directory / 'resources.pak').stat().st_mode), 0o644)
         self.assertEqual((directory / 'locales/ja.pak').read_bytes(), b'ja')
 
+    def test_ensure_makes_the_windows_executable_runnable(self):
+        # Windows's zip has electron.exe at 644; WSL runs no .exe without an execute bit.
+        archive = self.tmp / 'release.zip'
+        digest = release(archive, [('electron.exe', stat.S_IFREG | 0o644, b'pe'),
+                                   ('ffmpeg.dll', stat.S_IFREG | 0o644, b'dll')])
+        with mock.patch.dict(electron.SHA256, {'win32-x64': digest}):
+            directory = electron.ensure(self.tmp / 'cache', 'win32-x64',
+                                        lambda url, path: path.write_bytes(archive.read_bytes()))
+            self.assertEqual(stat.S_IMODE((directory / 'electron.exe').stat().st_mode), 0o755)
+            self.assertEqual(stat.S_IMODE((directory / 'ffmpeg.dll').stat().st_mode), 0o644)
+            # A cache from before is fixed in place, not fetched again.
+            (directory / 'electron.exe').chmod(0o644)
+            electron.ensure(self.tmp / 'cache', 'win32-x64', lambda url, path: self.fail('fetched again'))
+        self.assertEqual(stat.S_IMODE((directory / 'electron.exe').stat().st_mode), 0o755)
+
     def test_ensure_refuses_another_archive(self):
         archive = self.tmp / 'release.zip'
         release(archive, [('electron', stat.S_IFREG | 0o755, b'not the pinned one')])
