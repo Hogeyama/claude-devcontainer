@@ -124,11 +124,15 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # dind = "10.231.71"
 
 [codeServer]
-# Browser-based editor in the agent, opened by the isolated Windows WebView2
-# client. Independent of tode. Rebuild after changing this setting.
-# From WSL: claude/scripts/code-server.sh prepare (initial Windows setup/UAC),
-# then claude/scripts/code-server.sh open. See claude/code-server/README.md.
+# An editor on the host for the agent's workspace, with the host's IME and
+# without the host's VS Code paths into the container: the agent's VS Code
+# (code serve-web) in a dedicated Electron window that reaches nothing but
+# the agent, on Windows + WSL and on Linux (Wayland, in a bubblewrap
+# sandbox too). Independent of tode. Rebuild after changing this setting,
+# then open with claude/scripts/code-server.sh open; no administrator rights.
+# See claude/code-server/README.md.
 enabled = false
-# Marketplace IDs, optionally @version. Installed at build time, independently
-# of tode.extensions. Rebuild/recreate the agent after changing this list.
+# Marketplace IDs, optionally @version, independently of tode.extensions,
+# installed into the agent's image at build time (rebuild and recreate the
+# agent after a change).
 extensions = [] # e.g. ["anthropic.claude-code"]

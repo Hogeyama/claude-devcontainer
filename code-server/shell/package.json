@@ -1,0 +1,6 @@
+{
+  "name": "claude-devcontainer-shell",
+  "private": true,
+  "description": "The isolated editor's window: the agent's VS Code, through code-server-proxy only",
+  "main": "main.js"
+}

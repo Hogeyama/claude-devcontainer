@@ -19,7 +19,7 @@ services:
       args:
         AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
-        INSTALL_CODE_SERVER: ${CLAUDE_DEVCONTAINER_INSTALL_CODE_SERVER:-0}
+        INSTALL_VSCODE: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
         INSTALL_TODE: ${CLAUDE_DEVCONTAINER_TODE:-0}
         CODE_SERVER_EXTENSIONS: ${CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS:-}
         TODE_EXTENSIONS: ${CLAUDE_DEVCONTAINER_TODE_EXTENSIONS:-}
@@ -34,6 +34,9 @@ services:
     sysctls:
       net.ipv4.ip_forward: "0"
       net.ipv6.conf.all.disable_ipv6: "1"
+      # Lets code-server-proxy's connections be forwarded to loopback
+      # (agent/init-firewall.sh), with the isolated editor only.
+      net.ipv4.conf.all.route_localnet: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
     # Names for the proxy and DinD, in /etc/hosts since the firewall drops DNS.
     # The workspace's compose.yaml cannot read the subnets, which only this
     # file gets (include's env_file), so it names them instead.
@@ -82,8 +85,9 @@ services:
       - sumi-run:/run/sumi:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
-      # code-server user settings persist separately from tode.
-      - code-server-user:/home/node/.local/share/code-server/user-data/User
+      # The isolated editor's server data: Machine settings and the state of
+      # its extensions. The user settings are the editor window's own.
+      - vscode-server-data:/home/node/.vscode-server
       # tode's VS Code user settings, keybindings and extension state, kept
       # across rebuilds. Extensions and Machine settings stay in the image, so
       # that an image change reaches them and the agent cannot persist code.
@@ -101,8 +105,10 @@ services:
       # Root's, and sticky like /tmp: Claude Code creates and replaces its own
       # files here, but cannot change or move the root-owned copies of the
       # host's configuration (scripts/copy-host-config.py). Being a mount
-      # point, it cannot be moved aside as a whole either.
-      - /home/node/.claude:mode=1777
+      # point, it cannot be moved aside as a whole either. exec, since
+      # Docker mounts a tmpfs noexec by default and the copied skills carry
+      # scripts that Claude Code runs from here.
+      - /home/node/.claude:mode=1777,exec
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
@@ -131,7 +137,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges=true]
     tmpfs: ["/home/mitmproxy/.mitmproxy:uid=1000,gid=1000,mode=0700"]
-    ports: ["127.0.0.1:18086:8080"]
+    # A free port of the range, so that several workspaces can be up at once;
+    # code-server.sh asks compose which.
+    ports: ["127.0.0.1:18086-18186:8080"]
     extra_hosts:
       - agent-code-server:${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
     networks:
@@ -272,7 +280,7 @@ volumes:
       o: lowerdir=${CLAUDE_DEVCONTAINER_NODE_LOWER:?Run initialize.sh},upperdir=${CLAUDE_DEVCONTAINER_NODE_UPPER:?Run initialize.sh},workdir=${CLAUDE_DEVCONTAINER_NODE_WORK:?Run initialize.sh}
   claude-projects:
   tode-user:
-  code-server-user:
+  vscode-server-data:
   public-ca:
   proxy-private-ca:
   dind-data:
