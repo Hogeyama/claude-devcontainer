@@ -4,15 +4,15 @@
 //
 // Every origin the shell may reach is http://localhost:<port>, and
 // code-server-proxy decides where each port goes (../proxy.py): 18000 is the
-// IDE, 18001 its webviews, and any other port the same port in the agent.
+// IDE and its webviews; any other port is the same port in the agent.
 // One site for all of them, since Chromium sends SameSite=Lax cookies to an
 // iframe only when every frame above it is of the top page's site, and the
 // Simple Browser shows an app in an iframe of a webview's iframe.
 
 const IDE_PORT = 18000;
-const WEBVIEW_PORT = 18001;
 // The only permission granted: copying in the IDE writes the clipboard.
-// Reading it is not, and pasting with the keyboard needs no permission.
+// Reading it is denied, including the Terminal's Ctrl-V command, which uses
+// the Clipboard API rather than the browser's native paste event.
 const PERMISSIONS = new Set(['clipboard-sanitized-write']);
 
 function parse(url) {
@@ -44,7 +44,7 @@ function isAgentBlob(url) {
 // A URL of the server's: the IDE or its webviews.
 function isServer(url) {
   const parsed = isAgent(url) ? parse(url) : null;
-  return parsed !== null && [String(IDE_PORT), String(WEBVIEW_PORT)].includes(parsed.port);
+  return parsed !== null && parsed.port === String(IDE_PORT);
 }
 
 // A frame may show the agent's pages, its own blob: URLs, and the empty
@@ -78,15 +78,13 @@ function allowsPermission(permission) {
   return PERMISSIONS.has(permission);
 }
 
-// The first page: the IDE with the folder open, and the connection token,
-// which the server turns into a cookie for this site and drops from the URL.
-function ideUrl(token, folder) {
+// The first page opens the folder. main.js supplies authentication in a header.
+function ideUrl(folder) {
   const url = new URL(`http://localhost:${IDE_PORT}/`);
-  url.searchParams.set('tkn', token);
   url.searchParams.set('folder', folder);
   return url.toString();
 }
 
 module.exports = {
-  IDE_PORT, WEBVIEW_PORT, isServer, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, ideUrl,
+  IDE_PORT, isServer, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, ideUrl,
 };

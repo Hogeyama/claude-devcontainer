@@ -1,21 +1,21 @@
 #!/bin/sh
-# Run on the trusted host: in WSL for the Windows client, on a Linux Wayland
+# Run on the trusted host: in WSL for the Windows client, on a Linux Wayland or X11
 # desktop for the Linux one. Both open the editor's Electron shell
 # (code-server/shell/), never an unrestricted browser or VS Code.
 set -eu
 scripts=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 case "${1:-open}" in
-prepare|open|remove-network) action=${1:-open} ;;
-*) echo "usage: $0 [prepare|open|remove-network]" >&2; exit 2 ;;
+prepare|open) action=${1:-open} ;;
+*) echo "usage: $0 [prepare|open]" >&2; exit 2 ;;
 esac
-python3 - "$scripts" "$action" <<'PY'
+python3 - "$scripts" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import settings
-if sys.argv[2] != 'remove-network' and not settings.load()['codeServer']['enabled']:
+if not settings.load()['codeServer']['enabled']:
     sys.exit('error: set [codeServer] enabled = true in .devcontainer/claude.local.toml and rebuild first')
 PY
-# WSL opens the shell on Windows; any other Linux, in a sandbox on Linux.
+# WSL opens the shell on Windows; any other Linux, in a Wayland or X11 session on Linux.
 if command -v wslpath >/dev/null && command -v powershell.exe >/dev/null; then
     client=$scripts/../code-server/windows/client.py
     windows=1
@@ -30,7 +30,7 @@ prepare)
 open)
     # Verify the actual backend before opening the window.
     "$scripts/compose.sh" exec -T agent sh -ec \
-      'test "$CLAUDE_DEVCONTAINER_CODE_SERVER" = 1 && curl --fail --silent --noproxy "*" http://127.0.0.1:18000/version >/dev/null'
+      'test "$CLAUDE_DEVCONTAINER_CODE_SERVER" = 1 && curl --fail --silent --noproxy "*" http://127.0.0.1:18000/healthz >/dev/null'
     "$scripts/compose.sh" up -d code-server-proxy
     # The published port: compose takes a free one of its range per workspace.
     port=$("$scripts/compose.sh" port code-server-proxy 8080 | sed 's/.*://')
@@ -45,7 +45,7 @@ port = int(sys.argv[1])
 for attempt in range(60):
     conn = http.client.HTTPConnection('127.0.0.1', port, timeout=1)
     try:
-        conn.request('GET', 'http://localhost:18000/version')
+        conn.request('GET', 'http://localhost:18000/healthz')
         if conn.getresponse().status == 200:
             break
     except (OSError, http.client.HTTPException):
@@ -62,12 +62,6 @@ PYTHON
     if [ "$windows" = 1 ]; then
         exec python3 "$client" --proxy-port "$port"
     fi
-    # The lock, then the window, in a sandbox that stays when this returns.
+    # The lock, then Electron on the host; the launcher stays until it exits.
     exec python3 "$client" --proxy-port "$port" --detach ;;
-remove-network)
-    # The former WebView2 client's WFP rules and loopback exemption.
-    if [ "$windows" = 1 ]; then
-        exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$scripts/../code-server/windows/remove-network.ps1")"
-    fi
-    echo 'nothing to remove: the Linux client keeps no network rules outside its sandbox.' ;;
 esac

@@ -1,6 +1,6 @@
 'use strict';
 // The isolated editor's window (README.md): the agent's VS Code, which
-// `code serve-web` serves in the agent, through code-server-proxy and nothing
+// Coder code-server serves in the agent, through code-server-proxy and nothing
 // else. The page is the container's, so its JavaScript counts as the
 // attacker's; every decision here is made in the browser process and the
 // network service, outside the renderer, where the page cannot change it.
@@ -8,8 +8,7 @@
 // Usage: electron <this directory> --proxy-port=<port> [--folder=/workspace]
 //          [--user-data-dir=<profile>]
 // with the server's connection token in CLAUDE_DEVCONTAINER_VSCODE_TOKEN.
-// The proxy's port is on the host's 127.0.0.1 (Windows) or the sandbox's
-// (Linux, linux/client.py).
+// The proxy's port is on the host's 127.0.0.1 on both Windows and Linux.
 const { app, BrowserWindow, Menu, session } = require('electron');
 const policy = require('./policy');
 
@@ -62,8 +61,8 @@ async function lockDown(ses) {
     if (policy.isServer(details.url)) {
       const name = Object.keys(headers).find((key) => key.toLowerCase() === 'cookie') || 'Cookie';
       const cookies = (headers[name] || '').split(';').map((cookie) => cookie.trim())
-        .filter((cookie) => cookie && !cookie.startsWith('vscode-tkn='));
-      headers[name] = [...cookies, `vscode-tkn=${token}`].join('; ');
+        .filter((cookie) => cookie && !cookie.startsWith('code-server-session='));
+      headers[name] = [...cookies, `code-server-session=${token}`].join('; ');
     }
     callback({ requestHeaders: headers });
   });
@@ -179,5 +178,5 @@ app.whenReady().then(async () => {
     details.preventDefault();
     window.setTitle(`${title} [agent]`);
   });
-  window.loadURL(policy.ideUrl(token, folder));
+  window.loadURL(policy.ideUrl(folder));
 });

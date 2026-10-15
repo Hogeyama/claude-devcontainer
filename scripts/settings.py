@@ -56,7 +56,6 @@ DEFAULTS = {
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
-    'tode': {'enabled': False, 'extensions': []},
     'codeServer': {'enabled': False, 'extensions': []},
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
@@ -72,7 +71,7 @@ HOST_GIT = '/run/host/git'
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'TODE', 'TODE_EXTENSIONS', 'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -159,10 +158,9 @@ def check(data, source):
     for image in docker.get('images', []):
         if not image or re.search(r'[\s#]', image):
             raise ValueError(f'{source}: docker.images: {image!r} is not an image name')
-    for editor in ('tode', 'codeServer'):
-        for item in data.get(editor, {}).get('extensions', []):
-            if not EXTENSION.fullmatch(item):
-                raise ValueError(f'{source}: {editor}.extensions: {item!r} is not an extension ID (publisher.name)')
+    for item in data.get('codeServer', {}).get('extensions', []):
+        if not EXTENSION.fullmatch(item):
+            raise ValueError(f'{source}: codeServer.extensions: {item!r} is not an extension ID (publisher.name)')
     for item in proxy.get('connectors', []):
         if not CONNECTOR.fullmatch(item):
             raise ValueError(f'{source}: proxy.connectors: {item!r} is not a connector ID (mcpsrv_...)')
@@ -214,9 +212,8 @@ def load(root=ROOT):
     if settings['docker']['enabled'] and settings['agent']['uid'] in SUBORDINATE_IDS:
         raise ValueError(f'agent.uid: {settings["agent"]["uid"]} is used by DinD; with docker.enabled it must be '
                          f'outside {SUBORDINATE_IDS.start}-{SUBORDINATE_IDS.stop - 1}')
-    for editor in ('tode', 'codeServer'):
-        if settings[editor]['extensions'] and not settings[editor]['enabled']:
-            raise ValueError(f'{editor}.extensions: needs {editor}.enabled')
+    if settings['codeServer']['extensions'] and not settings['codeServer']['enabled']:
+        raise ValueError('codeServer.extensions: needs codeServer.enabled')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
@@ -255,8 +252,6 @@ def variables(settings):
         PREFIX + 'SUMI_FILE': secrets.name,
         PREFIX + 'CODE_SERVER_EXTENSIONS': ' '.join(settings['codeServer']['extensions']),
         PREFIX + 'CODE_SERVER': '1' if settings['codeServer']['enabled'] else '0',
-        PREFIX + 'TODE': '1' if settings['tode']['enabled'] else '0',
-        PREFIX + 'TODE_EXTENSIONS': ' '.join(settings['tode']['extensions']),
         PREFIX + 'PROXY_CA': str(settings['proxy']['ca'] or ''),
         PREFIX + 'CONNECTORS': ','.join(settings['proxy']['connectors']),
         PREFIX + 'WEB_SEARCH': '1' if settings['proxy']['web_search'] else '0',

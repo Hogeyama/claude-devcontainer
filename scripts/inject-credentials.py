@@ -89,12 +89,17 @@ def config():
     values = {key: os.environ.get(key, '') for key in CLAUDE_KEYS}
     secrets = {}
     if CONFIG.exists():
-        result = subprocess.run(['sh', '-c', 'set -a; . "$1"; env -0', 'sh', str(CONFIG)], stdout=subprocess.PIPE)
+        # Compare inside the same shell: its launcher (for example Nix's sh
+        # wrapper) may add environment variables before our script runs.
+        script = 'env -0; printf "\\0"; set -a; . "$1" && env -0'
+        result = subprocess.run(['sh', '-c', script, 'sh', str(CONFIG)], stdout=subprocess.PIPE)
         if result.returncode:
             raise Unavailable(f'{CONFIG} failed with exit code {result.returncode}.')
-        loaded = dict(item.split('=', 1) for item in result.stdout.decode(errors='replace').split('\0') if '=' in item)
+        before, after = result.stdout.decode(errors='replace').split('\0\0', 1)
+        original = dict(item.split('=', 1) for item in before.split('\0') if '=' in item)
+        loaded = dict(item.split('=', 1) for item in after.split('\0') if '=' in item)
         secrets = {name: value for name, value in loaded.items()
-                   if SECRET_NAME.fullmatch(name) and name not in SHELL_VARIABLES and os.environ.get(name) != value}
+                   if SECRET_NAME.fullmatch(name) and name not in SHELL_VARIABLES and original.get(name) != value}
         # A Claude credential in the environment replaces the file's, of any kind.
         if not any(values.values()):
             values = {key: loaded.get(key, '') if key in secrets else '' for key in CLAUDE_KEYS}
