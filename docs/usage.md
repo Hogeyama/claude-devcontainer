@@ -288,12 +288,15 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
-## Windows IMEでcode-serverを使う（WebView2）
+## ホストのIMEでエディタを使う（Windows WebView2 / Linux VS Code）
 
-Windows + WSLでは、`[codeServer] enabled = true` でagent内のcode-serverを有効にできます。
-専用のローカルWebView2ウィンドウで表示するので、Windows IMEを直接使えます。
+`[codeServer] enabled = true` で、agentの`/workspace`をホストの画面とIMEで編集できます。
+Windows + WSLでは、agent内のcode-serverを専用のローカルWebView2ウィンドウで表示します。
 AppContainerとWFPでブラウザの通信を専用proxyに限定し、外部アプリへの引き渡しも拒否します。
-todeとは独立した機能です。セットアップ・制約は[code-serverの手順](../.devcontainer/claude/code-server/README.md)を参照してください。
+Linux（Wayland）では、ホストのVS Code自体をbubblewrapに入れ、Docker socketもホームも渡さずに、
+同じ専用proxy経由でagent内のVS Code serverへ接続します。
+[VS Codeが作る経路](#vs-codeが作る経路)は、どちらもサンドボックスの中で閉じます。
+todeとは独立した機能です。セットアップ・制約は[隔離エディタの手順](../.devcontainer/claude/code-server/README.md)を参照してください。
 
 ## ターミナルでVS Codeを使う（tode）
 

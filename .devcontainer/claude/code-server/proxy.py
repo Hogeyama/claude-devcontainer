@@ -4,6 +4,8 @@ import re
 from mitmproxy import http, ctx
 
 BACKEND = ('agent-code-server', 8088)
+# The official VS Code server, for the Linux client's resolver extension.
+VSCODE = ('agent-code-server', 8089)
 PORT_HOST = re.compile(r'port-([1-9][0-9]{0,4})\.localhost')
 BLOCKED_PAGE = (
     b'<!doctype html><title>Blocked by code-server proxy</title>'
@@ -19,8 +21,10 @@ def target_for(host, port):
         return None
     if host == 'ide.localhost':
         return BACKEND
+    if host == 'vscode.localhost':
+        return VSCODE
     match = PORT_HOST.fullmatch(host)
-    if match and 1 <= int(match[1]) <= 65535 and int(match[1]) != 8088:
+    if match and 1 <= int(match[1]) <= 65535 and int(match[1]) not in (8088, 8089):
         return BACKEND
     return None
 

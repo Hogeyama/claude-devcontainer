@@ -84,6 +84,10 @@ services:
       - claude-projects:/home/node/.claude/projects
       # code-server user settings persist separately from tode.
       - code-server-user:/home/node/.local/share/code-server/user-data/User
+      # The Linux client's VS Code server, which code-server/linux/server.py
+      # copies in as root (the agent cannot change it), and its data.
+      - vscode-server:/opt/vscode-server
+      - vscode-server-data:/home/node/.vscode-server
       # tode's VS Code user settings, keybindings and extension state, kept
       # across rebuilds. Extensions and Machine settings stay in the image, so
       # that an image change reaches them and the agent cannot persist code.
@@ -273,6 +277,8 @@ volumes:
   claude-projects:
   tode-user:
   code-server-user:
+  vscode-server:
+  vscode-server-data:
   public-ca:
   proxy-private-ca:
   dind-data:

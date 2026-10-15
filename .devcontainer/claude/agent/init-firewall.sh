@@ -20,7 +20,8 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -d "$proxy" -p tcp --dport 8080 -j ACCEPT
 iptables -A OUTPUT -d "$dind" -p tcp -m multiport ! --dports 2375,2376 -j ACCEPT
 
-# Only the browser proxy can initiate connections to the optional editor.
+# Only the browser proxy can initiate connections to the optional editors:
+# code-server, and the VS Code server of the Linux client.
 if [ "${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}" = 1 ]; then
-    iptables -A INPUT -s "${CLAUDE_DEVCONTAINER_CODE_SERVER_PROXY_ADDRESS:?}" -p tcp --dport 8088 -j ACCEPT
+    iptables -A INPUT -s "${CLAUDE_DEVCONTAINER_CODE_SERVER_PROXY_ADDRESS:?}" -p tcp -m multiport --dports 8088,8089 -j ACCEPT
 fi

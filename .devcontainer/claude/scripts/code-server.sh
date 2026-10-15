@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run on the trusted WSL host. Never fall back to an unrestricted browser.
+# Run on the trusted host: WSL for the Windows client, a Linux Wayland desktop
+# for the Linux one. Never fall back to an unrestricted browser or VS Code.
 set -eu
 scripts=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 case "${1:-open}" in
@@ -13,14 +14,20 @@ import settings
 if sys.argv[2] != 'remove-network' and not settings.load()['codeServer']['enabled']:
     sys.exit('error: set [codeServer] enabled = true in .devcontainer/claude.local.toml and rebuild first')
 PY
-if ! command -v wslpath >/dev/null || ! command -v powershell.exe >/dev/null; then
-    echo 'error: this launcher currently requires Windows WebView2 + WSL.' >&2
-    exit 1
+# WSL opens the Windows client; any other Linux the sandboxed VS Code.
+if command -v wslpath >/dev/null && command -v powershell.exe >/dev/null; then
+    client=windows
+    windows=$(wslpath -w "$scripts/../code-server/windows")
+else
+    client=linux
+    linux=$scripts/../code-server/linux
 fi
-windows=$(wslpath -w "$scripts/../code-server/windows")
 case "$action" in
 prepare)
-    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$windows\\prepare.ps1" -ConfigureNetwork ;;
+    case $client in
+    windows) exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$windows\\prepare.ps1" -ConfigureNetwork ;;
+    linux) exec python3 "$linux/client.py" --check ;;
+    esac ;;
 open)
     # Verify the actual backend before opening the isolated client.
     "$scripts/compose.sh" exec -T agent sh -ec \
@@ -44,8 +51,17 @@ for attempt in range(60):
 else:
     sys.exit('error: code-server is not reachable through its browser proxy; see compose.sh logs code-server-proxy')
 PYTHON
-    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
-      '& "$env:LOCALAPPDATA\ClaudeCodeServerSetup\launch.ps1"' ;;
+    case $client in
+    windows)
+        exec powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+          '& "$env:LOCALAPPDATA\ClaudeCodeServerSetup\launch.ps1"' ;;
+    linux)
+        python3 "$linux/server.py"
+        exec python3 "$linux/client.py" ;;
+    esac ;;
 remove-network)
-    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$windows\\remove-network.ps1" ;;
+    case $client in
+    windows) exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$windows\\remove-network.ps1" ;;
+    linux) echo 'nothing to remove: the Linux client keeps no network rules outside its sandbox.' ;;
+    esac ;;
 esac

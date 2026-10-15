@@ -109,3 +109,46 @@ Sandboxie、追加カーネルドライバ、noVNCは使用していません。
 これは実測した経路のデモであり、全Windowsサービスの代理通信やCOMインターフェース、
 ブラウザ・OSの脆弱性を網羅する保証ではありません。元のデスクトップVS Codeでの
 ホスト実行結果を取り消すものでもありません。DebianのFcitx5／IBusによるGUI実機検証は未完了です。
+
+## LinuxのVS CodeクライアントからClaude Codeを使う
+
+2026-10-15（JST）に、[隔離エディタ](../.devcontainer/claude/code-server/README.md)のLinuxクライアントを実機で確認しました。
+ホストはDebian 12、Hyprland（Wayland）、Fcitx5、VS Code 1.119.0（commit `8b640eef`、nix）、bubblewrap 0.11.2です。
+agentはclone modeで、DinD・nix・sumi・codeServer（`extensions = ["anthropic.claude-code"]`）を有効にしています。
+
+### 起動
+
+- `code-server.sh open`は、ホストの`code --version`に合う公式VS Code serverを取得して`vscode-server` volumeへ配備し、
+  agentで8089番に起動したあと、bubblewrapの中でVS Codeを開きました。2回目以降は取得と配備を省き、起動だけで済みました。
+- 最初の実装では接続が「the handshake timed out」で失敗しました。VS Codeのmanaged接続は
+  `GET ws://localhost/...`の絶対形式のupgrade要求を送り、`skipWebSocketFrames=true`で101のあとをフレームなしに話すためです。
+  resolver拡張が要求を`http://vscode.localhost:8000/...`へのproxy要求に書き換え、mitmproxyを`websocket=false`にして解決しました。
+- サンドボックス内のVS Codeのログには、Marketplaceとupdate CDNへの「Offline」だけが残ります。外向きの経路がないためで、想定どおりです。
+
+### agent内のClaude Codeで確認したこと
+
+VS Codeの拡張ビューでagent側にanthropic.claude-codeがあり、Claude Codeに次を実行させて結果を得ました。
+
+| 観測点 | 結果 |
+| --- | --- |
+| 実行場所 | hostname `a711d79f8779`、`node`、`/workspace`、`/.dockerenv`あり |
+| 通信 | `https://example.com`はproxyがCONNECTに403、`https://api.anthropic.com`はCONNECTに200 |
+| 編集と受け渡し | README.mdへの1行追加をagentの`main`にコミット。ホストの`git fetch agent`で取得できた |
+| ビルドとテスト | `pnpm --dir frontend test`が1件合格。testcontainersがDinDの`busybox:1.37`をpullなしで起動 |
+| 隔離 | `/home/cq2n-iwym`、`/home/node/.ssh`、`/var/run/docker.sock`はいずれも存在しない |
+
+`mount`の出力には、node_modulesのoverlayの設定にあるホストのパス文字列が3行含まれます。中身は読めません。これは今回の変更とは無関係の既存の挙動です。
+
+### 利用者の実操作で確認したこと
+
+- 日本語IME（Fcitx5、text-input-v3経由）は、エディタと統合ターミナルで普段どおりに使えました。
+- agent内の3000番で起動したHTTPサーバーは、ポートビューからSimple Browserで開けました。
+  「ブラウザで開く」は何も起きません。サンドボックス内の`xdg-open`が拒否するためで、拒否のメッセージは画面には出ません。
+
+### 未解決
+
+- 最初の起動ではClaude Codeの認証に失敗しました。原因は特定できていません。`devcontainer up --remove-existing-container`と
+  `inject-credentials.py`の実行後は通っています。proxyのコンテナIDは前後で同じで、認証情報の注入の記録もあるため、
+  proxyに認証情報がなかったという説明は当てはまりません。再発したらproxyのログで拒否された要求を確認します。
+- `--remove-existing-container`では、initializeCommandが起動する注入のwatcherが旧環境へ注入してから「the environment stopped」で終了し、
+  新しい環境を見ません。作り直しのあとは`inject-credentials.py`をホストで実行しています。

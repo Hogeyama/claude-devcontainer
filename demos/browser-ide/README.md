@@ -1,5 +1,11 @@
 # ローカルブラウザで開くcode-serverの境界検証
 
+> [!NOTE]
+> Windows版は`.devcontainer/claude/code-server/`の機能になりました。Linux版は、ここの
+> bwrap構成を使って、ブラウザではなくホストのVS Codeを隔離する形で
+> `.devcontainer/claude/code-server/linux/`に移しました（[手順](../../.devcontainer/claude/code-server/README.md)）。
+> このディレクトリは検証の記録として残しています。
+
 code-serverを専用の**ローカルブラウザで直接表示**するデモです。
 noVNCや画面転送は使用しません。ソースはcode-serverコンテナと共有し、
 編集や統合ターミナルの利用にcloneの受け渡しは必要ありません。

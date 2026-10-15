@@ -97,6 +97,7 @@ RUN install -d -o node -g node /home/node/.local/share/code-server \
     /home/node/.local/share/code-server/extensions /home/node/.local/share/code-server/user-data \
     /home/node/.local/share/code-server/user-data/User \
     /home/node/.local/share/code-server/user-data/Machine \
+    /home/node/.vscode-server \
     && printf '%s\n' '{"terminal.integrated.profiles.linux":{"bash":{"path":"/bin/bash"}},"terminal.integrated.defaultProfile.linux":"bash"}' \
        > /home/node/.local/share/code-server/user-data/Machine/settings.json
 # tode runs inside this container, Chromium and code-server included, and sends

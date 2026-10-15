@@ -57,7 +57,7 @@ DEFAULTS = {
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
     'tode': {'enabled': False, 'extensions': []},
-    'codeServer': {'enabled': False, 'extensions': []},
+    'codeServer': {'enabled': False, 'extensions': [], 'vscode': ''},
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
@@ -219,8 +219,10 @@ def load(root=ROOT):
             raise ValueError(f'{editor}.extensions: needs {editor}.enabled')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
+    settings['codeServer']['vscode'] = settings['codeServer']['vscode'] and resolve(settings['codeServer']['vscode'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
-    for name, path in (('sumi.secrets', settings['sumi']['secrets']), ('proxy.ca', settings['proxy']['ca'])):
+    for name, path in (('sumi.secrets', settings['sumi']['secrets']), ('proxy.ca', settings['proxy']['ca']),
+                       ('codeServer.vscode', settings['codeServer']['vscode'])):
         if "'" in str(path) or '\n' in str(path):
             raise ValueError(f"{name}: {path}: newlines and ' are not allowed")
     return settings

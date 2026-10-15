@@ -52,7 +52,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
         self.assertEqual(loaded['tode'], {'enabled': False, 'extensions': []})
-        self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': []})
+        self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': [], 'vscode': ''})
         self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}})
         # load() must not change the defaults it starts from.
         self.write('claude.toml', '[sumi]\nsecrets = "s.txt"\n')
@@ -223,6 +223,19 @@ dind = "10.99.1"
         self.write('claude.local.toml', '[codeServer]\nenabled = "true"\n')
         with self.assertRaisesRegex(ValueError, 'codeServer.enabled: expected true or false'):
             self.load()
+
+    def test_code_server_vscode_is_a_host_path(self):
+        self.write('claude.local.toml', '[codeServer]\nenabled = true\nvscode = "~/bin/code"\n')
+        with mock.patch.dict(os.environ, {'HOME': '/home/me'}):
+            self.assertEqual(self.load()['codeServer']['vscode'], Path('/home/me/bin/code'))
+        self.write('claude.local.toml', '[codeServer]\nvscode = "../code"\n')
+        self.assertEqual(self.load()['codeServer']['vscode'], self.root / 'code')
+        self.write('claude.local.toml', '[codeServer]\nvscode = 1\n')
+        with self.assertRaisesRegex(ValueError, 'codeServer.vscode: expected a string'):
+            self.load()
+        self.write('claude.local.toml', '[codeServer]\nvscode = "/usr/bin/code"\n')
+        # The host's VS Code is the client's business, not compose's.
+        self.assertNotIn('/usr/bin/code', settings.variables(self.load()).values())
 
     def test_code_server_extension_override_is_independent(self):
         self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n'

@@ -143,6 +143,42 @@ class CodeServerIntegrationTest(unittest.TestCase):
                 chunk = sock.recv(4096)
                 self.assertTrue(chunk, data)
                 data += chunk
+        # The Linux client's VS Code server: its own name and port, through the
+        # same proxy and firewall, and not as a forwarded port.
+        docker('exec', '-d', '-u', 'node', agent, 'python3', '-c',
+               'import http.server\n'
+               'class V(http.server.BaseHTTPRequestHandler):\n'
+               '    def do_GET(self):\n'
+               '        self.send_response(200); self.end_headers(); self.wfile.write(b"commit-" + self.path.encode())\n'
+               'http.server.HTTPServer(("0.0.0.0", 8089), V).serve_forever()')
+        for _ in range(40):
+            status, body = request('GET', 'http://vscode.localhost:8000/version')
+            if status == 200:
+                break
+            time.sleep(.1)
+        self.assertEqual((status, body), (200, b'commit-/version'))
+        for method, url in [('GET', 'http://port-8089.localhost:8000/'), ('CONNECT', 'port-8089.localhost:8000'),
+                            ('CONNECT', 'vscode.localhost:8001')]:
+            self.assertEqual(request(method, url)[0], 451, (method, url))
+        with socket.create_connection(('127.0.0.1', port), 5) as sock:
+            sock.settimeout(5)
+            sock.sendall(b'CONNECT vscode.localhost:8000 HTTP/1.1\r\nHost: vscode.localhost:8000\r\n\r\n')
+            self.assertIn(b'200', sock.recv(4096).split(b'\r\n')[0])
+            sock.sendall(b'GET /version HTTP/1.1\r\nHost: vscode.localhost:8000\r\n\r\n')
+            self.assertIn(b'commit-/version', sock.recv(4096))
+        # An upgrade as a plain proxy request, without CONNECT, as the Linux
+        # client's resolver sends it; the stream after the 101 is passed as is.
+        with socket.create_connection(('127.0.0.1', port), 5) as sock:
+            sock.settimeout(5)
+            sock.sendall(b'GET http://port-3000.localhost:8000/socket HTTP/1.1\r\nHost: port-3000.localhost:8000\r\n'
+                         b'Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n'
+                         b'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n')
+            data = sock.recv(4096)
+            self.assertIn(b'101', data.split(b'\r\n')[0])
+            while b'hello' not in data:
+                chunk = sock.recv(4096)
+                self.assertTrue(chunk, data)
+                data += chunk
         # The ports panel must generate the same host-based URLs.
         env = docker('exec', '-u', 'node', agent, 'sh', '-c', 'cat /proc/$(pgrep -fo "[/]opt/code-server/lib/node /opt/code-server --")/environ')
         self.assertIn('VSCODE_PROXY_URI=http://port-{{port}}.localhost:8000', env)
@@ -150,6 +186,11 @@ class CodeServerIntegrationTest(unittest.TestCase):
         blocked = docker('run', '--rm', '--network', tag, '--entrypoint', 'python3', image, '-c',
                          'import socket\ns=socket.socket();s.settimeout(1)\n'
                          f'try: s.connect(({agent_ip!r},8088));print("connected")\n'
+                         'except OSError: print("blocked")')
+        self.assertEqual(blocked, 'blocked')
+        blocked = docker('run', '--rm', '--network', tag, '--entrypoint', 'python3', image, '-c',
+                         'import socket\ns=socket.socket();s.settimeout(1)\n'
+                         f'try: s.connect(({agent_ip!r},8089));print("connected")\n'
                          'except OSError: print("blocked")')
         self.assertEqual(blocked, 'blocked')
         disabled = docker('run', '--rm', '--network', 'none', '--user', '1000:1000',
