@@ -8,9 +8,14 @@ from unittest.mock import patch
 from mitmproxy import connection, http
 from mitmproxy.test import tflow
 
-import addon
-from addon import PolicyAddon
 import policy
+import workspace_config
+
+# addon reads on import the proxy.json that the image build installs, which a
+# run outside the image lacks; each test sets the routes it needs.
+with patch.object(workspace_config, 'installed', return_value=policy.parse({})):
+    import addon
+    from addon import PolicyAddon
 
 CREDENTIALS = ('managed-anthropic', 'api-key')
 # The GitHub part of template/claude.toml.
@@ -181,6 +186,37 @@ class PolicyTest(unittest.TestCase):
                             ('https://api.anthropic.com/api/oauth/account/settings', 'GET')]:
             with self.subTest(url=url):
                 self.denied(flow(url, method))
+
+    def test_artifact_content_host(self):
+        self.credentials = None  # Not needed: the read token is in the query.
+        sent = [('Authorization', 'Bearer attacker'), ('Cookie', 'session=attacker'), ('X-Frame-Asset-Token', 't')]
+        for path in ['/_f/abc123/index.html?__frame_t=t', '/_f/abc123/_src/a%20b.png', '/_warmup']:
+            with self.subTest(path=path):
+                headers = self.allowed(flow('https://abc123.frame.claudeusercontent.com' + path, 'GET', b'', sent))
+                self.assertNotIn('Authorization', headers)
+                self.assertNotIn('Cookie', headers)
+                self.assertEqual(headers['X-Frame-Asset-Token'], 't')
+        for url, method in [('https://abc123.frame.claudeusercontent.com/_f/abc123/index.html', 'POST'),
+                            ('https://abc123.frame.claudeusercontent.com/api/frame/perm/abc123', 'GET'),
+                            ('https://abc123.frame.claudeusercontent.com/_f/../_x', 'GET'),
+                            ('https://frame.claudeusercontent.com/_f/abc123/index.html', 'GET'),
+                            ('https://a.b.frame.claudeusercontent.com/_f/abc123/index.html', 'GET'),
+                            ('https://-a.frame.claudeusercontent.com/_f/abc123/index.html', 'GET'),
+                            ('https://abcframe.claudeusercontent.com/_f/abc123/index.html', 'GET'),
+                            ('https://abc123.frame.claudeusercontent.com.attacker.example/_f/abc123/index.html', 'GET'),
+                            ('https://www.claudeusercontent.com/_f/abc123/index.html', 'GET'),
+                            ('http://abc123.frame.claudeusercontent.com/_f/abc123/index.html', 'GET'),
+                            ('https://abc123.frame.claudeusercontent.com:8443/_f/abc123/index.html', 'GET')]:
+            with self.subTest(url=url):
+                self.denied(flow(url, method))
+        for host, allowed in [('abc123.frame.claudeusercontent.com', True), ('frame.claudeusercontent.com', False)]:
+            f = flow()
+            f.request = http.Request.make('CONNECT', f'https://{host}:443')
+            self.addon.http_connect(f)
+            self.assertEqual(f.response is None, allowed, host)
+            data = SimpleNamespace(server=connection.Server(address=(host, 443)))
+            self.addon.server_connect(data)
+            self.assertEqual(data.server.error is None, allowed, host)
 
     def test_anthropic_rejects_ways_to_reach_other_hosts(self):
         variants = [messages(mcp_servers=[]), messages(container='c'),

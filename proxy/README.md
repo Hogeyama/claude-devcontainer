@@ -2,7 +2,8 @@ The proxy policy is defined in `addon.py`, with host settings for workspace
 hosts, connectors and web search. Rebuild the image from the host to change
 the code; never mount an agent-editable addon into the running proxy.
 
-Run unit tests with Python and `proxy/requirements.txt` installed:
+Run unit tests from `.devcontainer/claude`, with Python and
+`proxy/requirements.txt` installed:
 
 ```sh
 python -m unittest discover -s proxy -p '*_test.py' -v
@@ -50,6 +51,11 @@ or result sources. This permission also applies to direct API calls from Bash.
 claude.ai connectors (mcp-proxy.anthropic.com) are closed unless their IDs are
 listed in `proxy.connectors` of `claude.toml`; listed ones get the claude.ai OAuth
 token, and what they do on the connected account is not inspected.
+
+The Artifact tool reads a page's files from `<slug>.frame.claudeusercontent.com`,
+one subdomain per artifact, so `addon.py` matches that host by suffix: `GET` of
+`/_f/...` and of the `/_warmup` probe. The read token is in the query, and the
+proxy adds no credentials.
 
 Other hosts come only from the workspace's `proxy.hosts`: its routes, the
 headers the agent may pass, and the headers injected with the host's secrets,
