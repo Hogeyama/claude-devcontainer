@@ -78,9 +78,10 @@ def open_window(port, folder):
     state.mkdir(parents=True, exist_ok=True)
     # Over the previous copy: a window that is open has read its files.
     shutil.copytree(SHELL, state / 'shell', dirs_exist_ok=True)
-    # WSL passes a variable to a Windows process only when WSLENV names it.
+    # WSL passes a variable to a Windows process only when WSLENV names it;
+    # /w: from WSL to Windows only.
     names = [name for name in os.environ.get('WSLENV', '').split(':') if name]
-    environ = os.environ | {'WSLENV': ':'.join(names + [TOKEN + '/u'])}
+    environ = os.environ | {'WSLENV': ':'.join(names + [TOKEN + '/w'])}
     command = shell_command(directory / electron.executable(PLATFORM), state / 'shell', state / 'profile', port, folder)
     with open(state / 'client.log', 'w') as log:
         subprocess.Popen(command, cwd=state, env=environ, stdin=subprocess.DEVNULL, stdout=log, stderr=log,

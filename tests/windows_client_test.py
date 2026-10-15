@@ -55,7 +55,7 @@ class WindowsClientTest(unittest.TestCase):
         options = popen.call_args.kwargs
         self.assertEqual(command[0], str(base / 'electron/x/electron.exe'))
         self.assertIn('--proxy-port=18090', command)
-        self.assertEqual(options['env']['WSLENV'], f'USERPROFILE/p:{client.TOKEN}/u')
+        self.assertEqual(options['env']['WSLENV'], f'USERPROFILE/p:{client.TOKEN}/w')
         self.assertEqual(options['env'][client.TOKEN], 'secret')
         self.assertTrue(options['start_new_session'])
         state = Path(options['cwd'])
