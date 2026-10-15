@@ -347,7 +347,7 @@ code-server、Chromium、拡張機能はすべてコンテナの中で動きま�
 - Chromiumはheadless Ozoneで起動し、`DISPLAY`と`WAYLAND_DISPLAY`を外します。転送されたディスプレイがあっても使いません。
 - Chromiumは`127.0.0.1`でremote debugging portを開き、code-serverも`127.0.0.1`で待ち受けます。コンテナの中のプロセスは、これらを通じて画面を操作できます。agentはもともと同じユーザーなので、権限は増えません。
 - 拡張機能のMarketplaceは、proxyで許可していないので、コンテナの中からは使えません。[拡張機能を入れる](#拡張機能を入れる)を参照してください。
-- todeとcode-serverのtarballは、バージョンとSHA-256を固定してimageのビルド時にダウンロードします。todeは初回の起動時にcode-serverをGitHubから取りに行きますが、proxyが拒否するので、imageに入れたcode-serverを`TODE_CODE_SERVER`で指定しています。todeを更新するときは`agent/Dockerfile`のURLとchecksumを変え、code-serverも新しいtodeが固定するバージョン（`dist/codeserver/vendored.js`）に合わせてください。`tode --upgrade`は使えません。
+- todeとcode-serverのtarballは、バージョンとSHA-256を固定してimageのビルド時にダウンロードします。todeは初回の起動時にcode-serverをGitHubから取りに行きますが、proxyが拒否するので、imageに入れたcode-serverを`TODE_CODE_SERVER`で指定しています。code-serverは隔離エディタと共有し、proxy URLのパス・クエリ・フラグメントを保持する上流修正を含む4.141.0に固定しています。todeが固定するバージョン（`dist/codeserver/vendored.js`）とは異なります。todeやcode-serverを更新するときは`agent/Dockerfile`のURLとchecksumを変え、両者の組合せで動作を確認してください。`tode --upgrade`は使えません。
 - 日本語と絵文字を表示できるよう、Notoのフォントを入れています。
 - Chromiumは`--disable-dev-shm-usage`で起動し、描画のバッファを`/dev/shm`でなく`/tmp`に置きます。Dockerの`/dev/shm`は64MBで、大きな画面では足りず、rendererがログを残さずに落ちて画面が固まるためです。
 - code-serverのターミナルは`/bin/bash`で起動します。nixのdev shellはreadlineなしのBashをPATHの先頭に置き、このBashはプロンプトの`\[ \]`をそのまま表示するためです。dev shellの環境は`~/.bashrc`から読むので、ターミナルでも使えます。

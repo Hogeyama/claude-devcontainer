@@ -19,7 +19,8 @@ ENTRYPOINT ["/sumi", "serve"]
 # graphics protocol. Only the stage that INSTALL_TODE names is built, so the
 # tarballs are downloaded only when tode.enabled is set. tode would otherwise
 # fetch code-server from GitHub at its first start, which the proxy denies; the
-# version and checksums are those tode pins (dist/codeserver/vendored.js).
+# shared code-server version is pinned independently of tode's vendored version
+# to include the upstream proxy URL path, query, and fragment fix (coder/code-server#8012).
 FROM scratch AS tode-amd64
 ADD --checksum=sha256:a8aae8c31c649781ee4fb3b174da08163830cc10e1dcee58465cc184a152cb25 \
     https://tode-releases.zenbu-labs.workers.dev/dl/stable/v0.4.2/tode-linux-x64.tar.gz /tode.tar.gz
@@ -29,11 +30,11 @@ ADD --checksum=sha256:ab59e0aab3e1d171288699c3fbba508b5cf5f214f0c0db2ec42e35baf5
     https://tode-releases.zenbu-labs.workers.dev/dl/stable/v0.4.2/tode-linux-arm64.tar.gz /tode.tar.gz
 
 FROM scratch AS code-server-amd64
-ADD --checksum=sha256:a38d26f4cb81f768feddff79e2937fd3f39c83d3da8be3da7225e1087e62e4ed \
-    https://github.com/coder/code-server/releases/download/v4.132.0/code-server-4.132.0-linux-amd64.tar.gz /code-server.tar.gz
+ADD --checksum=sha256:65bcd20b524d03eb1b5adb7f360244599ef0e5b74089a46a982d32c074b97a29 \
+    https://github.com/coder/code-server/releases/download/v4.141.0/code-server-4.141.0-linux-amd64.tar.gz /code-server.tar.gz
 FROM scratch AS code-server-arm64
-ADD --checksum=sha256:ade569a677d1c04ee66ef153382b7e15bf261f955407663c7ddc6b87f9ee29fc \
-    https://github.com/coder/code-server/releases/download/v4.132.0/code-server-4.132.0-linux-arm64.tar.gz /code-server.tar.gz
+ADD --checksum=sha256:e5cc78da1d631c6cf6162f9b18eeaa8ee9d3239e1a88bb99d0602cdc5fa1852d \
+    https://github.com/coder/code-server/releases/download/v4.141.0/code-server-4.141.0-linux-arm64.tar.gz /code-server.tar.gz
 FROM tode-${TARGETARCH} AS tode-1
 FROM scratch AS tode-0
 FROM tode-${INSTALL_TODE} AS tode

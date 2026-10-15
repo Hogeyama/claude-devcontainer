@@ -127,7 +127,7 @@ AppContainerやWFPでElectronを閉じ込めるには、ループバック免除
 agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番で起動します。
 ホストのポートには公開しません。
 
-- code-server 4.132.0は、`agent/Dockerfile`がバージョンとSHA-256を固定してビルド時に入れます。todeと配布物を共有し、どちらか一方が有効なら取得します。
+- code-server 4.141.0は、`agent/Dockerfile`がバージョンとSHA-256を固定してビルド時に入れます。todeと配布物を共有し、どちらか一方が有効なら取得します。
 - `codeServer.extensions` は、ビルド時にcode-serverのCLIで入れます。todeと同じく`EXTENSIONS_GALLERY`でMicrosoftのMarketplaceを指定します。指定した拡張やバージョンが入らなければビルドは失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直します。
 - 起動のたびに64桁の16進トークンを作り、従来と同じ`/run/claude-devcontainer/vscode-token`に置きます。serverには`HASHED_PASSWORD`として渡し、シェルは18000番へのすべての要求に`code-server-session` Cookieとして付けます。Cookieなしで取得されるService Workerのスクリプトも含みます。最初のURLにはフォルダだけを指定します。
 - webviewはIDEと同じ`localhost:18000`から配信されます。serverへのパッチとwebview専用ポートは不要です。
