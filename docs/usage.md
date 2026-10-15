@@ -232,7 +232,7 @@ python3 .devcontainer/claude/scripts/inject-credentials.py
 
 proxyは1環境につき1組の認証値を持ち、次の要求から新しい値を使います。認証値はproxy専用tmpfsに保存され、置き換えるかproxyを停止するまで有効です。ファイルはproxyのUID 1000（agentのUIDの設定とは無関係）が所有する0400で、agentやDinDからは読めません。
 
-`devcontainer up`で起動すると、注入スクリプトは環境が動いている間ホストで動き続けます。proxyが作り直されれば、その都度注入し直します。
+`devcontainer up`で起動すると、注入スクリプトは環境が動いている間ホストで動き続けます。proxyやagentが作り直されれば、その都度注入し直します。起動から10分間は、環境が消えても終了しません。`devcontainer up --remove-existing-container`はagentを消してからイメージをビルドするので、その間も待ち続けて新しいagentに注入します。
 
 ### ホストのClaude Codeのログイン
 

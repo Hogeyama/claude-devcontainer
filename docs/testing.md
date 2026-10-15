@@ -150,5 +150,3 @@ VS Codeの拡張ビューでagent側にanthropic.claude-codeがあり、Claude C
 - 最初の起動ではClaude Codeの認証に失敗しました。原因は特定できていません。`devcontainer up --remove-existing-container`と
   `inject-credentials.py`の実行後は通っています。proxyのコンテナIDは前後で同じで、認証情報の注入の記録もあるため、
   proxyに認証情報がなかったという説明は当てはまりません。再発したらproxyのログで拒否された要求を確認します。
-- `--remove-existing-container`では、initializeCommandが起動する注入のwatcherが旧環境へ注入してから「the environment stopped」で終了し、
-  新しい環境を見ません。作り直しのあとは`inject-credentials.py`をホストで実行しています。

@@ -255,11 +255,14 @@ class WatchTest(unittest.TestCase):
         # (seconds since the start, (agent, proxy)) in order; the last one reached is running.
         self.timeline = []
         self.injected = []
+        self.configured = []
+        self.logged = []
         source = mock.Mock(mode='oauth', **{'current.return_value': 'token', 'settings.return_value': None})
         for name, value in [('take_over', lambda: None), ('claude', lambda values: source),
                             ('find_environment', self.environment), ('requested_secrets', lambda proxy: []),
                             ('inject', lambda proxy, data: self.injected.append(proxy)),
-                            ('install_settings', lambda agent, settings: None), ('log', lambda *message: None)]:
+                            ('install_settings', lambda agent, settings: self.configured.append(agent)),
+                            ('log', lambda *message: self.logged.append(' '.join(message)))]:
             patcher = mock.patch.object(inject_credentials, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -281,11 +284,24 @@ class WatchTest(unittest.TestCase):
         inject_credentials.watch({'secrets': {}})
         self.assertEqual(self.injected, ['proxy'])
 
+    def test_configures_the_agent_that_replaces_a_running_one(self):
+        # --remove-existing-container removes the agent but not the proxy, and
+        # builds the images before it starts the new agent.
+        self.timeline = [(0, ('old', 'proxy')), (10, (None, None)), (150, ('new', 'proxy')), (700, (None, None))]
+        inject_credentials.watch({'secrets': {}})
+        self.assertEqual(self.configured, ['old', 'new'])
+
+    def test_logs_each_agent_it_configures(self):
+        self.timeline = [(0, ('old', 'proxy')), (10, (None, None)), (150, ('new', 'proxy')), (700, (None, None))]
+        inject_credentials.watch({'secrets': {}})
+        self.assertTrue(any('new' in line for line in self.logged), self.logged)
+
     def test_stops_soon_after_the_environment_stops(self):
-        self.timeline = [(0, ('agent', 'proxy')), (100, (None, None))]
+        stopped = inject_credentials.START_SECONDS + 100
+        self.timeline = [(0, ('agent', 'proxy')), (stopped, (None, None))]
         inject_credentials.watch({'secrets': {}})
         self.assertEqual(self.injected, ['proxy'])
-        self.assertLessEqual(self.clock, 100 + inject_credentials.WAIT_SECONDS + inject_credentials.POLL_SECONDS)
+        self.assertLessEqual(self.clock, stopped + inject_credentials.WAIT_SECONDS + inject_credentials.POLL_SECONDS)
 
 
 if __name__ == '__main__':

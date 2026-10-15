@@ -38,10 +38,12 @@ SETUP_TOKEN = 'CLAUDE_CODE_OAUTH_TOKEN'
 SECRET_NAME = re.compile(r'[A-Z_][A-Z0-9_]*')
 # What the shell itself changes while reading the file.
 SHELL_VARIABLES = {'PWD', 'OLDPWD', 'SHLVL', '_'}
-# How long the watcher waits for the environment to appear: `up` builds the
-# images after initializeCommand starts it, which takes minutes the first time.
+# How long the watcher keeps watching after it starts, even while the
+# environment is gone: `up` builds the images after initializeCommand starts it,
+# which takes minutes the first time, and --remove-existing-container removes
+# the running agent before that build.
 START_SECONDS = 600
-# How long it waits for the environment to reappear once it has run.
+# After that, how long it waits for the environment to reappear.
 WAIT_SECONDS = 60
 POLL_SECONDS = 5
 RETRY = 'Run .devcontainer/claude/scripts/inject-credentials.py on the host once the container is up.'
@@ -333,20 +335,20 @@ def watch(values):
     take_over()
     source = claude(values)
     injected, names = None, []
-    last_seen, patience = time.monotonic(), START_SECONDS
-    while time.monotonic() - last_seen < patience:
+    started = last_seen = time.monotonic()
+    while time.monotonic() < max(started + START_SECONDS, last_seen + WAIT_SECONDS):
         try:
             agent, proxy = find_environment()
             if proxy:
-                last_seen, patience = time.monotonic(), WAIT_SECONDS
+                last_seen = time.monotonic()
                 if injected is None or injected[1] != proxy:
                     names = requested_secrets(proxy)
                 state = (agent, proxy, snapshot(values, source, names), json.dumps(source.settings()))
                 if state != injected:
                     inject(proxy, state[2])
                     install_settings(agent, source.settings())
-                    if injected is None or injected[1] != proxy:
-                        log('injected into', proxy[:12])
+                    if injected is None or injected[:2] != state[:2]:
+                        log('injected into', proxy[:12], 'for agent', agent[:12])
                     injected = state
         except subprocess.CalledProcessError:
             pass  # Not ready yet.
