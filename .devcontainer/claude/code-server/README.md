@@ -21,6 +21,8 @@ proxyはagentとは別のコンテナで、agentからは書き換えられま�
 
 ## 有効にする
 
+todeのサポートは削除しました。以前の設定に`[tode]`がある場合は、`claude.toml`と`claude.local.toml`からセクションごと削除し、必要な拡張機能を`codeServer.extensions`へ移してください。既存の`tode-user` volumeは自動削除しませんが、今後は使用しません。
+
 1. `.devcontainer/claude.local.toml`（チーム共通なら `claude.toml`）に設定します。既定は無効です。
 
    ```toml
@@ -127,8 +129,8 @@ AppContainerやWFPでElectronを閉じ込めるには、ループバック免除
 agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番で起動します。
 ホストのポートには公開しません。
 
-- code-server 4.141.0は、`agent/Dockerfile`がバージョンとSHA-256を固定してビルド時に入れます。todeと配布物を共有し、どちらか一方が有効なら取得します。
-- `codeServer.extensions` は、ビルド時にcode-serverのCLIで入れます。todeと同じく`EXTENSIONS_GALLERY`でMicrosoftのMarketplaceを指定します。指定した拡張やバージョンが入らなければビルドは失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直します。
+- code-server 4.141.0は、`agent/Dockerfile`がバージョンとSHA-256を固定してビルド時に入れます。`codeServer.enabled`が有効な場合だけ取得します。
+- `codeServer.extensions` は、ビルド時にcode-serverのCLIで入れます。`EXTENSIONS_GALLERY`でMicrosoftのMarketplaceを指定します。指定した拡張やバージョンが入らなければビルドは失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直します。
 - 起動のたびに64桁の16進トークンを作り、従来と同じ`/run/claude-devcontainer/vscode-token`に置きます。serverには`HASHED_PASSWORD`として渡し、シェルは18000番へのすべての要求に`code-server-session` Cookieとして付けます。Cookieなしで取得されるService Workerのスクリプトも含みます。最初のURLにはフォルダだけを指定します。
 - webviewはIDEと同じ`localhost:18000`から配信されます。serverへのパッチとwebview専用ポートは不要です。
 - Workspace Trustは`--disable-workspace-trust`で無効にします。agentのworkspaceはもともと攻撃者が書き換えられるもので、agentのClaude Codeも最初から信頼しています。制限モードはagent内の拡張機能を止めるだけで、ホストを守りません。

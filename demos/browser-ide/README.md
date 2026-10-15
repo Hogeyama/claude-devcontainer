@@ -44,7 +44,7 @@ Wayland socketは表示・入力のための明示的な共有資源です。com
 ## 起動
 
 このリポジトリのagentイメージに`/opt/code-server/bin/code-server`があることが必要です。
-この環境ではtode同梱のcode-serverを利用していますが、tode自体は起動しません。
+`[codeServer] enabled = true`でビルドしたagentイメージを利用します。
 別名のイメージなら`AGENT_IMAGE`で指定できます。
 
 ```sh

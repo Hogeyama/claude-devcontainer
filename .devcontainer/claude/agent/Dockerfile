@@ -1,5 +1,3 @@
-# tode.enabled in claude.toml: 1 installs terminal-code (tode) below.
-ARG INSTALL_TODE=0
 # codeServer.enabled: installs Coder code-server for the isolated editor.
 ARG INSTALL_CODE_SERVER=0
 # sumi masks secrets in what Claude's tools return (sumi.enabled in
@@ -15,33 +13,14 @@ FROM sumi-${TARGETARCH} AS sumi
 FROM scratch AS sumi-serve
 COPY --from=sumi /sumi /sumi
 ENTRYPOINT ["/sumi", "serve"]
-# terminal-code (tode), VS Code drawn in the terminal through the kitty
-# graphics protocol. Only the stage that INSTALL_TODE names is built, so the
-# tarballs are downloaded only when tode.enabled is set. tode would otherwise
-# fetch code-server from GitHub at its first start, which the proxy denies; the
-# shared code-server version is pinned independently of tode's vendored version
-# to include the upstream proxy URL path, query, and fragment fix (coder/code-server#8012).
-FROM scratch AS tode-amd64
-ADD --checksum=sha256:a8aae8c31c649781ee4fb3b174da08163830cc10e1dcee58465cc184a152cb25 \
-    https://tode-releases.zenbu-labs.workers.dev/dl/stable/v0.4.2/tode-linux-x64.tar.gz /tode.tar.gz
-
-FROM scratch AS tode-arm64
-ADD --checksum=sha256:ab59e0aab3e1d171288699c3fbba508b5cf5f214f0c0db2ec42e35baf5396156 \
-    https://tode-releases.zenbu-labs.workers.dev/dl/stable/v0.4.2/tode-linux-arm64.tar.gz /tode.tar.gz
-
 FROM scratch AS code-server-amd64
 ADD --checksum=sha256:65bcd20b524d03eb1b5adb7f360244599ef0e5b74089a46a982d32c074b97a29 \
     https://github.com/coder/code-server/releases/download/v4.141.0/code-server-4.141.0-linux-amd64.tar.gz /code-server.tar.gz
 FROM scratch AS code-server-arm64
 ADD --checksum=sha256:e5cc78da1d631c6cf6162f9b18eeaa8ee9d3239e1a88bb99d0602cdc5fa1852d \
     https://github.com/coder/code-server/releases/download/v4.141.0/code-server-4.141.0-linux-arm64.tar.gz /code-server.tar.gz
-FROM tode-${TARGETARCH} AS tode-1
-FROM scratch AS tode-0
-FROM tode-${INSTALL_TODE} AS tode
-# Both features share the same download; disabled features use an empty stage.
 FROM code-server-${TARGETARCH} AS code-server-1
 FROM scratch AS code-server-0
-FROM code-server-${INSTALL_TODE} AS tode-code-server
 FROM code-server-${INSTALL_CODE_SERVER} AS editor-code-server
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
 # Only agent-setup.sh from the workspace's .devcontainer/, if there is one. A
@@ -73,12 +52,6 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     && install -d -o node -g node /workspace \
     # The claude-projects volume copies this owner when it is first created.
     && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
-    # The tode-user volume's mount point, made here whether or not tode is
-    # installed: Docker would create missing parents, ~/.local among them, as root.
-    && for dir in .local .local/share .local/share/tode .local/share/tode/vscode \
-        .local/share/tode/vscode/user-data .local/share/tode/vscode/user-data/User; do \
-      install -d -o node -g node "/home/node/$dir"; \
-    done \
     # Interactive shells, including Nix's Bash launched by VS Code, and Bash
     # that takes itself for a command run by rshd, which reads ~/.bashrc in
     # place of BASH_ENV: one with a socket for stdin and no SHLVL, as Claude
@@ -89,10 +62,8 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
-RUN --mount=type=bind,from=tode-code-server,target=/tmp/tode-code-server \
-    --mount=type=bind,from=editor-code-server,target=/tmp/editor-code-server \
+RUN --mount=type=bind,from=editor-code-server,target=/tmp/editor-code-server \
     archive=/tmp/editor-code-server/code-server.tar.gz \
-    && if [ ! -f "$archive" ]; then archive=/tmp/tode-code-server/code-server.tar.gz; fi \
     && if [ -f "$archive" ]; then \
       mkdir -p /opt/code-server \
       && tar -xzf "$archive" -C /opt/code-server --strip-components 1 --no-same-owner \
@@ -108,69 +79,6 @@ RUN if [ "$INSTALL_CODE_SERVER" = 1 ]; then \
         > /opt/code-server/machine-settings.json; \
     fi
 RUN install -d -o node -g node /home/node/.vscode-server
-# tode runs inside this container, Chromium and code-server included, and sends
-# the terminal only pixels; see docs/usage.md. Chromium's own sandbox needs user
-# namespaces or a setuid helper, which seccomp and no-new-privileges deny here,
-# so tode's Electron runs with --no-sandbox: a page that broke out of a renderer
-# would be a process of the agent's user in this container, which the agent
-# already is. Headless Ozone keeps it off any display, forwarded or not.
-# Docker gives /dev/shm 64 MiB, less than Chromium's frame buffers for a large
-# screen, and a renderer that runs out dies without logging, which leaves the
-# editor frozen; --disable-dev-shm-usage has Chromium use /tmp instead.
-# The base image has no fonts but DejaVu, so Chromium drew Japanese and emoji
-# as boxes. A Nix dev shell puts its Bash, built without readline, first on
-# PATH, and that Bash prints the \[ \] of ~/.bashrc's prompt as they are, so
-# code-server's terminal starts /bin/bash (code-server's Machine settings, which
-# tode leaves alone); ~/.bashrc still loads the dev shell's environment.
-RUN --mount=type=bind,from=tode,target=/tmp/tode \
-    if [ -f /tmp/tode/tode.tar.gz ]; then \
-      apt-get update && apt-get install -y --no-install-recommends \
-        libnss3 libgtk-3-0 libasound2 libgbm1 \
-        fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
-      && rm -rf /var/lib/apt/lists/* \
-      && mkdir -p /opt/tode \
-      && tar -xzf /tmp/tode/tode.tar.gz -C /opt/tode --strip-components 1 --no-same-owner \
-      && chmod -R u-s,g-s,go-w /opt/tode \
-      && electron=/opt/tode/node_modules/@zenbu-labs/pixel/electron/dist/pixel \
-      && mv "$electron" "$electron.bin" \
-      && if ldd "$electron.bin" | grep 'not found' >&2; then exit 1; fi \
-      && printf '%s\n' '#!/bin/sh' \
-        "[ -n \"\$ELECTRON_RUN_AS_NODE\" ] && exec $electron.bin \"\$@\"" \
-        'unset DISPLAY WAYLAND_DISPLAY' \
-        "exec $electron.bin \"\$@\" --no-sandbox --disable-dev-shm-usage --ozone-platform=headless '--screen-info={8192x8192}'" \
-        > "$electron" \
-      && chmod 755 "$electron" \
-      && printf '%s\n' '#!/bin/sh' \
-        'export ELECTRON_RUN_AS_NODE=1 TODE_INSTALL_ROOT=/opt/tode TODE_CODE_SERVER=/opt/code-server/bin/code-server TERMINAL_BROWSER_FRAMES=inline DO_NOT_TRACK=1' \
-        "exec $electron.bin /opt/tode/dist/main.js \"\$@\"" \
-        > /usr/local/bin/tode \
-      && chmod 755 /usr/local/bin/tode \
-      && machine=/home/node/.local/share/tode/vscode/user-data/Machine \
-      && install -d -o node -g node "$machine" \
-      && printf '%s\n' '{' \
-        '  "terminal.integrated.profiles.linux": {"bash": {"path": "/bin/bash", "icon": "terminal-bash"}},' \
-        '  "terminal.integrated.defaultProfile.linux": "bash"' \
-        '}' > "$machine/settings.json" \
-      && chown node:node "$machine/settings.json"; \
-    fi
-# tode.extensions in claude.toml, space-separated, from the Marketplace that
-# tode sets for code-server. Installed here on the host's network, since the
-# proxy does not let the agent reach the Marketplace and its CDN hosts.
-ARG TODE_EXTENSIONS=""
-RUN if [ -n "$TODE_EXTENSIONS" ]; then \
-      data=/home/node/.local/share/tode/vscode \
-      && install -d -o node -g node "$data/extensions" \
-      && set -- \
-      && for id in $TODE_EXTENSIONS; do set -- "$@" --install-extension "$id"; done \
-      && HOME=/home/node EXTENSIONS_GALLERY='{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","cacheUrl":"https://vscode.blob.core.windows.net/gallery/index","controlUrl":""}' \
-        runuser -u node -- /opt/code-server/bin/code-server \
-        --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" "$@" \
-      && listed=$(HOME=/home/node runuser -u node -- /opt/code-server/bin/code-server \
-        --extensions-dir "$data/extensions" --user-data-dir "$data/user-data" --list-extensions) \
-      && for id in $TODE_EXTENSIONS; do \
-        printf '%s\n' "$listed" | grep -qixF "${id%%@*}" || { echo "error: tode.extensions: $id was not installed" >&2; exit 1; }; \
-      done; \
-    fi
 # codeServer.extensions in claude.toml, space-separated, each optionally
 # @version. Installed at build time from the Marketplace (the agent has no
 # runtime access to it), with the server's own CLI, into /opt/code-server/extensions,

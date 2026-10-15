@@ -51,7 +51,6 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
-        self.assertEqual(loaded['tode'], {'enabled': False, 'extensions': []})
         self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': []})
         self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}})
         # load() must not change the defaults it starts from.
@@ -80,6 +79,7 @@ class SettingsTest(unittest.TestCase):
             ('[git]\nshared_writable = true\n', r'git.shared_writable: unknown setting'),
             ('[agent]\nuser = 1\n', r'claude.local.toml: agent.user: unknown setting'),
             ('[dind]\nenabled = true\n', r'claude.local.toml: unknown table \[dind\]'),
+            ('[tode]\nenabled = true\n', r'claude.local.toml: unknown table \[tode\]'),
             ('[docker]\nenabled = 1\n', r'docker.enabled: expected true or false'),
             ('[agent]\nuid = true\n', r'agent.uid: expected an integer'),
             ('[agent]\nuid = 0\n', r'agent.uid: must be positive'),
@@ -89,9 +89,6 @@ class SettingsTest(unittest.TestCase):
             ('[proxy]\nconnectors = ["drive"]\n', r'proxy.connectors:'),
             ('[proxy]\nweb_search = "true"\n', r'proxy.web_search: expected true or false'),
             ('[proxy]\nweb_search = 1\n', r'proxy.web_search: expected true or false'),
-            ('[tode]\nenabled = true\nextensions = ["python"]\n', r'tode.extensions: .python. is not'),
-            ('[tode]\nenabled = true\nextensions = ["a.b c"]\n', r'tode.extensions:'),
-            ('[tode]\nextensions = ["ms-python.python"]\n', r'tode.extensions: needs tode.enabled'),
             ('[codeServer]\nenabled = true\nextensions = ["python"]\n', r'codeServer.extensions: .python. is not'),
             ('[codeServer]\nenabled = true\nextensions = ["a.b c"]\n', r'codeServer.extensions:'),
             ('[codeServer]\nextensions = ["ms-python.python"]\n', r'codeServer.extensions: needs codeServer.enabled'),
@@ -171,7 +168,7 @@ shell = "devShells.x86_64-linux.$foo"
 [sumi]
 enabled = true
 secrets = "../.secrets/list.txt"
-[tode]
+[codeServer]
 enabled = true
 extensions = ["ms-python.python", "golang.go@0.48.0"]
 [proxy]
@@ -191,10 +188,8 @@ dind = "10.99.1"
             'CLAUDE_DEVCONTAINER_SUMI': "'1'",
             'CLAUDE_DEVCONTAINER_SUMI_DIR': f"'{self.root / '.secrets'}'",
             'CLAUDE_DEVCONTAINER_SUMI_FILE': "'list.txt'",
-            'CLAUDE_DEVCONTAINER_CODE_SERVER': "'0'",
-            'CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS': "''",
-            'CLAUDE_DEVCONTAINER_TODE': "'1'",
-            'CLAUDE_DEVCONTAINER_TODE_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
+            'CLAUDE_DEVCONTAINER_CODE_SERVER': "'1'",
+            'CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
             'CLAUDE_DEVCONTAINER_PROXY_CA': f"'{self.root / 'ca.pem'}'",
             'CLAUDE_DEVCONTAINER_CONNECTORS': "'mcpsrv_01A,mcprs_02B'",
             'CLAUDE_DEVCONTAINER_WEB_SEARCH': "'0'",
@@ -210,26 +205,23 @@ dind = "10.99.1"
             'github.com': {'routes': ['/']}}})
         self.assertEqual((out / '.gitignore').read_text(), '*\n')
 
-    def test_code_server_independent_from_tode(self):
-        for editor, tode in [(False, False), (True, False), (False, True), (True, True)]:
-            with self.subTest(editor=editor, tode=tode):
-                self.write('claude.toml', f'[codeServer]\nenabled = {str(editor).lower()}\n[tode]\nenabled = {str(tode).lower()}\n')
+    def test_code_server_opt_in(self):
+        for editor in (False, True):
+            with self.subTest(editor=editor):
+                self.write('claude.toml', f'[codeServer]\nenabled = {str(editor).lower()}\n')
                 values = settings.variables(self.load())
                 self.assertEqual(values['CLAUDE_DEVCONTAINER_CODE_SERVER'], str(int(editor)))
-                self.assertEqual(values['CLAUDE_DEVCONTAINER_TODE'], str(int(tode)))
         self.write('claude.local.toml', '[codeServer]\nenabled = false\n')
         self.assertFalse(self.load()['codeServer']['enabled'])
         self.write('claude.local.toml', '[codeServer]\nenabled = "true"\n')
         with self.assertRaisesRegex(ValueError, 'codeServer.enabled: expected true or false'):
             self.load()
 
-    def test_code_server_extension_override_is_independent(self):
-        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n'
-                   '[tode]\nenabled = true\nextensions = ["golang.go"]\n')
+    def test_code_server_extension_override(self):
+        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n')
         self.write('claude.local.toml', '[codeServer]\nextensions = ["vscodevim.vim@1.27.3", "a.b"]\n')
         self.generate()
         self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS'], "'vscodevim.vim@1.27.3 a.b'")
-        self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_TODE_EXTENSIONS'], "'golang.go'")
         self.write('claude.local.toml', '[codeServer]\nextensions = []\n')
         self.assertEqual(self.load()['codeServer']['extensions'], [])
 

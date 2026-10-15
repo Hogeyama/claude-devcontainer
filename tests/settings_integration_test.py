@@ -110,7 +110,8 @@ class SettingsIntegrationTest(unittest.TestCase):
                 agent = services['agent']
                 self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_CODE_SERVER'], expected)
                 self.assertEqual(agent['build']['args']['INSTALL_CODE_SERVER'], expected)
-                self.assertEqual(agent['build']['args']['INSTALL_TODE'], '0')
+                self.assertNotIn('INSTALL_TODE', agent['build']['args'])
+                self.assertFalse(any(v.get('source') == 'tode-user' for v in agent['volumes']))
                 self.assertEqual(agent['sysctls']['net.ipv4.conf.all.route_localnet'], expected)
                 self.assertNotIn('ports', agent)
                 proxy = services['code-server-proxy']
@@ -119,13 +120,11 @@ class SettingsIntegrationTest(unittest.TestCase):
                 self.assertNotIn('volumes', proxy)
 
     def test_code_server_extensions_reach_build_only(self):
-        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n'
-                   '[tode]\nenabled = true\nextensions = ["golang.go"]\n')
+        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n')
         self.write('claude.local.toml', '[codeServer]\nextensions = ["vscodevim.vim@1.27.3"]\n')
         self.initialize()
         agent = self.compose_config()['services']['agent']
         self.assertEqual(agent['build']['args']['CODE_SERVER_EXTENSIONS'], 'vscodevim.vim@1.27.3')
-        self.assertEqual(agent['build']['args']['TODE_EXTENSIONS'], 'golang.go')
         self.assertNotIn('CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS', agent['environment'])
 
     def test_web_search_opt_in_reaches_only_the_proxy(self):

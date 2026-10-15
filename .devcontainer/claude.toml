@@ -22,10 +22,6 @@ enabled = true
 # Public demo fixture included in the clone; keep real secret lists outside Git.
 secrets = "../.secrets/sumi/secrets.txt"
 
-[tode]
-enabled = true
-extensions = ["anthropic.claude-code"]
-
 [codeServer]
 enabled = true
 extensions = ["anthropic.claude-code"]

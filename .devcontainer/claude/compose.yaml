@@ -20,12 +20,10 @@ services:
         AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
         INSTALL_CODE_SERVER: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
-        INSTALL_TODE: ${CLAUDE_DEVCONTAINER_TODE:-0}
         CODE_SERVER_EXTENSIONS: ${CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS:-}
-        TODE_EXTENSIONS: ${CLAUDE_DEVCONTAINER_TODE_EXTENSIONS:-}
     command: ["sleep", "infinity"]
     # sleep as PID 1 reaps nothing, so processes orphaned by devcontainer exec
-    # sessions, such as tode's Chromium, stayed as zombies.
+    # sessions would otherwise stay as zombies.
     init: true
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, CHOWN, DAC_OVERRIDE]
@@ -88,10 +86,6 @@ services:
       # The isolated editor's server data: Machine settings and the state of
       # its extensions. The user settings are the editor window's own.
       - vscode-server-data:/home/node/.vscode-server
-      # tode's VS Code user settings, keybindings and extension state, kept
-      # across rebuilds. Extensions and Machine settings stay in the image, so
-      # that an image change reaches them and the agent cannot persist code.
-      - tode-user:/home/node/.local/share/tode/vscode/user-data/User
       # features/nix-1 links to /nix/store; features/nix-0 is empty.
       - type: bind
         source: ./features/nix-${CLAUDE_DEVCONTAINER_NIX:-0}
@@ -279,7 +273,6 @@ volumes:
       device: overlay
       o: lowerdir=${CLAUDE_DEVCONTAINER_NODE_LOWER:?Run initialize.sh},upperdir=${CLAUDE_DEVCONTAINER_NODE_UPPER:?Run initialize.sh},workdir=${CLAUDE_DEVCONTAINER_NODE_WORK:?Run initialize.sh}
   claude-projects:
-  tode-user:
   vscode-server-data:
   public-ca:
   proxy-private-ca:
