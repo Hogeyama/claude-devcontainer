@@ -61,7 +61,7 @@ agent内でIDEのサーバー（Coder code-server）を動かし、ホストで�
 
 IDEのサーバーにはCoderのcode-server 4.132.0を使う。以前の`code serve-web`では、webviewの配信先とWorkspace Trustの指定をパッチで変更していた。その保守を減らすため、同一オリジンでwebviewを配信し、`--disable-workspace-trust`を備えるcode-serverへ移行する。配布物はバージョンとSHA-256を固定し、todeと共有する。
 
-Marketplaceはtodeと同じく`EXTENSIONS_GALLERY`で指定し、拡張をビルド時に入れる。Microsoft公式ビルドからCoderのビルドへ信頼対象が変わり、内蔵VS Codeもserve-webの1.142からcode-server同梱版（commit `313bf03…`）へ下がる。Microsoft製品以外からMarketplaceを使う利用条件の懸念もtodeと共通である。code-serverの更新は別に判断する。
+拡張はcode-server標準のOpen VSXからビルド時に入れる。`EXTENSIONS_GALLERY`によるMicrosoft Marketplaceへの上書きは行わない。Microsoft公式ビルドからCoderのビルドへ信頼対象が変わり、内蔵VS Codeもserve-webの1.142からcode-server同梱版（commit `313bf03…`）へ下がる。code-serverの更新は別に判断する。
 
 ![構成図。部品と、許可する通信の向き](2026-10-15-electron-shell-design.png)
 
