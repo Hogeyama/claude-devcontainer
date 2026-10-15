@@ -35,6 +35,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code@2.1.295 \
     && npm cache clean --force
+# acp.enabled / acp.version in claude.toml. Disabled builds fetch no ACP packages.
+ARG INSTALL_ACP=0
+ARG ACP_VERSION=0.90.0
+RUN if [ "$INSTALL_ACP" = 1 ]; then \
+      npm install -g "@agentclientprotocol/claude-agent-acp@$ACP_VERSION" \
+      && npm cache clean --force; \
+    fi
 # The workspace's owner on the host (agent.uid and agent.gid in claude.toml).
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000

@@ -288,6 +288,90 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
+## ACPクライアントから使う
+
+ホストのEmacs、Neovimなどから、コンテナ内の[claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)へ接続できます。[`git.isolation = "shared"`](#gitの共有と分離)が前提です。agentの`/workspace`がホストの作業ツリーそのものになるので、エディタとagentが同じファイルを指せます。`.devcontainer/claude.toml`か`claude.local.toml`で両方を有効にしてください。
+
+```toml
+[git]
+isolation = "shared"
+
+[acp]
+enabled = true
+version = "0.90.0"
+```
+
+`acp.enabled`の既定値は`false`で、無効ならACPのパッケージをダウンロード・インストールしません。`clone`のまま`acp.enabled = true`にすると、`devcontainer up`が設定エラーで止まります。`version`は省略でき、既定値は`0.90.0`です。完全なバージョン番号で指定してください。`latest`などのタグや`^0.90.0`などの範囲指定は受け付けません。別バージョンと同梱のClaude Codeとの互換性は、利用する版で確認してください。有効化・バージョンの変更後は、`devcontainer up --remove-existing-container`でimageを作り直します。
+
+クライアントを問わず、次のコマンドをACPのstdioサーバーとして登録してください。ホストに必要なのはPython 3とDocker CLIです。
+
+```sh
+/absolute/path/to/project/.devcontainer/claude/scripts/acp-agent.py
+```
+
+このスクリプトが置かれたリポジトリの、起動済みのagentへ接続します。別の場所にあるスクリプトを共用する場合は、引数に`--workspace-folder /absolute/path/to/project`を付けてください。接続時には、実行中のコンテナがsharedで作られ、このリポジトリの作業ツリーをmountしていることを`git fetch agent`と同じ方法で確かめます。設定ファイルを書き換えただけで、コンテナがcloneのままなら接続を拒否します。
+
+### Emacs agent-shell
+
+[agent-shell](https://github.com/xenodium/agent-shell)のClaude用コマンドを設定します。次のパスは、ホストのリポジトリの絶対パスに置き換えてください。
+
+```elisp
+(with-eval-after-load 'agent-shell-anthropic
+  (setq agent-shell-anthropic-claude-acp-command
+        '("python3" "/absolute/path/to/project/.devcontainer/claude/scripts/acp-agent.py")
+        agent-shell-anthropic-authentication
+        (agent-shell-anthropic-make-authentication :login t)))
+```
+
+ホストのそのプロジェクトで`M-x agent-shell-anthropic-start-claude-code`を実行してください。`:login t`はagent-shellにAPI keyを要求させないための設定です。コンテナへのログインは不要で、認証情報は通常の起動時にproxyへ注入したものを使います。
+
+### Neovim Avante
+
+[AvanteのACP provider](https://github.com/avante-corp/avante.nvim#acp-support)として登録します。既存の`require("avante").setup(...)`やlazy.nvimの`opts`へ、次の設定を追加してください。
+
+```lua
+require("avante").setup({
+  provider = "claude-container",
+  acp_providers = {
+    ["claude-container"] = {
+      command = "python3",
+      args = { "/absolute/path/to/project/.devcontainer/claude/scripts/acp-agent.py" },
+      env = {
+        HOME = vim.env.HOME,
+        DOCKER_HOST = vim.env.DOCKER_HOST,
+        DOCKER_CONTEXT = vim.env.DOCKER_CONTEXT,
+        DOCKER_CONFIG = vim.env.DOCKER_CONFIG,
+      },
+    },
+  },
+})
+```
+
+ホストのそのプロジェクトでAvanteを開きます。ほかのproviderを使っている場合は、`:AvanteSwitchProvider claude-container`で切り替えられます。このproviderに`auth_method`やAPI key、`ACP_PERMISSION_MODE`を設定する必要はありません。権限モードはコンテナ側のClaude設定を引き継ぎ、ACPのモード選択で変更できます。
+
+`env`はホストのDocker CLIが接続先の設定を読むためのものです。Avanteは通常の環境変数をすべて引き継ぐわけではないので、Dockerの接続にほかの変数が必要な場合もここに追加してください。これらはコンテナへ転送されません。
+
+### パスの変換
+
+- `session/new`などでクライアントが渡すホストのプロジェクトパスを`/workspace`へ変換します。サブディレクトリも同じ相対位置へ変換します。ホストでシンボリックリンク経由のパスを開いた場合も、実体がこのプロジェクト内なら変換できます。ほかのリポジトリを作業場所に指定するとエラーになります。
+- プロンプト中の構造化された`file://` URIも変換します。通常の文章や添付したテキストは書き換えません。文章でファイルの場所を伝えるときは、プロジェクト相対パスを使ってください。
+- agentからの通知では、ツールの対象ファイル（`locations`）、差分のパス、`file://`のリソース、セッション一覧の`cwd`を、`/workspace/...`からホストのパスへ戻します。エディタは対象ファイルを開いたり、差分を表示したりできます。ツールのタイトルや本文、ツールの生の入出力（`rawInput`・`rawOutput`）は書き換えません。agentから受け取ったパスはホストで解決せず、文字列の前置きだけを置き換えます。
+- `.git`は変換しません。sharedの`/workspace/.git`はagent専用のvolumeで、ホストの`.git`とは別物です。`.git`の中を作業場所に指定するとエラーになり、そこを指すURIはそのまま渡ります。`/workspace`の外（`/home/node/...`など）のパスも、コンテナのパスのまま表示します。
+
+### 隔離の範囲
+
+- agentの編集は共有の作業ツリーへ直接書かれ、保存済みのファイルとしてエディタに見えます。エディタの未保存のバッファはagentに渡りません。編集中のファイルをagentが書き換えると、エディタ側で再読み込みや競合の解消が必要になります。agentのコミットはこれまでどおり[ホストでレビューして取り込み](#ホストでレビューして取り込む)ます。sharedで共有される範囲は[隔離の範囲](network-policy.md#sharedで共有されるもの)も参照してください。
+- クライアントのファイル読み書き（`fs`）・ターミナル・拡張機能はagentへ公開しません。作業ツリーは共有していても、エディタ経由の読み書きはホストのユーザーとして行われ、agentのread-onlyの`.devcontainer`、`shared_hidden_paths`、専用の`.git`を迂回し、agentが作ったsymlinkもホストで辿ります。agentは自分のmountの上で編集し、エディタはその結果をディスクで見ます。
+- 中継はagentからの`session/update`通知と`session/request_permission`要求だけを通し、それ以外の要求を拒否します。双方向の`_meta`拡張も除きます。クライアント独自のSDK設定も転送しません。ツール実行とファイル編集はコンテナ内のClaude Codeが行います。
+- 承認要求はエディタに表示されます。ログイン用のホストコマンドやブラウザ認証、クライアント拡張によるフォームなどは使えません。認証を更新するときは、既存の認証情報注入スクリプトを使ってください。
+- エディタで明示的に添付した選択範囲・ファイル本文は、プロンプトとしてコンテナへ送られます。`shared_hidden_paths`で隠したファイルも、エディタで添付すれば中身が渡ります。中継はその内容をマスクしません。
+- エディタが通知のパスを開くとき、そのファイルはホストで開かれます。agentは作業ツリーにsymlinkを置けるので、心当たりのないパスを開く前に中身を確認してください。
+- クライアントが渡す`mcpServers`は常に空にします。エディタのMCP設定に含まれる認証値をコンテナへ渡さないためです。MCPサーバーはコンテナ内の`.mcp.json`などで設定し、認証値は既存のproxyで注入してください。
+- ホストの環境変数や認証値を`docker exec`へ転送しません。アダプターはコンテナの`node`ユーザーで動き、通常のCLIと同じ`/usr/local/bin/claude`を使います。
+- 中継の`acp-agent.py`は`.devcontainer`の下にあり、sharedではagentからread-onlyです。agentはホストが実行するこの境界を書き換えられません。
+
+中継の標準出力はACPのJSON-RPC専用です。シェルのラッパーを加える場合も、挨拶などの文字列を標準出力へ出さないでください。`docker exec -it`や、アダプターへの直接接続でこの中継を置き換えると、ここで説明したホスト側の制限が適用されません。
+
 ## ホストのIMEでエディタを使う（隔離エディタ）
 
 `[codeServer] enabled = true` で、agentの`/workspace`をホストの画面とIMEで編集できます。

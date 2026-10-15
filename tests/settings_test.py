@@ -77,6 +77,7 @@ class SettingsTest(unittest.TestCase):
         loaded = self.load()
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': []})
+        self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
@@ -124,6 +125,14 @@ class SettingsTest(unittest.TestCase):
             ('[dind]\nenabled = true\n', r'claude.local.toml: unknown table \[dind\]'),
             ('[tode]\nenabled = true\n', r'claude.local.toml: unknown table \[tode\]'),
             ('[docker]\nenabled = 1\n', r'docker.enabled: expected true or false'),
+            ('[acp]\nenabled = 1\n', r'acp.enabled: expected true or false'),
+            ('[acp]\nenable = true\n', r'acp.enable: unknown setting'),
+            ('[acp]\nversion = 90\n', r'acp.version: expected a string'),
+            ('[acp]\nversion = "latest"\n', r'acp.version: expected an exact version'),
+            ('[acp]\nversion = "^0.90.0"\n', r'acp.version: expected an exact version'),
+            ('[acp]\nversion = "0.90.0 --force"\n', r'acp.version: expected an exact version'),
+            ('[acp]\nenabled = true\n', r'acp.enabled: needs git.isolation = "shared"'),
+            ('[git]\nisolation = "clone"\n[acp]\nenabled = true\n', r'acp.enabled: needs git.isolation'),
             ('[agent]\nuid = true\n', r'agent.uid: expected an integer'),
             ('[agent]\nuid = 0\n', r'agent.uid: must be positive'),
             ('[docker]\nimages = "busybox"\n', r'docker.images: expected a list'),
@@ -233,6 +242,7 @@ dind = "10.99.1"
             'CLAUDE_DEVCONTAINER_SUMI_FILE': "'list.txt'",
             'CLAUDE_DEVCONTAINER_CODE_SERVER': "'1'",
             'CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
+            'CLAUDE_DEVCONTAINER_ACP': "'0'", 'CLAUDE_DEVCONTAINER_ACP_VERSION': "'0.90.0'",
             'CLAUDE_DEVCONTAINER_PROXY_CA': f"'{self.root / 'ca.pem'}'",
             'CLAUDE_DEVCONTAINER_CONNECTORS': "'mcpsrv_01A,mcprs_02B'",
             'CLAUDE_DEVCONTAINER_WEB_SEARCH': "'0'",

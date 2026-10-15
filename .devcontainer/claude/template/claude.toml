@@ -10,7 +10,7 @@
 # here as a whole.
 #
 # After a change, stop the environment and run `devcontainer up` again; for
-# git.*, agent.*, docker.enabled, nix.enabled, sumi.enabled, codeServer.*, with
+# git.*, agent.*, acp.*, docker.enabled, nix.enabled, sumi.enabled, codeServer.*, with
 # --remove-existing-container. Relative paths are from this directory (except
 # git.shared_hidden_paths, from the repository root), and ~ is the host's home.
 
@@ -35,6 +35,14 @@
 # Owner of the agent's volumes; match the host UID/GID for dependency overlays.
 # uid = 1000
 # gid = 1000
+
+[acp]
+# Install claude-agent-acp for host ACP clients (agent-shell, Avante, etc.),
+# which connect through scripts/acp-agent.py. Needs git.isolation = "shared":
+# the client's files are then the agent's. Changes need an image rebuild.
+# enabled = false
+# Exact package version; tags such as "latest" and ranges are not accepted.
+# version = "0.90.0"
 
 [docker]
 # Run Docker in DinD for the agent.

@@ -127,6 +127,31 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.assertEqual(agent['build']['args']['CODE_SERVER_EXTENSIONS'], 'vscodevim.vim@1.27.3')
         self.assertNotIn('CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS', agent['environment'])
 
+    def test_acp_opt_in_version_and_host_override_reach_build(self):
+        shared = '[git]\nisolation = "shared"\n'
+        for workspace, local, enabled, version in [
+            ('', '', '0', '0.90.0'),
+            ('enabled = true', '', '1', '0.90.0'),
+            ('enabled = true\nversion = "0.89.1"', '', '1', '0.89.1'),
+            ('enabled = true', 'enabled = false', '0', '0.90.0'),
+            ('enabled = true', 'version = "1.2.3-beta.1"', '1', '1.2.3-beta.1'),
+        ]:
+            with self.subTest(workspace=workspace, local=local):
+                self.write('claude.toml', shared + '[acp]\n' + workspace)
+                self.write('claude.local.toml', '[acp]\n' + local)
+                self.initialize()
+                agent = self.compose_config()['services']['agent']
+                self.assertEqual(agent['build']['args']['INSTALL_ACP'], enabled)
+                self.assertEqual(agent['build']['args']['ACP_VERSION'], version)
+                self.assertNotIn('CLAUDE_DEVCONTAINER_ACP', agent['environment'])
+
+    def test_acp_stops_initialization_outside_shared(self):
+        self.write('claude.toml', '[git]\nisolation = "shared"\n[acp]\nenabled = true\n')
+        self.write('claude.local.toml', '[git]\nisolation = "clone"\n')
+        failed = self.initialize(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('acp.enabled: needs git.isolation = "shared"', failed.stderr)
+
     def test_web_search_opt_in_reaches_only_the_proxy(self):
         for value, expected in [(None, '0'), ('true', '1'), ('false', '0')]:
             with self.subTest(value=value):

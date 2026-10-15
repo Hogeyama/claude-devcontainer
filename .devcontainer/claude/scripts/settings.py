@@ -56,6 +56,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': []},
     'agent': {'uid': 1000, 'gid': 1000, 'extra_path': []},
+    'acp': {'enabled': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
@@ -74,7 +75,7 @@ HOST_GIT = '/run/host/git'
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'ACP', 'ACP_VERSION', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -84,6 +85,10 @@ RESERVED_ENV_PREFIXES = ('TESTCONTAINERS_', PREFIX)
 CONNECTOR = re.compile(r'mcp(srv|rs)_[A-Za-z0-9]+')
 # A Marketplace extension ID, publisher.name, optionally @version.
 EXTENSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(@[0-9][0-9A-Za-z.+-]*)?')
+# Exact package versions only, including prereleases; no moving tags or ranges.
+ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
+                         r'(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+                         r'(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?')
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
 # rootlesskit in DinD maps these subordinate IDs besides the agent's UID.
 SUBORDINATE_IDS = range(100000, 165536)
@@ -155,6 +160,8 @@ def check(data, source):
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
             raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
     shell_path(data.get('agent', {}).get('extra_path', []), str(source))
+    if 'version' in data.get('acp', {}) and not ACP_VERSION.fullmatch(data['acp']['version']):
+        raise ValueError(f'{source}: acp.version: expected an exact version, such as "0.90.0"')
     agent, docker, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'proxy', 'subnets'))
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
@@ -223,6 +230,10 @@ def load(root=ROOT):
                          f'outside {SUBORDINATE_IDS.start}-{SUBORDINATE_IDS.stop - 1}')
     if settings['codeServer']['extensions'] and not settings['codeServer']['enabled']:
         raise ValueError('codeServer.extensions: needs codeServer.enabled')
+    # The ACP bridge maps the agent's /workspace paths to the host's files and
+    # back, which only holds while the agent edits the host's working tree.
+    if settings['acp']['enabled'] and settings['git']['isolation'] not in SHARED_MODES:
+        raise ValueError('acp.enabled: needs git.isolation = "shared"')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
@@ -261,6 +272,8 @@ def variables(settings):
         PREFIX + 'SUMI_FILE': secrets.name,
         PREFIX + 'CODE_SERVER_EXTENSIONS': ' '.join(settings['codeServer']['extensions']),
         PREFIX + 'CODE_SERVER': '1' if settings['codeServer']['enabled'] else '0',
+        PREFIX + 'ACP': '1' if settings['acp']['enabled'] else '0',
+        PREFIX + 'ACP_VERSION': settings['acp']['version'],
         PREFIX + 'PROXY_CA': str(settings['proxy']['ca'] or ''),
         PREFIX + 'CONNECTORS': ','.join(settings['proxy']['connectors']),
         PREFIX + 'WEB_SEARCH': '1' if settings['proxy']['web_search'] else '0',
