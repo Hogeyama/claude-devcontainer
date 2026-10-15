@@ -109,8 +109,9 @@ class SettingsIntegrationTest(unittest.TestCase):
                 services = self.compose_config()['services']
                 agent = services['agent']
                 self.assertEqual(agent['environment']['CLAUDE_DEVCONTAINER_CODE_SERVER'], expected)
-                self.assertEqual(agent['build']['args']['INSTALL_CODE_SERVER'], expected)
+                self.assertEqual(agent['build']['args']['INSTALL_VSCODE'], expected)
                 self.assertEqual(agent['build']['args']['INSTALL_TODE'], '0')
+                self.assertEqual(agent['sysctls']['net.ipv4.conf.all.route_localnet'], expected)
                 self.assertNotIn('ports', agent)
                 proxy = services['code-server-proxy']
                 self.assertEqual(proxy['scale'], int(expected))

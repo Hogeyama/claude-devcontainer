@@ -1,4 +1,4 @@
-"""Loopback-only app with root-relative assets, POST, redirect and WebSocket."""
+"""Loopback-only app with root-relative assets, POST, redirects, WebSocket, and pages that refuse framing."""
 import base64
 import hashlib
 import http.server
@@ -16,14 +16,16 @@ class Preview(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'\x81\x05hello')
             self.wfile.flush()
             return
-        if self.path == '/redirect':
+        if self.path in ('/redirect', '/redirect-out'):
             self.send_response(302)
-            self.send_header('Location', '/assets/app.js')
+            self.send_header('Location', '/assets/app.js' if self.path == '/redirect' else 'http://example.com/')
             self.end_headers()
             return
         body = b'<script src="/assets/app.js"></script>' if self.path == '/' else b'preview-asset'
         self.send_response(200)
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('X-Frame-Options', 'SAMEORIGIN')
+        self.send_header('Content-Security-Policy', "default-src 'self'; frame-ancestors 'self'")
         self.end_headers()
         self.wfile.write(body)
 

@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
-"""The Linux client: the host's VS Code in a bubblewrap sandbox.
+"""The Linux client: the editor's Electron shell (../shell/) in a bubblewrap sandbox.
 
-scripts/code-server.sh open runs this on the host, after server.py has the
-agent's VS Code server up. As with the Windows client, VS Code reaches
-code-server-proxy on 127.0.0.1:18086 and nothing else, and sees nothing of
-the host but what the window needs:
+scripts/code-server.sh open runs this on the host, with the agent's server
+up and its connection token in CLAUDE_DEVCONTAINER_VSCODE_TOKEN. The shell
+itself sends every request to code-server-proxy and refuses any other
+destination; the sandbox is a second wall, the OS's, in case the shell is
+taken over. Inside, the shell reaches the proxy on 127.0.0.1:18086 and
+nothing else, and sees nothing of the host but what the window needs:
 
 - Namespaces: its own user, PID, network, IPC and UTS namespaces, every
-  capability dropped. The network namespace has only loopback, so no
-  setting, extension or page can reach another address: none is routable.
+  capability dropped. The network namespace has only loopback, so no page
+  can reach another address: none is routable.
 - Filesystem: the host's system directories, /nix/store and fonts read-only,
-  for VS Code and this script; a private home with VS Code's persistent
-  user data and extensions; the Wayland socket, for the window and the
-  compositor's input method (text-input-v3). No home directory, session
-  D-Bus, X11, SSH agent or Docker socket. xdg-open is a script that refuses.
+  for Electron's libraries and this script; Electron, from the cache of
+  ../electron.py, and a copy of the shell, read-only; a private home with the
+  shell's profile; the Wayland socket, for the window and the compositor's
+  input method (text-input-v3). No home directory, session D-Bus, X11, SSH
+  agent or Docker socket. xdg-open is a script that refuses.
 - The proxy, through a relay: inside, this script listens on 127.0.0.1:18086
   and forwards each connection to a Unix socket; outside, it accepts those and
   forwards them to the proxy's published port. The allowlist of
   code-server-proxy (../proxy.py) decides what the sandbox may reach.
 
-The resolver extension (resolver/) connects VS Code's remote authority to the
-agent's server through that proxy; the Dev Containers extension, Docker and
-the usual paths of docs/usage.md "VS Codeが作る経路" are not involved. What a
-remote extension can still do, such as open a "local" terminal, happens in
-this sandbox.
+Chromium's own sandbox stays on, nesting user namespaces in this one.
+Where AppArmor restricts unprivileged user namespaces (Ubuntu 23.10 and
+later), bubblewrap and Chromium need a profile that allows them; never
+--no-sandbox, which would leave the shell's renderers unconfined.
 
 Usage:  client.py [--folder /workspace]   open the window (the default)
-        client.py --check                 report VS Code, bwrap and the display
+        client.py --prepare               download Electron, then report as --check
+        client.py --check                 report Electron, bwrap and the display
 """
 import argparse
 import asyncio
@@ -38,23 +41,19 @@ from pathlib import Path
 import pwd
 import shutil
 import socket
-import subprocess
 import sys
 import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent
-# .devcontainer/claude/scripts, for settings.py. In the sandbox this file is
-# /run/code-server/client.py and has no workspace above it (workspace_root).
-SCRIPTS = HERE.parents[1] / 'scripts'
-# Inside the sandbox, where the relay listens and the resolver connects. Each
+# In the sandbox this file is /run/code-server/client.py, with no workspace
+# or shell beside it (workspace_root).
+SHELL = HERE.parent / 'shell'
+# Inside the sandbox, where the relay listens and the shell's proxy is. Each
 # sandbox has its own network namespace, so the number is the same for every
 # workspace; the proxy's published port on the host is not (--proxy-port).
 PROXY_PORT = 18086
-# The resolver extension's ID (resolver/package.json) and the remote authority
-# it resolves. The server's folder is given on the command line.
-EXTENSION = 'claude-devcontainer.agent-resolver'
-AUTHORITY = 'claude-devcontainer+agent'
+TOKEN = 'CLAUDE_DEVCONTAINER_VSCODE_TOKEN'
 # The host's, shared read-only when present. The merged-usr links (/bin ->
 # usr/bin) are recreated as links.
 SYSTEM = ('/usr', '/lib', '/lib64', '/lib32', '/bin', '/sbin', '/nix/store',
@@ -62,6 +61,7 @@ SYSTEM = ('/usr', '/lib', '/lib64', '/lib32', '/bin', '/sbin', '/nix/store',
 HOME = '/home/vscode'
 # Paths in the sandbox.
 RUN = '/run/code-server'
+ELECTRON = '/opt/electron'
 # In the private home: the sandbox puts it there once VS Code's process is
 # started (the window follows), which a detached parent waits for.
 LAUNCHED = '.launched'
@@ -71,45 +71,39 @@ exit 126
 '''
 # An address nothing routes to (TEST-NET-1). Connecting must fail inside.
 OUTSIDE = ('192.0.2.1', 80)
-# Written to a new user data directory: no update or Marketplace checks,
-# which the sandbox cannot make anyway.
-SETTINGS = {
-    'update.mode': 'none',
-    'extensions.autoCheckUpdates': False,
-    'extensions.autoUpdate': False,
-    'telemetry.telemetryLevel': 'off',
-    'workbench.startupEditor': 'none',
-}
+USERNS_RESTRICTION = Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
+USERNS_ADVICE = ('AppArmor restricts unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns=1), '
+                 "which bubblewrap and Chromium's sandbox need; see code-server/README.md")
 
 
 def fail(message):
     raise SystemExit('error: ' + message)
 
 
-def find_code(setting='', which=shutil.which):
-    """VS Code's real path: codeServer.vscode, or `code` on PATH.
-
-    The real path matters: the sandbox shares the system directories, not a
-    profile or home directory that a link on PATH may lead through.
-    """
-    if setting:
-        path = Path(setting)
-        if not path.is_file() or not os.access(path, os.X_OK):
-            fail(f'codeServer.vscode: {setting} is not an executable file')
-        return path.resolve()
-    found = which('code')
-    if not found:
-        fail('VS Code (code) is not on PATH; install it or set codeServer.vscode')
-    return Path(found).resolve()
+def electron_module():
+    sys.path.insert(0, str(HERE.parent))
+    import electron
+    return electron
 
 
-def code_version(code):
-    """(version, commit, arch) of `code --version`."""
-    result = subprocess.run([str(code), '--version'], capture_output=True, text=True)
-    lines = result.stdout.split()
-    if result.returncode or len(lines) < 3:
-        fail(f'{code} --version failed: {result.stderr.strip() or result.stdout.strip()}')
-    return lines[0], lines[1], lines[2]
+def electron_directory(environ=os.environ):
+    """Where ../electron.py keeps this host's Electron, downloaded or not."""
+    cache = Path(environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'claude-devcontainer/electron'
+    electron = electron_module()
+    return cache, electron.linux_platform()
+
+
+def ensure_electron():
+    """Electron of ../electron.py, downloaded on the host's network the first time."""
+    return electron_module().ensure(*electron_directory())
+
+
+def userns_restricted(path=USERNS_RESTRICTION):
+    """Whether AppArmor keeps unprivileged processes from creating user namespaces."""
+    try:
+        return path.read_text().strip() == '1'
+    except OSError:
+        return False
 
 
 def wayland_socket(environ=os.environ):
@@ -127,29 +121,24 @@ def workspace_root():
 
 
 def state_directory(root=None, environ=os.environ):
-    """Persistent client state of one workspace: VS Code's user data and extensions, the server's token, the log.
+    """Persistent client state of one workspace: the shell's profile, and the log.
 
-    Per workspace, so that two can be open at once: VS Code instances must
-    not share a user data directory, and its own single-instance lock does
-    not see across PID namespaces.
+    Per workspace, so that two can be open at once: Electron instances must
+    not share a profile, and its single-instance lock does not see across
+    PID namespaces.
     """
     root = Path(root or workspace_root()).resolve()
     state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     return state / 'claude-devcontainer/vscode' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
 
 
-def load_settings():
-    sys.path.insert(0, str(SCRIPTS))
-    import settings
-    return settings.load()['codeServer']
-
-
-def sandbox(bwrap, code, home, runtime, wayland, environ=os.environ):
+def sandbox(bwrap, electron, home, runtime, wayland, environ=os.environ):
     """bwrap's command line, up to the command to run in the sandbox.
 
-    home and runtime are host directories: the private home, and the relay's
-    socket, this script and the refusing xdg-open. wayland is the compositor's
-    socket, or None for a run without a window.
+    electron, home and runtime are host directories: Electron, the private
+    home, and the relay's socket, this script, the shell and the refusing
+    xdg-open. electron and wayland, the compositor's socket, are None for a
+    run without a window.
     """
     uid = os.getuid()
     cmd = [bwrap, '--die-with-parent', '--new-session', '--unshare-user', '--unshare-pid',
@@ -161,15 +150,17 @@ def sandbox(bwrap, code, home, runtime, wayland, environ=os.environ):
             cmd += ['--symlink', os.readlink(path), path]
         elif Path(path).exists():
             cmd += ['--ro-bind', path, path]
-    # VS Code or Python installed elsewhere, as /opt/visual-studio-code or a
-    # toolchain of its own. A directory of the home would open the home.
+    # Python installed elsewhere, as a toolchain of its own. A directory of
+    # the home would open the home.
     shared = [Path(path).resolve() for path in SYSTEM if Path(path).exists()]
-    for path in (code.parent, Path(sys.base_prefix).resolve()):
-        if not any(path.is_relative_to(root) for root in shared):
-            if path.is_relative_to(Path.home()):
-                fail(f'{path} is in the home directory, which VS Code does not get; '
-                     'install VS Code and Python system-wide or in /nix/store')
-            cmd += ['--ro-bind', str(path), str(path)]
+    python = Path(sys.base_prefix).resolve()
+    if not any(python.is_relative_to(root) for root in shared):
+        if python.is_relative_to(Path.home()):
+            fail(f'{python} is in the home directory, which the sandbox does not get; '
+                 'install Python system-wide or in /nix/store')
+        cmd += ['--ro-bind', str(python), str(python)]
+    if electron:
+        cmd += ['--ro-bind', str(electron), ELECTRON]
     # Nothing of the host's /etc but these: the user, and localhost.
     for name in ('passwd', 'group', 'hosts'):
         cmd += ['--ro-bind', str(runtime / 'etc' / name), f'/etc/{name}']
@@ -191,39 +182,20 @@ def sandbox(bwrap, code, home, runtime, wayland, environ=os.environ):
     return cmd
 
 
-def code_command(code, folder):
-    """VS Code's command line in the sandbox."""
-    return [str(code), '--new-window', '--disable-updates', '--disable-telemetry',
-            '--skip-welcome', '--skip-release-notes',
-            f'--user-data-dir={HOME}/user-data', f'--extensions-dir={HOME}/extensions',
-            f'--enable-proposed-api={EXTENSION}',
-            # No keyring, no /dev/dri in the sandbox; the window is Wayland's
-            # and takes the compositor's input method.
-            '--password-store=basic', '--disable-gpu',
-            '--ozone-platform=wayland', '--enable-features=WaylandWindowDecorations',
-            '--enable-wayland-ime=true', '--wayland-text-input-version=3',
-            f'--folder-uri=vscode-remote://{AUTHORITY}{folder}']
-
-
-def prepare_home(home):
-    """The private home: the resolver extension, and initial settings once."""
-    extensions = home / 'extensions'
-    extensions.mkdir(parents=True, exist_ok=True)
-    version = json.loads((HERE / 'resolver/package.json').read_text())['version']
-    target = extensions / f'{EXTENSION}-{version}'
-    shutil.rmtree(target, ignore_errors=True)
-    shutil.copytree(HERE / 'resolver', target)
-    user = home / 'user-data/User'
-    user.mkdir(parents=True, exist_ok=True)
-    if not (user / 'settings.json').exists():
-        (user / 'settings.json').write_text(json.dumps(SETTINGS, indent=4) + '\n')
+def shell_command(folder):
+    """The shell's command line in the sandbox."""
+    return [f'{ELECTRON}/electron', f'{RUN}/shell', f'--proxy-port={PROXY_PORT}', f'--folder={folder}',
+            f'--user-data-dir={HOME}/shell',
+            # No /dev/dri in the sandbox; the window is Wayland's and takes
+            # the compositor's input method.
+            '--disable-gpu', '--ozone-platform=wayland', '--enable-features=WaylandWindowDecorations',
+            '--enable-wayland-ime', '--wayland-text-input-version=3']
 
 
 def write_etc(etc):
     """passwd, group and hosts for the sandbox: the user with the private home, and localhost.
 
-    Node's os.userInfo() and the integrated terminal need the user; VS Code's
-    port forwarding binds localhost, and there is no DNS inside.
+    Chromium looks the user up, and there is no DNS inside.
     """
     uid, gid = os.getuid(), os.getgid()
     try:
@@ -285,10 +257,10 @@ def others():
 
 
 async def inside(args):
-    """In the sandbox: the loopback relay to the bridge socket, then VS Code.
+    """In the sandbox: the loopback relay to the bridge socket, then the shell.
 
-    VS Code's launcher may exit at once and leave the window to a process of
-    its own, so the sandbox is kept, with the relay, until nothing runs in it.
+    The sandbox is kept, with the relay, until nothing runs in it, Chromium's
+    helper processes included.
     """
     check_sandbox(args.host_netns)
     server = await asyncio.start_server(
@@ -304,7 +276,7 @@ async def inside(args):
             writer.close()
             print(json.dumps(found))
             return 0
-        process = await asyncio.create_subprocess_exec(*code_command(Path(args.code), args.folder))
+        process = await asyncio.create_subprocess_exec(*shell_command(args.folder))
         Path(HOME, LAUNCHED).touch()
         status = await process.wait()
         while others():
@@ -313,11 +285,9 @@ async def inside(args):
 
 
 def take_lock(state):
-    """One window per workspace: VS Code's own single-instance lock does not see across PID namespaces.
+    """One window per workspace: the shell's own single-instance lock does not see across PID namespaces.
 
-    Taken before anything else happens to the workspace's server, so that a
-    second `open` does not restart the server under the open window. The
-    lock is the open file, which a detached child inherits.
+    The lock is the open file, which a detached child inherits.
     """
     home = state / 'home'
     home.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -325,22 +295,15 @@ def take_lock(state):
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        fail('the agent VS Code window is already open; close it first')
+        fail("the agent's editor window is already open; close it first")
     return lock
-
-
-def prepare_server(proxy_port):
-    """server.py: the agent's server of this VS Code, and the token for it."""
-    sys.path.insert(0, str(HERE))
-    import server
-    server.prepare(proxy_port)
 
 
 def detach(state):
     """Fork: the child goes on as a session of its own, its output in client.log.
 
     The parent returns once the sandbox reports (LAUNCHED in the private
-    home) that VS Code is started, or exits with the child's status and the
+    home) that the shell is started, or exits with the child's status and the
     end of its log if it fails before that.
     """
     launched = state / 'home' / LAUNCHED
@@ -358,30 +321,41 @@ def detach(state):
         finished, status = os.waitpid(pid, os.WNOHANG)
         if finished:
             sys.stderr.write(log.read_text()[-2000:])
-            raise SystemExit(f'error: VS Code did not start; see {log}')
+            if userns_restricted():
+                sys.stderr.write(USERNS_ADVICE + '\n')
+            raise SystemExit(f'error: the editor did not start; see {log}')
         if launched.exists():
-            print(f'VS Code is open; its output goes to {log}')
+            print(f'the editor is open; its output goes to {log}')
             return False
         time.sleep(0.1)
-    raise SystemExit(f'error: VS Code is taking too long to start; see {log}')
+    raise SystemExit(f'error: the editor is taking too long to start; see {log}')
+
+
+def report(bwrap, electron, wayland):
+    print(f'electron: {electron or "not downloaded yet; prepare or open downloads it"}\n'
+          f'bwrap: {bwrap}\nwayland: {wayland}')
+    if userns_restricted():
+        print('warning: ' + USERNS_ADVICE)
 
 
 async def outside(args):
     """On the host: the bridge socket to the proxy, and bwrap around inside()."""
     bwrap = shutil.which('bwrap') or fail('bubblewrap (bwrap) is required on the host')
-    code = find_code(args.code or load_settings()['vscode'])
     wayland = None if args.probe else wayland_socket()
     if args.check:
-        version, commit, arch = code_version(code)
-        print(f'vscode: {code} ({version} {commit} {arch})\nbwrap: {bwrap}\nwayland: {wayland}')
+        cache, platform = electron_directory()
+        found = cache / f'{electron_module().VERSION}-{platform}'
+        report(bwrap, found if found.is_dir() else None, wayland)
         return 0
-    state = state_directory()
-    home = state / 'home'
-    try:
-        token = (state / 'token').read_text().strip() if not args.probe else ''
-    except FileNotFoundError:
-        fail('no server token; run code-server.sh open, which starts the server first')
-    prepare_home(home)
+    if args.prepare:
+        report(bwrap, ensure_electron(), wayland)
+        return 0
+    token = os.environ.get(TOKEN, '')
+    if not token and not args.probe:
+        fail(f'no connection token in {TOKEN}; open the editor with code-server.sh open')
+    electron = None if args.probe else ensure_electron()
+    home = state_directory() / 'home'
+    home.mkdir(mode=0o700, parents=True, exist_ok=True)
     runtime = Path(tempfile.mkdtemp(prefix='code-server-', dir=os.environ.get('XDG_RUNTIME_DIR')))
     try:
         (runtime / 'bin').mkdir(mode=0o700)
@@ -390,16 +364,17 @@ async def outside(args):
             (runtime / 'bin' / name).chmod(0o755)
         write_etc(runtime / 'etc')
         shutil.copy(HERE / 'client.py', runtime / 'client.py')
+        # A copy, so that the window runs the shell as checked out at its start.
+        shutil.copytree(SHELL, runtime / 'shell')
         port = args.proxy_port
         bridge = await asyncio.start_unix_server(
             lambda reader, writer: relay(reader, writer, lambda: asyncio.open_connection('127.0.0.1', port)),
             str(runtime / 'proxy.sock'))
-        command = sandbox(bwrap, code, home, runtime, wayland)
+        command = sandbox(bwrap, electron, home, runtime, wayland)
         if token:
-            command += ['--setenv', 'CLAUDE_DEVCONTAINER_VSCODE_TOKEN', token]
+            command += ['--setenv', TOKEN, token]
         command += [str(Path(sys.executable).resolve()), f'{RUN}/client.py', '--inside',
-                    '--code', str(code), '--folder', args.folder,
-                    '--host-netns', os.readlink('/proc/self/ns/net')]
+                    '--folder', args.folder, '--host-netns', os.readlink('/proc/self/ns/net')]
         if args.probe:
             command.append('--probe')
         async with bridge:
@@ -415,14 +390,14 @@ async def outside(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Open the agent workspace in a sandboxed VS Code.')
+    parser = argparse.ArgumentParser(description="Open the agent's workspace in the sandboxed editor shell.")
     parser.add_argument('--folder', default='/workspace', help='the folder in the agent to open')
     parser.add_argument('--check', action='store_true', help='report what would be used, without opening a window')
+    parser.add_argument('--prepare', action='store_true', help='download Electron, then report as --check')
     parser.add_argument('--proxy-port', type=int, default=PROXY_PORT,
                         help="the host port of this workspace's code-server-proxy")
     parser.add_argument('--detach', action='store_true',
-                        help='return once VS Code is started; its output goes to client.log in the state directory')
-    parser.add_argument('--code', help=argparse.SUPPRESS)        # tests: instead of codeServer.vscode
+                        help='return once the editor is started; its output goes to client.log in the state directory')
     parser.add_argument('--probe', action='store_true', help=argparse.SUPPRESS)  # tests: report the sandbox, no window
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--host-netns', help=argparse.SUPPRESS)
@@ -430,11 +405,9 @@ def main():
     try:
         if args.inside:
             sys.exit(asyncio.run(inside(args)))
-        if not args.check:
+        if not args.check and not args.prepare:
             state = state_directory()
             lock = take_lock(state)  # noqa: F841  held until this process and its child end
-            if not args.probe:
-                prepare_server(args.proxy_port)
             if args.detach and not detach(state):
                 return
         sys.exit(asyncio.run(outside(args)))

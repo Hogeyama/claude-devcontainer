@@ -106,7 +106,7 @@ Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）�
 agentが動いているコンテナには、VS Codeを接続しないでください。接続すると、コンテナで動くプロセスが、ホストでコマンドを実行したり、proxyを通らずに外部と通信したりできるようになります。agentの変更は、ホストのリポジトリへfetchし、ホストで差分を見てください。理由と、それでも接続する場合の手順は、[VS Codeで開く](docs/usage.md#vs-codeで開く)を参照してください。
 
 コンテナの中でVS Codeを使う場合は、ターミナルで動かす[tode](docs/usage.md#ターミナルでvs-codeを使うtode)を使ってください。
-ホストのIMEで使いたい場合は、[隔離エディタ](docs/usage.md#ホストのimeでエディタを使うwindows-webview2--linux-vs-code)（Windows: WebView2、Linux: bubblewrapに入れたVS Code）があります。
+ホストのIMEで使いたい場合は、agentのVS Codeを専用のElectronシェルで表示する[隔離エディタ](docs/usage.md#ホストのimeでエディタを使う隔離エディタ)があります。
 
 ### 5. 終了する
 

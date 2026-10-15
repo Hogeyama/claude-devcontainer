@@ -1,0 +1,101 @@
+<!doctype html>
+<title>shell probe</title>
+<!-- tests/electron_shell_test.py serves this as the IDE: each attempt to leave
+     the allowed origins, and the results POSTed back. CANARY is a port of the
+     host's loopback that nothing may reach. -->
+<body>
+<script>
+const CANARY = '__CANARY__';
+const results = {};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function attempt(name, run) {
+  try {
+    results[name] = await Promise.race([run(), sleep(5000).then(() => 'timeout')]);
+  } catch (error) {
+    results[name] = 'error:' + error.name;
+  }
+}
+const status = async (url, options) => (await fetch(url, options)).status;
+function socket(url) {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(url);
+    ws.onopen = () => resolve('open');
+    ws.onerror = () => resolve('error');
+  });
+}
+function frame(src) {
+  const iframe = document.createElement('iframe');
+  iframe.src = src;
+  document.body.append(iframe);
+}
+function link(rel, href) {
+  const element = document.createElement('link');
+  element.rel = rel;
+  element.href = href;
+  document.head.append(element);
+}
+async function report(path, body) {
+  await fetch(path, { method: 'POST', body: JSON.stringify(body) });
+}
+
+(async () => {
+  await attempt('fetch_app', () => status('http://localhost:3000/ok'));
+  await attempt('fetch_external', () => status('http://example.com/fetch'));
+  await attempt('fetch_loopback', () => status(`http://127.0.0.1:${CANARY}/fetch`));
+  await attempt('fetch_localhost_subdomain', () => status('http://app.localhost:3000/fetch'));
+  await attempt('fetch_https', () => status('https://localhost:3000/https'));
+  await attempt('beacon', () => String(navigator.sendBeacon('http://example.com/beacon', 'x')));
+  await attempt('websocket_external', () => socket('ws://example.com/ws'));
+  await attempt('websocket_loopback', () => socket(`ws://127.0.0.1:${CANARY}/ws`));
+  await attempt('websocket_app', () => socket('ws://localhost:3000/ws'));
+  await attempt('window_open', () => String(window.open('http://localhost:18000/popup')));
+  await attempt('clipboard_read', () => navigator.clipboard.readText());
+  await attempt('notification', () => Notification.requestPermission());
+  await attempt('geolocation', () => new Promise((resolve) => navigator.geolocation.getCurrentPosition(
+    () => resolve('granted'), (error) => resolve('denied:' + error.code))));
+  await attempt('worker', () => new Promise((resolve) => {
+    new Worker('/worker.js').onmessage = (event) => resolve(event.data);
+  }));
+  await attempt('service_worker', async () => {
+    await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    for (let i = 0; i < 50 && !navigator.serviceWorker.controller; i++) {
+      await sleep(100);
+    }
+    return (await fetch('/sw-probe')).text();
+  });
+  await attempt('webrtc', async () => {
+    const connection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:192.0.2.1:3478' }] });
+    const candidates = [];
+    connection.onicecandidate = (event) => event.candidate && candidates.push(event.candidate.candidate);
+    connection.createDataChannel('probe');
+    await connection.setLocalDescription(await connection.createOffer());
+    await sleep(2000);
+    return candidates;
+  });
+  frame('http://example.com/frame');
+  frame('http://localhost:3000/frame');
+  frame('/redirect-out');
+  frame(`http://127.0.0.1:${CANARY}/frame`);
+  frame('data:text/html,<script>fetch("http://example.com/data-frame")<\/script>');
+  link('prefetch', 'http://example.org/prefetch');
+  link('dns-prefetch', '//example.net');
+  link('preconnect', 'http://example.net');
+  const image = new Image();
+  image.src = `http://127.0.0.1:${CANARY}/image`;
+  await sleep(2000);
+  await report('/report', results);
+  // Navigations away from the page: if one succeeded, /done never arrives.
+  location.href = 'claude-devcontainer-test://open';
+  await sleep(500);
+  location.href = 'http://example.com/top';
+  await sleep(500);
+  const anchor = document.createElement('a');
+  anchor.href = '/download';
+  anchor.download = 'probe.txt';
+  document.body.append(anchor);
+  anchor.click();
+  await sleep(1500);
+  await report('/done', {});
+})();
+</script>

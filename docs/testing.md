@@ -150,3 +150,90 @@ VS Codeの拡張ビューでagent側にanthropic.claude-codeがあり、Claude C
 - 最初の起動ではClaude Codeの認証に失敗しました。原因は特定できていません。`devcontainer up --remove-existing-container`と
   `inject-credentials.py`の実行後は通っています。proxyのコンテナIDは前後で同じで、認証情報の注入の記録もあるため、
   proxyに認証情報がなかったという説明は当てはまりません。再発したらproxyのログで拒否された要求を確認します。
+
+## Electronシェルとweb版VS Codeの組み合わせ
+
+2026-10-15（JST）に、[隔離エディタ](../.devcontainer/claude/code-server/README.md)のElectronシェルを、Debian 12のホストで動かすClaude Codeのサンドボックスの中で確認しました。
+シェルはElectron 44.7.2で、headless（`--ozone-platform=headless`）で起動しました。
+このサンドボックスは、Dockerのソケットへの接続とUnixソケットの作成を許しません。
+そのため、agentのコンテナ、firewallの転送、Linuxクライアントのbubblewrapは含みません。
+Electronの多重起動防止はUnixソケットを使うので、そこだけを無効にしたうえでシェルを読み込みました。
+
+### シェルの判定
+
+`tests/electron_shell_test.py`は、偽のIDEページからあらゆる経路で外へ出ようとし、記録用のproxyとホストのループバックの待受に何が届くかを調べます。
+
+| 試行 | 結果 |
+| --- | --- |
+| 外部（example.com）、127.0.0.1、`app.localhost`、httpsへのfetch | すべて失敗。proxyにも届かない |
+| 外部と127.0.0.1へのWebSocket | 失敗。agentの`localhost:3000`へのWebSocketは、proxyへのCONNECTになる |
+| Web WorkerとService Workerからのfetch | 外部は失敗、`localhost:3000`はproxy経由で200 |
+| 外部と127.0.0.1へのiframe、`data:`のiframeからのfetch、`<link rel=prefetch>`、`dns-prefetch`、`preconnect` | proxyにもループバックにも届かない |
+| サーバーから外部へのリダイレクト | リダイレクト先への要求は出ない |
+| `window.open` | `null`。要求も出ない |
+| 外部プロトコルとトップレベルの外部への遷移 | どちらも拒否され、ページはそのまま次の処理へ進んだ。`xdg-open`などの代わりに置いたスクリプトは起動しない |
+| ダウンロード | 保存されない |
+| クリップボードの読み取り、通知、位置情報 | すべて拒否 |
+| WebRTC（STUNサーバーを指定） | ICE候補は0件 |
+| ホストのループバックの待受 | 接続は0件 |
+
+最初の試行では、シェルの起動時に`redirector.gvt1.com:443`へのCONNECTがproxyまで届きました。
+持続的なsession partitionを作ると、Electronがスペルチェックの辞書をすぐにダウンロードし始めるためです。
+`setSpellCheckerEnabled(false)`ではこのダウンロードは止まりません。
+sessionの作成時に言語の一覧を空にしてからは、起動から終了までproxyに届いた要求は`localhost`宛てだけになりました。
+
+### web版VS Codeを通しで動かす
+
+VS Code 1.142.0（commit `6d62b1d5`）のweb版serverを`agent/vscode-patches.py`で書き換え、ホストの127.0.0.1:18000で直接起動しました。
+`code serve-web`は、serverとの間でUnixソケットを使うため、このサンドボックスでは起動できませんでした。
+proxyには、code-server-proxyのベースimageから取り出したmitmproxy 11.1.3を`proxy.py`とともにbubblewrapで動かしました。
+agent内のWebアプリの代わりに、ホストの3000番で、`SameSite=Lax`のCookieを設定し、`X-Frame-Options: SAMEORIGIN`とCSPの`frame-ancestors 'self'`を返すサーバーを動かしました。
+workspace側の拡張機能として、webviewを開いてからSimple Browserで`http://localhost:3000/login`を開く検証用の拡張機能を入れました。
+
+| 観測点 | 結果 |
+| --- | --- |
+| IDEの読み込み | 接続トークンがCookieになり、管理用と拡張機能ホスト用のWebSocketがどちらもつながった |
+| 拡張機能のwebview | `localhost:18001`から読み込まれ、スクリプトの`fetch`がproxy経由でアプリに届き、拡張機能へのメッセージも届いた |
+| Simple Browserでのログイン | `/login`が設定した`SameSite=Lax`のCookieが、続く`/check`に付いて送られた |
+| iframeでの表示 | `/check`のページが描画され、ページ内の画像を要求した。`X-Frame-Options`とCSPを取り除かないproxyでは、`/check`は要求されたが描画されなかった |
+| proxyが拒否した要求 | 0件 |
+
+確認の途中で、webviewの次の問題が見つかり、`agent/vscode-patches.py`で直しました。
+
+- webviewの`index.html`は、自分のホスト名が親のオリジンのハッシュでないと起動しない。`localhost:18001`では起動しなかった。
+- IDEのページのCSPは、`frame-src`を`*.vscode-cdn.net`に限っていた。
+- webviewはService Workerをmoduleとして登録する。module形式のService Workerのスクリプトは、仕様上Cookieなしで取得されるので、接続トークンがなく403になった。classic形式で登録すると、Cookieが付いて200になった。スクリプトにmodule構文はない。
+
+### Dockerでの確認
+
+同じ日に、利用者のホストでagentのimage（x64、`INSTALL_VSCODE=1`、拡張機能なし）とproxyのimageをビルドし、`tests/code_server_integration_test.py`を実行して通りました。
+このテストは、firewallと`route_localnet=1`を設定したagentと、proxyのコンテナを組み合わせて、次を確かめます。
+
+- コンテナ内の`code serve-web`が、外部に接続できない状態でimageのserverを起動し、`/version`がimageのcommitを返す。
+- 接続トークンがCookieになり、Cookieのない要求は403になる。IDEのページのCSPと`workbench.js`のwebviewのエンドポイント、webviewの`index.html`は、書き換えたとおりになっている。IDEへのWebSocketは101になる。
+- proxyからの接続は、agentの127.0.0.1で待ち受けるアプリにも、0.0.0.0で待ち受けるアプリにも届く。アプリの応答から`X-Frame-Options`とCSPの`frame-ancestors`が外れ、外部へのリダイレクトは451になる。
+- 外部、127.0.0.1、agentのアドレス、以前の`ide.localhost`や`port-3000.localhost`の名前への要求は451になる。
+- 同じネットワークのほかのコンテナからは、agentの18000番にもアプリのポートにも接続できない。
+
+続けて、このリポジトリの設定（`codeServer.extensions = ["anthropic.claude-code"]`、todeも有効）で`devcontainer build`を実行しました。
+serverのCLIがMarketplaceからanthropic.claude-code 2.1.300を`/opt/vscode/extensions`に入れ、インストール後の確認も通って、ビルドは成功しました。
+
+### 未確認
+
+- arm64のimageのビルド。
+- `devcontainer up`で作ったagentでの起動と、入れた拡張機能がエディタに読み込まれること。
+- Linuxクライアント：bubblewrapの中でのElectronの起動（Chromiumのサンドボックスの入れ子）、Waylandでのウィンドウ表示、日本語IME。中継にUnixソケットを使うため、`tests/vscode_client_test.py`のbubblewrapの2件もこのサンドボックスでは失敗し、ほかの8件は通った。
+- Windows：シェルの起動、外部プロトコル、WebRTC、IME。
+- ユーザーの操作が要るもの：キーボードでの貼り付け、WebHIDなどの選択画面。
+- Forgejoそのものでのログイン。上の確認は代わりのサーバーで行った。
+
+## Linuxで隔離エディタを開く
+
+2026-10-15（JST）に、利用者のホスト（Debian 12、Hyprland、Fcitx5）で`devcontainer up`と`code-server.sh open`を実行しました。
+
+- `open`はElectron 44.7.2を取得してSHA-256を照合し、bubblewrapの中でシェルを起動しました。IDEが開き、統合ターミナルから`claude -p ping`が通りました。
+- Claude Code拡張は、最初はグレーアウトしていました。Workspace Trustの制限モードで、未信頼のworkspaceに対応しない拡張機能が無効になっていたためです。手元の検証環境でも同じ表示を再現し、信頼すると拡張機能が起動することを確かめました。この確認を受けて、Workspace Trustを無効にしました。
+- 信頼した後も、Claude Codeのパネルは空でした。シェルのログには、webviewの`index.html`（`localhost:18001`）の読み込みが`ERR_BLOCKED_BY_RESPONSE`で失敗した記録がありました。serve-webのCLIは、すべての応答に`X-Frame-Options`とCSPの`frame-ancestors 'self'`を付けます。どちらもポートを区別するので、`localhost:18000`のIDEは`localhost:18001`のwebviewをiframeに入れられません。手元の検証環境はserverを直接動かしていたので、この問題が出ませんでした。proxyに同じヘッダーを付けるスクリプトを加えて再現し、18001番の応答を書き換えたproxyでClaude Codeのパネルが表示されることを確かめました。
+- 日本語IMEは、エディタとCtrl+Pの入力欄では使えましたが、統合ターミナルでは使えませんでした。`"editor.editContext": false`にしてエディタにもtextareaで入力させると、エディタでも使えなくなりました。このエディタはEditContext APIで入力を受け、ターミナルは画面外の透明なtextareaで受けます。原因はまだ分かっていません。
+- VS Codeのポートビューは表示されず、ポートの自動転送も起きませんでした。serve-webのworkbenchは、起動オプションでtunnel providerを渡さないためです。各ポートをそれ自身に対応させるtunnel providerを加えるとポートビューが戻ることは確かめましたが、アプリは転送しなくても`http://localhost:<ポート>/`で開けるので、加えないことにしました。
+- エディタやターミナルのlocalhostのリンクは、クリックしても何も起きませんでした。シェルが新しいウィンドウを拒否するためです。Machine設定に`"workbench.externalUriOpeners": {"http://localhost:*": "simpleBrowser.open"}`を置くと、手元の検証環境で、エディタのリンクのCtrl+クリックがSimple Browserのタブで開き、ページが描画されました。設定がなければ何も起きませんでした。拡張機能の`vscode.env.openExternal`はこの設定を使わないので、拡張機能が開くリンクには効きません。

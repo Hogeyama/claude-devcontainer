@@ -52,7 +52,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
         self.assertEqual(loaded['tode'], {'enabled': False, 'extensions': []})
-        self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': [], 'vscode': ''})
+        self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': []})
         self.assertEqual(loaded['proxy'], {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}})
         # load() must not change the defaults it starts from.
         self.write('claude.toml', '[sumi]\nsecrets = "s.txt"\n')
@@ -96,6 +96,7 @@ class SettingsTest(unittest.TestCase):
             ('[codeServer]\nenabled = true\nextensions = ["a.b c"]\n', r'codeServer.extensions:'),
             ('[codeServer]\nextensions = ["ms-python.python"]\n', r'codeServer.extensions: needs codeServer.enabled'),
             ('[codeServer]\nenabled = true\nextensions = "a.b"\n', r'codeServer.extensions: expected a list'),
+            ('[codeServer]\nvscode = "/usr/bin/code"\n', r'codeServer.vscode: unknown setting'),
             ('[subnets]\nproxy = "10.0.256"\n', r'subnets.proxy:'),
             ('[subnets]\nproxy = "10.0"\n', r'subnets.proxy:'),
             ('[nix]\nshell = "a\'b"\n', r"nix.shell: newlines and '"),
@@ -192,7 +193,6 @@ dind = "10.99.1"
             'CLAUDE_DEVCONTAINER_SUMI_FILE': "'list.txt'",
             'CLAUDE_DEVCONTAINER_CODE_SERVER': "'0'",
             'CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS': "''",
-            'CLAUDE_DEVCONTAINER_INSTALL_CODE_SERVER': "'1'",
             'CLAUDE_DEVCONTAINER_TODE': "'1'",
             'CLAUDE_DEVCONTAINER_TODE_EXTENSIONS': "'ms-python.python golang.go@0.48.0'",
             'CLAUDE_DEVCONTAINER_PROXY_CA': f"'{self.root / 'ca.pem'}'",
@@ -216,26 +216,12 @@ dind = "10.99.1"
                 self.write('claude.toml', f'[codeServer]\nenabled = {str(editor).lower()}\n[tode]\nenabled = {str(tode).lower()}\n')
                 values = settings.variables(self.load())
                 self.assertEqual(values['CLAUDE_DEVCONTAINER_CODE_SERVER'], str(int(editor)))
-                self.assertEqual(values['CLAUDE_DEVCONTAINER_INSTALL_CODE_SERVER'], str(int(editor or tode)))
                 self.assertEqual(values['CLAUDE_DEVCONTAINER_TODE'], str(int(tode)))
         self.write('claude.local.toml', '[codeServer]\nenabled = false\n')
         self.assertFalse(self.load()['codeServer']['enabled'])
         self.write('claude.local.toml', '[codeServer]\nenabled = "true"\n')
         with self.assertRaisesRegex(ValueError, 'codeServer.enabled: expected true or false'):
             self.load()
-
-    def test_code_server_vscode_is_a_host_path(self):
-        self.write('claude.local.toml', '[codeServer]\nenabled = true\nvscode = "~/bin/code"\n')
-        with mock.patch.dict(os.environ, {'HOME': '/home/me'}):
-            self.assertEqual(self.load()['codeServer']['vscode'], Path('/home/me/bin/code'))
-        self.write('claude.local.toml', '[codeServer]\nvscode = "../code"\n')
-        self.assertEqual(self.load()['codeServer']['vscode'], self.root / 'code')
-        self.write('claude.local.toml', '[codeServer]\nvscode = 1\n')
-        with self.assertRaisesRegex(ValueError, 'codeServer.vscode: expected a string'):
-            self.load()
-        self.write('claude.local.toml', '[codeServer]\nvscode = "/usr/bin/code"\n')
-        # The host's VS Code is the client's business, not compose's.
-        self.assertNotIn('/usr/bin/code', settings.variables(self.load()).values())
 
     def test_code_server_extension_override_is_independent(self):
         self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n'

@@ -1,0 +1,86 @@
+'use strict';
+// What the shell lets its pages load, as pure functions of the URL; main.js
+// applies them, and tests/electron_shell_test.py checks them with Node.
+//
+// Every origin the shell may reach is http://localhost:<port>, and
+// code-server-proxy decides where each port goes (../proxy.py): 18000 is the
+// IDE, 18001 its webviews, and any other port the same port in the agent.
+// One site for all of them, since Chromium sends SameSite=Lax cookies to an
+// iframe only when every frame above it is of the top page's site, and the
+// Simple Browser shows an app in an iframe of a webview's iframe.
+
+const IDE_PORT = 18000;
+const WEBVIEW_PORT = 18001;
+// The only permission granted: copying in the IDE writes the clipboard.
+// Reading it is not, and pasting with the keyboard needs no permission.
+const PERMISSIONS = new Set(['clipboard-sanitized-write']);
+
+function parse(url) {
+  try {
+    return new URL(url);
+  } catch {
+    return null;
+  }
+}
+
+// A URL of http://localhost:<port> or ws://localhost:<port>, the only ones
+// that go out (to the proxy).
+function isAgent(url) {
+  const parsed = parse(url);
+  if (!parsed || !['http:', 'ws:'].includes(parsed.protocol)) {
+    return false;
+  }
+  // An empty port is the scheme's default, 80; URL refuses one above 65535.
+  return parsed.hostname === 'localhost' && parsed.port !== '0'
+    && parsed.username === '' && parsed.password === '';
+}
+
+// blob: URLs name the origin that made them, and load nothing from the network.
+function isAgentBlob(url) {
+  return url.startsWith('blob:') && isAgent(url.slice('blob:'.length))
+    && parse(url.slice('blob:'.length)).protocol === 'http:';
+}
+
+// A frame may show the agent's pages, its own blob: URLs, and the empty
+// documents that iframes start with. Nothing else: no other site, file: or
+// data: document, and no external protocol (vscode:, ms-settings:, mailto:).
+function allowsNavigation(url) {
+  if (url === 'about:blank' || url === 'about:srcdoc' || isAgentBlob(url)) {
+    return true;
+  }
+  return isAgent(url) && parse(url).protocol === 'http:';
+}
+
+// A request (fetch, WebSocket, subresource, a worker's) may go to the agent;
+// data: and blob: are read in the browser.
+function allowsRequest(url) {
+  return isAgent(url) || isAgentBlob(url) || url.startsWith('data:');
+}
+
+// The Location of a redirect, relative to the URL that answered it.
+function allowsRedirect(location, base) {
+  let target;
+  try {
+    target = new URL(location, base);
+  } catch {
+    return false;
+  }
+  return allowsNavigation(target.toString());
+}
+
+function allowsPermission(permission) {
+  return PERMISSIONS.has(permission);
+}
+
+// The first page: the IDE with the folder open, and the connection token,
+// which the server turns into a cookie for this site and drops from the URL.
+function ideUrl(token, folder) {
+  const url = new URL(`http://localhost:${IDE_PORT}/`);
+  url.searchParams.set('tkn', token);
+  url.searchParams.set('folder', folder);
+  return url.toString();
+}
+
+module.exports = {
+  IDE_PORT, WEBVIEW_PORT, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, ideUrl,
+};

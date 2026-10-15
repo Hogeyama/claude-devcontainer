@@ -20,8 +20,13 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -d "$proxy" -p tcp --dport 8080 -j ACCEPT
 iptables -A OUTPUT -d "$dind" -p tcp -m multiport ! --dports 2375,2376 -j ACCEPT
 
-# Only the browser proxy can initiate connections to the optional editors:
-# code-server, and the VS Code server of the Linux client.
+# code-server-proxy alone may connect in, to any port: each connection goes
+# to the same port of loopback, where the editor's server (18000) and the
+# agent's web apps listen, on 127.0.0.1 or 0.0.0.0 alike. compose.yaml sets
+# route_localnet, without which the kernel drops a packet to 127.0.0.1 that
+# came from outside; INPUT's DROP still refuses every other source.
 if [ "${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}" = 1 ]; then
-    iptables -A INPUT -s "${CLAUDE_DEVCONTAINER_CODE_SERVER_PROXY_ADDRESS:?}" -p tcp -m multiport --dports 8088,8089 -j ACCEPT
+    browser=${CLAUDE_DEVCONTAINER_CODE_SERVER_PROXY_ADDRESS:?}
+    iptables -t nat -A PREROUTING -s "$browser" -p tcp -j DNAT --to-destination 127.0.0.1
+    iptables -A INPUT -s "$browser" -d 127.0.0.1 -p tcp -j ACCEPT
 fi

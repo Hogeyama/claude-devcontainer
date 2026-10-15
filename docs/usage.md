@@ -288,15 +288,15 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
-## ホストのIMEでエディタを使う（Windows WebView2 / Linux VS Code）
+## ホストのIMEでエディタを使う（隔離エディタ）
 
 `[codeServer] enabled = true` で、agentの`/workspace`をホストの画面とIMEで編集できます。
-Windows + WSLでは、agent内のcode-serverを専用のローカルWebView2ウィンドウで表示します。
-AppContainerとWFPでブラウザの通信を専用proxyに限定し、外部アプリへの引き渡しも拒否します。
-Linux（Wayland）では、ホストのVS Code自体をbubblewrapに入れ、Docker socketもホームも渡さずに、
-同じ専用proxy経由でagent内のVS Code serverへ接続します。
-[VS Codeが作る経路](#vs-codeが作る経路)は、どちらもサンドボックスの中で閉じます。
-todeとは独立した機能です。セットアップ・制約は[隔離エディタの手順](../.devcontainer/claude/code-server/README.md)を参照してください。
+agentの中で公式のVS Code（`code serve-web`）を動かし、ホストでは専用のElectronシェルがそれを表示します。
+シェルは、すべての通信を専用のproxyへ送り、agentのIDEとWebアプリ以外への通信、新規ウィンドウ、外部アプリケーションの起動を拒否します。
+Linux（Wayland）では、シェルをさらにbubblewrapに入れ、ループバックしかないnetwork namespaceで動かします。
+Windows + WSLでは管理者権限を使わないので、この外側の壁はありません。
+[VS Codeが作る経路](#vs-codeが作る経路)はどれもできません。
+todeとは独立した機能です。セットアップと制約は[隔離エディタの手順](../.devcontainer/claude/code-server/README.md)を参照してください。
 
 ## ターミナルでVS Codeを使う（tode）
 
@@ -356,7 +356,7 @@ code-server、Chromium、拡張機能はすべてコンテナの中で動きま�
 
 agentが動いているコンテナに、VS Codeを接続しないでください。VS Codeで接続すると、VS Codeとその拡張機能が、コンテナからホストへ通じる経路をいくつか作ります。どの経路もproxyとfirewallを通りません。VS Codeのサーバーはagentと同じ`node`ユーザーで動くので、コンテナで動くプロセスはすべてこれらの経路を使えます。その中には、ホストでコマンドを実行する経路と、proxyを通らずに外部と通信する経路があり、どちらも遮断できません。
 
-コンテナの中でエディタを使う場合は、[ターミナルでVS Codeを使う（tode）](#ターミナルでvs-codeを使うtode)を参照してください。agentの変更を見るときは、[ホストでレビューして取り込む](#ホストでレビューして取り込む)の手順でホストのリポジトリへfetchし、ホストで差分を見てください。VS Codeを使う場合も、ホストで開いたリポジトリのまま差分を見てください。fetchしただけではファイルを取り出さないので、agentが書いた`.vscode/`の設定などをホストのVS Codeが実行することはありません。
+コンテナの中でエディタを使う場合は、[ターミナルでVS Codeを使う（tode）](#ターミナルでvs-codeを使うtode)を、ホストの画面とIMEで使う場合は[隔離エディタ](#ホストのimeでエディタを使う隔離エディタ)を参照してください。agentの変更を見るときは、[ホストでレビューして取り込む](#ホストでレビューして取り込む)の手順でホストのリポジトリへfetchし、ホストで差分を見てください。VS Codeを使う場合も、ホストで開いたリポジトリのまま差分を見てください。fetchしただけではファイルを取り出さないので、agentが書いた`.vscode/`の設定などをホストのVS Codeが実行することはありません。
 
 ### VS Codeが作る経路
 

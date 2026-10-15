@@ -1,9 +1,9 @@
 # ローカルブラウザで開くcode-serverの境界検証
 
 > [!NOTE]
-> Windows版は`.devcontainer/claude/code-server/`の機能になりました。Linux版は、ここの
-> bwrap構成を使って、ブラウザではなくホストのVS Codeを隔離する形で
-> `.devcontainer/claude/code-server/linux/`に移しました（[手順](../../.devcontainer/claude/code-server/README.md)）。
+> この検証は`.devcontainer/claude/code-server/`の隔離エディタになりました。現在は、両OSで
+> 専用のElectronシェルがagentのVS Codeを表示し、Linuxではここのbwrap構成でそのシェルを
+> 隔離します（[手順](../../.devcontainer/claude/code-server/README.md)）。
 > このディレクトリは検証の記録として残しています。
 
 code-serverを専用の**ローカルブラウザで直接表示**するデモです。

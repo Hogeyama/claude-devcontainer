@@ -57,7 +57,7 @@ DEFAULTS = {
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
     'tode': {'enabled': False, 'extensions': []},
-    'codeServer': {'enabled': False, 'extensions': [], 'vscode': ''},
+    'codeServer': {'enabled': False, 'extensions': []},
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
@@ -72,7 +72,7 @@ HOST_GIT = '/run/host/git'
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'TODE', 'TODE_EXTENSIONS', 'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'INSTALL_CODE_SERVER', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'TODE', 'TODE_EXTENSIONS', 'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -219,10 +219,8 @@ def load(root=ROOT):
             raise ValueError(f'{editor}.extensions: needs {editor}.enabled')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
-    settings['codeServer']['vscode'] = settings['codeServer']['vscode'] and resolve(settings['codeServer']['vscode'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
-    for name, path in (('sumi.secrets', settings['sumi']['secrets']), ('proxy.ca', settings['proxy']['ca']),
-                       ('codeServer.vscode', settings['codeServer']['vscode'])):
+    for name, path in (('sumi.secrets', settings['sumi']['secrets']), ('proxy.ca', settings['proxy']['ca'])):
         if "'" in str(path) or '\n' in str(path):
             raise ValueError(f"{name}: {path}: newlines and ' are not allowed")
     return settings
@@ -257,7 +255,6 @@ def variables(settings):
         PREFIX + 'SUMI_FILE': secrets.name,
         PREFIX + 'CODE_SERVER_EXTENSIONS': ' '.join(settings['codeServer']['extensions']),
         PREFIX + 'CODE_SERVER': '1' if settings['codeServer']['enabled'] else '0',
-        PREFIX + 'INSTALL_CODE_SERVER': '1' if settings['codeServer']['enabled'] or settings['tode']['enabled'] else '0',
         PREFIX + 'TODE': '1' if settings['tode']['enabled'] else '0',
         PREFIX + 'TODE_EXTENSIONS': ' '.join(settings['tode']['extensions']),
         PREFIX + 'PROXY_CA': str(settings['proxy']['ca'] or ''),
