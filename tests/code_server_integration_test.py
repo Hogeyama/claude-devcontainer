@@ -52,6 +52,9 @@ class CodeServerIntegrationTest(unittest.TestCase):
         docker('exec', agent, 'sh', '-ec', 'test ! -e /usr/local/bin/tode; test ! -e /opt/code-server; '
                'test -x /opt/vscode/bin/code')
         commit = docker('exec', agent, 'cat', '/opt/vscode/commit')
+        # LANG is C.UTF-8, which the editor's terminals keep, and the image has that
+        # locale: for one it lacks, locale writes a warning to stderr.
+        self.assertEqual(docker('exec', agent, 'sh', '-c', 'echo $LANG; locale 2>&1 >/dev/null'), 'C.UTF-8')
         # serve-web starts the image's server; with no egress, a download would fail here.
         for _ in range(120):
             ready = subprocess.run(['docker', 'exec', agent, 'curl', '-fsS', '--noproxy', '*',

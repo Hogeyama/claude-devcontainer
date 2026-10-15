@@ -248,6 +248,10 @@ COPY --chmod=755 agent/entrypoint.sh agent/start-code-server.sh agent/init-firew
 # Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
 # reach anything (a Next.js server calling an API, for one).
 ENV NODE_USE_ENV_PROXY=1
+# The image has no locale but C.UTF-8. VS Code gives a terminal a LANG of its
+# display language (en_US.UTF-8, say) unless LANG ends in .UTF-8, and Bash in
+# a locale that does not exist drops the Japanese an IME commits.
+ENV LANG=C.UTF-8
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
     CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
