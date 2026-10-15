@@ -1,6 +1,6 @@
 ---
 name: claude-devcontainer
-description: Use in this dev container when clone, Git, network requests, package installs, Docker or Testcontainers fail, or when a task needs unavailable tools or dependencies. Covers the independent workspace, host review and mandatory proxy.
+description: Use in this dev container before handing commits to the host, checking what the host has accepted, or comparing your files or Git with the host's, and when clone, Git, network requests, package installs, Docker or Testcontainers fail, or when a task needs unavailable tools or dependencies. Covers the independent workspace, host review and mandatory proxy.
 ---
 
 # Working in this dev container
@@ -35,6 +35,15 @@ The management inputs `/run/host/generated` and `/run/host/nix-env` are read-onl
 - `/run/host/git` is read-only; never try to write there or to reconfigure Git around it.
 - Do not create a `.git` directory or file anywhere below `/workspace`: Git run by the host inside that directory would use its config and hooks.
 
+Checking the host's side in `shared`:
+
+- Read the mode from `CLAUDE_DEVCONTAINER_GIT_ISOLATION`, not from `claude.toml`: `claude.local.toml` overrides it, and only the value at container creation counts.
+- The human often talks to you from an editor on the host (ACP clients such as Avante or agent-shell, through `acp-agent.py`). They see the same files, but their `git status` compares the host's index with the real files.
+- `/run/host/git` is the host's Git directory without a working tree. Read the host's state yourself with `git -C /run/host/git` (`log`, `rev-parse HEAD`, `reflog`, `branch`) instead of asking the human to run commands and paste output. To check that the host accepted commit `<id>`: `git -C /run/host/git merge-base --is-ancestor <id> HEAD`.
+- Commands that need a working tree (`status`, `diff` without two commits) fail there; that is expected. Do not pair it with `/workspace` (`--work-tree=/workspace`, `GIT_DIR=/run/host/git`): the hidden paths read as empty here, so the comparison reports deletions the host does not have. To compare with the host, compare commits (`git diff <host commit> <your commit>`).
+- In your own `git status`, the hidden paths stay out because of skip-worktree (`git ls-files -v` shows `S`). A clean status here does not mean their content matches the host's.
+- If Git has no `user.name`/`user.email`, ask the human which identity to use. They can provide one with `~/.config/claude-devcontainer/extra/.gitconfig` on the host, which becomes your `~/.gitconfig`. Do not invent one or write global config without asking.
+
 The independent workspace and Git exchange rules below apply to `clone`:
 
 - `/workspace` is your own persistent clone, initialized automatically from a local copy of the host's committed HEAD (including unpublished commits), using the host's branch name at creation time. If the host has detached HEAD, the clone does too. Later starts preserve your current branch. Create a separate task branch with `git switch -c agent/task-name` when needed.
@@ -46,7 +55,7 @@ The independent workspace and Git exchange rules below apply to `clone`:
 - Restarts and container recreation preserve your clone, dirty files and dependency changes. They do not automatically fetch/reset. Never recommend deleting workspace volumes as routine recovery.
 - `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Run Git as node, never root.
 - If `$CLAUDE_DEVCONTAINER_NIX` is `1`, Bash reads what the nix dev shell exported when the container started, after its shellHook ran in `/workspace`. When a dev shell tool or variable is missing, the shellHook's output is in `/run/claude-devcontainer/nix-env.log`.
-- If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte. This is deliberate. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
+- If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte (a 24-byte secret reads as 24 `*`). This is deliberate, and a run of `*` is the masking working, not a change to report. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
 
 ## Docker (DinD)
 
