@@ -21,6 +21,8 @@ services:
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
         INSTALL_CODE_SERVER: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
         CODE_SERVER_EXTENSIONS: ${CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS:-}
+        INSTALL_ACP: ${CLAUDE_DEVCONTAINER_ACP:-0}
+        ACP_VERSION: ${CLAUDE_DEVCONTAINER_ACP_VERSION:-0.90.0}
     command: ["sleep", "infinity"]
     # sleep as PID 1 reaps nothing, so processes orphaned by devcontainer exec
     # sessions would otherwise stay as zombies.
