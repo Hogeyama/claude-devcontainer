@@ -11,4 +11,8 @@ if [ -z "${claude_devcontainer_env_read-}" ]; then
     if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -O /run/claude-devcontainer/nix-env.rc ]; then
         . /run/claude-devcontainer/nix-env.rc
     fi
+    # Host user preferences, resolved at startup and mounted read-only.
+    if [ -r /run/host/generated/shell-path.sh ]; then
+        . /run/host/generated/shell-path.sh
+    fi
 fi

@@ -80,7 +80,7 @@ RUN if [ "$INSTALL_CODE_SERVER" = 1 ]; then \
     fi
 RUN install -d -o node -g node /home/node/.vscode-server
 # codeServer.extensions in claude.toml, space-separated, each optionally
-# @version. Installed at build time from the Marketplace (the agent has no
+# @version. Installed at build time from code-server's default Open VSX (the agent has no
 # runtime access to it), with the server's own CLI, into /opt/code-server/extensions,
 # which agent/start-code-server.sh copies for the server at each start. The
 # build fails if an extension is not installed afterwards, compared as
@@ -89,7 +89,6 @@ ARG CODE_SERVER_EXTENSIONS=""
 RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
       code_server() { \
         HOME=/tmp/code-server-install \
-        EXTENSIONS_GALLERY='{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","cacheUrl":"https://vscode.blob.core.windows.net/gallery/index","controlUrl":""}' \
         /opt/code-server/bin/code-server \
           --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/code-server-install "$@"; \
       } \
