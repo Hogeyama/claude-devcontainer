@@ -25,37 +25,38 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
-`CLAUDE_DEVCONTAINER_GIT_ISOLATION` records the mode selected at container creation (default `clone`). In `shared`, `/workspace` is the host working tree, and ordinary edits reach the host immediately, but `/workspace/.git` is this container's own Git. add and commit update only this Git metadata. The host's `.git` is read-only at `/run/host/git`. `.devcontainer` is read-only; use clone to develop it. `git.shared_hidden_paths` and in-repository `sumi.secrets` are covered by empty read-only mounts. Other untracked/ignored files remain shared; tracked files among the hidden paths carry the skip-worktree flag in this index, so they stay out of status and commits even though they read as empty here.
+Check the Git mode first: `echo "$CLAUDE_DEVCONTAINER_GIT_ISOLATION"` prints `clone` or `shared`, the mode the container was created with. Do not infer it from `claude.toml`: the host's `claude.local.toml` can override it, and a change applies only after the container is recreated. Follow the rules for both modes and the subsection for your mode only; the other mode's paths, remotes and exchange steps do not work for you.
 
-The management inputs `/run/host/generated` and `/run/host/nix-env` are read-only. Network and dependency CoW restrictions still apply. Mount changes require container recreation.
+In both modes:
 
+- Commit, then tell the human the branch name and the exact commit ID. The human fetches it through the host's `agent` remote, reviews it, and integrates that ID. GitHub is not involved in this exchange.
+- If Git has no `user.name`/`user.email`, ask the human which identity to use. They can provide one with `~/.config/claude-devcontainer/extra/.gitconfig` on the host, which becomes your `~/.gitconfig`. Do not invent one or write global config without asking.
+- `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Mount changes require container recreation. Run Git as node, never root.
+- If `$CLAUDE_DEVCONTAINER_NIX` is `1`, Bash reads what the nix dev shell exported when the container started, after its shellHook ran in `/workspace`. When a dev shell tool or variable is missing, the shellHook's output is in `/run/claude-devcontainer/nix-env.log`.
+- If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte (a 24-byte secret reads as 24 `*`). This is deliberate, and a run of `*` is the masking working, not a change to report. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
+
+### `shared`
+
+`/workspace` is the host working tree: ordinary edits reach the host immediately. `/workspace/.git` is this container's own Git, so add and commit update only it. The host's `.git` is read-only at `/run/host/git`. `.devcontainer` is read-only; use clone to develop it. `git.shared_hidden_paths` and in-repository `sumi.secrets` are covered by empty read-only mounts. Other untracked/ignored files remain shared. Tracked files among the hidden paths carry the skip-worktree flag in this index (`git ls-files -v` shows `S`), so they stay out of status and commits even though they read as empty here; a clean status does not mean their content matches the host's.
+
+- The human often talks to you from an editor on the host (ACP clients such as Avante or agent-shell, through `acp-agent.py`). They see the same files, but their `git status` compares the host's index with the real files.
 - Work on the branch you started on, or on an `agent/<task>` branch created from it. Do not use switch, stash or checkout to replace the files of the working tree: they are the human's files, possibly being edited.
-- Commit, then tell the human the branch name and the exact commit ID. The host fetches it through the `agent` remote, reviews it, and moves its HEAD and index to it. Edits you leave uncommitted stay in the working tree and appear in the host's `git status`.
+- The host integrates your commit with `git reset --mixed`, which moves its HEAD and index and keeps the files. Edits you leave uncommitted stay in the working tree and appear in the host's `git status`.
 - When the host has new commits, run `git fetch /run/host/git <branch>` and then `git reset --mixed FETCH_HEAD` (the files are already the host's) or a rebase. `git push agent` is not available in this mode. At container start, HEAD follows the host's branch automatically when no commit here is still unaccepted.
+- `/run/host/git` is the host's Git directory without a working tree. Read the host's state yourself with `git -C /run/host/git` (`log`, `rev-parse HEAD`, `reflog`, `branch`) instead of asking the human to run commands and paste output. To check that the host accepted commit `<id>`: `git -C /run/host/git merge-base --is-ancestor <id> HEAD`.
+- Commands that need a working tree (`status`, `diff` without two commits) fail there; that is expected. Do not pair it with `/workspace` (`--work-tree=/workspace`, `GIT_DIR=/run/host/git`): the hidden paths read as empty here, so the comparison reports deletions the host does not have. To compare with the host, compare commits (`git diff <host commit> <your commit>`).
 - `/run/host/git` is read-only; never try to write there or to reconfigure Git around it.
 - Do not create a `.git` directory or file anywhere below `/workspace`: Git run by the host inside that directory would use its config and hooks.
 
-Checking the host's side in `shared`:
-
-- Read the mode from `CLAUDE_DEVCONTAINER_GIT_ISOLATION`, not from `claude.toml`: `claude.local.toml` overrides it, and only the value at container creation counts.
-- The human often talks to you from an editor on the host (ACP clients such as Avante or agent-shell, through `acp-agent.py`). They see the same files, but their `git status` compares the host's index with the real files.
-- `/run/host/git` is the host's Git directory without a working tree. Read the host's state yourself with `git -C /run/host/git` (`log`, `rev-parse HEAD`, `reflog`, `branch`) instead of asking the human to run commands and paste output. To check that the host accepted commit `<id>`: `git -C /run/host/git merge-base --is-ancestor <id> HEAD`.
-- Commands that need a working tree (`status`, `diff` without two commits) fail there; that is expected. Do not pair it with `/workspace` (`--work-tree=/workspace`, `GIT_DIR=/run/host/git`): the hidden paths read as empty here, so the comparison reports deletions the host does not have. To compare with the host, compare commits (`git diff <host commit> <your commit>`).
-- In your own `git status`, the hidden paths stay out because of skip-worktree (`git ls-files -v` shows `S`). A clean status here does not mean their content matches the host's.
-- If Git has no `user.name`/`user.email`, ask the human which identity to use. They can provide one with `~/.config/claude-devcontainer/extra/.gitconfig` on the host, which becomes your `~/.gitconfig`. Do not invent one or write global config without asking.
-
-The independent workspace and Git exchange rules below apply to `clone`:
+### `clone`
 
 - `/workspace` is your own persistent clone, initialized automatically from a local copy of the host's committed HEAD (including unpublished commits), using the host's branch name at creation time. If the host has detached HEAD, the clone does too. Later starts preserve your current branch. Create a separate task branch with `git switch -c agent/task-name` when needed.
-- The host's worktree and `.git` are not mounted. Your `.devcontainer/`, Git configuration and hooks are writable; host startup uses the host's copies until the human reviews and integrates your commit.
-- Commit work on a task branch and tell the human its name and exact commit ID. No push is required: the host automatically has an `agent` remote pointing directly to this container and fetches your commits with ordinary Git. GitHub is not involved in this exchange.
+- The host's worktree and `.git` are not mounted, and `/run/host/git` does not exist. Your `.devcontainer/`, Git configuration and hooks are writable; host startup uses the host's copies until the human reviews and integrates your commit.
+- Commit work on a task branch. No push is required: the host's `agent` remote points directly to this container and fetches your commits with ordinary Git.
 - You have no automatic remote that can write back to the host. The human fetches, reviews fixed commit IDs, then integrates that ID.
 - To receive host changes, ask the human to run `git push agent HEAD:refs/heads/host/main` on the host, then merge/rebase the local `host/main` branch here. For host-only tests, commit the code and ask for review before execution; receive results in chat.
 - The human may also push, even with `--force`, to the branch checked out here. Git then updates the work tree and index to the pushed commit, and refuses the push while either has uncommitted changes. Commits a forced push removes from the branch stay in `git reflog`.
 - Restarts and container recreation preserve your clone, dirty files and dependency changes. They do not automatically fetch/reset. Never recommend deleting workspace volumes as routine recovery.
-- `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Run Git as node, never root.
-- If `$CLAUDE_DEVCONTAINER_NIX` is `1`, Bash reads what the nix dev shell exported when the container started, after its shellHook ran in `/workspace`. When a dev shell tool or variable is missing, the shellHook's output is in `/run/claude-devcontainer/nix-env.log`.
-- If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte (a 24-byte secret reads as 24 `*`). This is deliberate, and a run of `*` is the masking working, not a change to report. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
 
 ## Docker (DinD)
 
