@@ -105,8 +105,10 @@ services:
       # Root's, and sticky like /tmp: Claude Code creates and replaces its own
       # files here, but cannot change or move the root-owned copies of the
       # host's configuration (scripts/copy-host-config.py). Being a mount
-      # point, it cannot be moved aside as a whole either.
-      - /home/node/.claude:mode=1777
+      # point, it cannot be moved aside as a whole either. exec, since
+      # Docker mounts a tmpfs noexec by default and the copied skills carry
+      # scripts that Claude Code runs from here.
+      - /home/node/.claude:mode=1777,exec
     networks:
       proxy-internal:
         ipv4_address: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.20
