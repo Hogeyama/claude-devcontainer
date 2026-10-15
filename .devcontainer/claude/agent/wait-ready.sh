@@ -60,7 +60,7 @@ if [ "${CLAUDE_DEVCONTAINER_NIX:-0}" = 1 ] && [ -f /run/host/nix-env/dev-env.sh 
 fi
 
 if [ "${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}" = 1 ]; then
-    if ! timeout 30 sh -c 'until curl --fail --silent --noproxy "*" http://127.0.0.1:18000/version >/dev/null; do sleep 0.5; done'; then
+    if ! timeout 30 sh -c 'until curl --fail --silent --noproxy "*" http://127.0.0.1:18000/healthz >/dev/null; do sleep 0.5; done'; then
         echo "error: the editor's server did not start; see /run/claude-devcontainer/code-server.log" >&2
         exit 1
     fi

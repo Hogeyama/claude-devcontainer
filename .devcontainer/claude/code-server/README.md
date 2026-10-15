@@ -1,7 +1,7 @@
 # ホストのIMEで使う隔離エディタ（Electronシェル）
 
 agent内の`/workspace`を、ホストの画面とIMEで編集します。画面転送はしません。
-agentの中で公式のVS Code（`code serve-web`）を動かし、ホストでは専用のElectronシェルがそれを表示します。
+agentの中でCoderのcode-serverを動かし、ホストでは専用のElectronシェルがそれを表示します。
 WindowsとLinuxで、同じシェル、同じproxy、同じ設定を使います。
 ホストのVS Codeをコンテナに接続する通常の方法が作る[経路](../../../docs/usage.md#vs-codeが作る経路)は、このシェルにはありません。
 設計の経緯は[設計文書](../../../docs/superpowers/specs/2026-10-15-electron-shell-design.md)にあります。
@@ -9,8 +9,7 @@ WindowsとLinuxで、同じシェル、同じproxy、同じ設定を使います
 ```text
 Electronシェル（ホストのIME）
   └─ すべての通信: code-server-proxy（ホストの127.0.0.1の18086〜18186番のうち1つ）
-       ├─ http://localhost:18000       → agentのcode serve-web（IDE）
-       ├─ http://localhost:18001       → 同じserver（webview）
+       ├─ http://localhost:18000       → agentのcode-server（IDEとwebview）
        └─ http://localhost:<port>      → agentの同じポートのWebアプリ
             agentのfirewallが、proxyからの接続をagentの127.0.0.1へ転送する
 ```
@@ -125,15 +124,15 @@ AppContainerやWFPでElectronを閉じ込めるには、ループバック免除
 
 ## agent側のserver
 
-agentでは、`agent/start-code-server.sh`が`code serve-web`を127.0.0.1の18000番で起動します。
+agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番で起動します。
 ホストのポートには公開しません。
 
-- VS CodeのCLIとweb版serverは、`agent/Dockerfile`がcommitとSHA-256を固定してimageのビルド時に入れます。serve-webは起動時にserverをダウンロードしようとしますが、同じcommitのserverを見つけるとダウンロードしません。agentは外部に接続できないので、取得はビルド時に限ります。
-- `codeServer.extensions` は、ビルド時にserverのCLIでMarketplaceから入れます。見つからない拡張や、指定したバージョンが入らなかった場合はビルドが失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直すので、リストの内容に戻ります。
-- 接続トークンはagentの起動のたびに作り直し、`/run/claude-devcontainer/vscode-token`に置きます。`open`がこれを読んでシェルに渡し、シェルはserver（18000番と18001番）へのすべての要求にトークンのCookieを付けます。webviewのService Workerのスクリプトのように、ページがCookieを付けずに送る要求も含みます。
-- VS Codeのweb版は、webviewのページを`*.vscode-cdn.net`から読み込みます。この構成では`localhost:18001`から配信するため、`agent/vscode-patches.py`がビルド時にserverの3つのファイルを書き換えます。serve-webはすべての応答に、別のオリジンのiframeに入れることを禁じるヘッダーを付けます。ポートが違えばオリジンも違うので、proxyは18001番の応答だけ、IDE（18000番）のiframeに入れることを許すよう書き換えます。
-- Workspace Trustは無効にしてあり、制限モードにはなりません。agentのworkspaceはもともと攻撃者が書き換えられるもので、agentのClaude Codeも最初から信頼しています。制限モードは、agentの中の拡張機能を止めるだけで、ホストを守りません。serve-webにはserverへこの指定を渡す方法がないので、同じスクリプトがserverの起動スクリプトに`--disable-workspace-trust`を加えます。
-- VS Codeを更新するときは、Dockerfileのcommitとハッシュを変えてください。`agent/vscode-patches.py`が書き換える文字列が見つからなければ、ビルドが失敗します。
+- code-server 4.132.0は、`agent/Dockerfile`がバージョンとSHA-256を固定してビルド時に入れます。todeと配布物を共有し、どちらか一方が有効なら取得します。
+- `codeServer.extensions` は、ビルド時にcode-serverのCLIで入れます。todeと同じく`EXTENSIONS_GALLERY`でMicrosoftのMarketplaceを指定します。指定した拡張やバージョンが入らなければビルドは失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直します。
+- 起動のたびに64桁の16進トークンを作り、従来と同じ`/run/claude-devcontainer/vscode-token`に置きます。serverには`HASHED_PASSWORD`として渡し、シェルは18000番へのすべての要求に`code-server-session` Cookieとして付けます。Cookieなしで取得されるService Workerのスクリプトも含みます。最初のURLにはフォルダだけを指定します。
+- webviewはIDEと同じ`localhost:18000`から配信されます。serverへのパッチとwebview専用ポートは不要です。
+- Workspace Trustは`--disable-workspace-trust`で無効にします。agentのworkspaceはもともと攻撃者が書き換えられるもので、agentのClaude Codeも最初から信頼しています。制限モードはagent内の拡張機能を止めるだけで、ホストを守りません。
+- 更新するときはDockerfileのcode-serverのバージョンとハッシュを変え、ワークベンチ、webview、Simple Browser、ポートビューを実際に確認してください。
 - agentのfirewallは、code-server-proxyからの接続をすべてagentの127.0.0.1の同じポートへ転送します（`agent/init-firewall.sh`）。これにはcomposeが設定する`net.ipv4.conf.all.route_localnet=1`が必要です。ほかの送信元からの接続は、INPUTの既定のDROPで拒否されます。
 - 拡張の状態は`vscode-server-data` volumeに残ります。Machine設定は、起動のたびにimageの内容（ターミナルを`/bin/bash`で起動する設定と、localhostのリンクをSimple Browserで開く設定）に戻ります。ユーザー設定は、ブラウザ版VS Codeの仕様でシェルのプロファイルに保存されます。
 
@@ -153,7 +152,7 @@ ROOT_URL = http://localhost:3000/
 
 アプリが127.0.0.1と0.0.0.0のどちらで待ち受けていても接続できます。
 ホストへのポート公開やfirewallへの追加は要りません。
-18000番と18001番はエディタが使うので、アプリには使えません。
+18000番はエディタが使うので、アプリには使えません。
 
 Simple Browserは、アプリをwebviewのiframeのさらに内側のiframeで表示します。
 IDE、webview、アプリはすべて`localhost`の同じサイトなので、ログインの`SameSite=Lax`のCookieも送られます。
@@ -164,7 +163,7 @@ proxyは、アプリの応答から`X-Frame-Options`とCSPの`frame-ancestors`�
 シェルは新しいウィンドウを開かないので、この設定がなければクリックしても何も起きません。
 拡張機能が `vscode.env.openExternal` で開くリンクには、この設定は効きません。Claude Codeのチャット欄のリンクがどちらで開かれるかは、まだ確かめていません。
 
-serve-webのVS Codeにはポートを転送する仕組みがないので、ポートビューは表示されず、ポートの自動転送も起きません。アプリは転送しなくても、上のURLで開けます。
+ポートビューやSimple Browserが生成する`http://localhost:18000/proxy/<port>/...`には、信頼するproxyが`http://localhost:<port>/...`への302を返します。`/absproxy/<port>/...`も同じように扱います。パスとクエリを保ち（`/proxy/3000?x=1`も`http://localhost:3000/?x=1`へ転送）、code-serverのパス中継を通さないので、アプリの絶対パスも同じオリジンで動きます。`VSCODE_PROXY_URI`や`--proxy-domain`は指定しません。
 
 ## 無効にする
 
@@ -176,7 +175,7 @@ serve-webのVS Codeにはポートを転送する仕組みがないので、ポ�
 - Electronのセキュリティ修正に追従するため、`electron.py`のバージョンとハッシュを更新し続ける必要があります。
 - GitHubへのログイン、Settings Sync、実行時のMarketplaceへの接続、外部サイトのプレビューは使えません。
 - 右クリックメニューからの貼り付けは、クリップボードの読み取り権限が要るので動きません。キーボードでの貼り付けとコピーは動きます。
-- すべてのwebviewが同じオリジン（`localhost:18001`）になります。VS Codeの既定では、webviewごとにオリジンが分かれます。
+- すべてのwebviewが同じオリジン（`localhost:18000`）になります。VS Codeの既定では、webviewごとにオリジンが分かれます。
 - Cookieはポートを区別しないので、IDEの接続トークンのCookieは、agent内のWebアプリにも送られます。agentはもともとIDEのserverを動かしているので、トークンを得ても新たにできることはありません。
 - proxyはローカル認証なしです。同一ホスト上の他ユーザーを敵とする環境や、EC2などへ公開するための認証やTLSの構成には対応していません。接続トークンは、ホストの同じユーザーなら読めます。
 - 起動スクリプト、シェル、proxyのコードは、agentから書き換えられない場所に置く必要があります。sharedモードの `/workspace/.devcontainer` は既存の設定で読み取り専用です。

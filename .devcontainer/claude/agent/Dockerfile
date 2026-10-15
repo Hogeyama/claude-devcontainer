@@ -1,11 +1,7 @@
 # tode.enabled in claude.toml: 1 installs terminal-code (tode) below.
 ARG INSTALL_TODE=0
-# codeServer.enabled: 1 installs VS Code's server for the isolated editor
-# (code-server/README.md).
-ARG INSTALL_VSCODE=0
-# The release of VS Code that `code serve-web` serves, for the two tarballs
-# below. A new one also needs agent/vscode-patches.py to apply to it.
-ARG VSCODE_COMMIT=6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1
+# codeServer.enabled: installs Coder code-server for the isolated editor.
+ARG INSTALL_CODE_SERVER=0
 # sumi masks secrets in what Claude's tools return (sumi.enabled in
 # claude.toml). Its broker and the agent must run the same version.
 FROM scratch AS sumi-amd64
@@ -38,30 +34,14 @@ ADD --checksum=sha256:a38d26f4cb81f768feddff79e2937fd3f39c83d3da8be3da7225e1087e
 FROM scratch AS code-server-arm64
 ADD --checksum=sha256:ade569a677d1c04ee66ef153382b7e15bf261f955407663c7ddc6b87f9ee29fc \
     https://github.com/coder/code-server/releases/download/v4.132.0/code-server-4.132.0-linux-arm64.tar.gz /code-server.tar.gz
-# VS Code's CLI, whose `code serve-web` would download the server at its
-# first start, which the proxy denies; so the server of the same commit too.
-FROM scratch AS vscode-amd64
-ARG VSCODE_COMMIT
-ADD --checksum=sha256:266971dc63df73374f757a071fecd31f24aa1426ba305688d78ccb0c687ba45c \
-    https://update.code.visualstudio.com/commit:${VSCODE_COMMIT}/cli-linux-x64/stable /cli.tar.gz
-ADD --checksum=sha256:0c9e305190e69895ad609321a001f0b44496e3f8dfdbcbf9fc72125cb82b87de \
-    https://update.code.visualstudio.com/commit:${VSCODE_COMMIT}/server-linux-x64-web/stable /server.tar.gz
-FROM scratch AS vscode-arm64
-ARG VSCODE_COMMIT
-ADD --checksum=sha256:e2f04ad9496c5687e6f5cdffab6b82bb23d077143e01f93b7bb0bc3e7bb055c4 \
-    https://update.code.visualstudio.com/commit:${VSCODE_COMMIT}/cli-linux-arm64/stable /cli.tar.gz
-ADD --checksum=sha256:826740998633afdbaf130273052e31e4412f8a7f4f3c932ad9712af939412c44 \
-    https://update.code.visualstudio.com/commit:${VSCODE_COMMIT}/server-linux-arm64-web/stable /server.tar.gz
 FROM tode-${TARGETARCH} AS tode-1
 FROM scratch AS tode-0
 FROM tode-${INSTALL_TODE} AS tode
-# code-server, for tode alone.
+# Both features share the same download; disabled features use an empty stage.
 FROM code-server-${TARGETARCH} AS code-server-1
 FROM scratch AS code-server-0
-FROM code-server-${INSTALL_TODE} AS code-server
-FROM vscode-${TARGETARCH} AS vscode-1
-FROM scratch AS vscode-0
-FROM vscode-${INSTALL_VSCODE} AS vscode
+FROM code-server-${INSTALL_TODE} AS tode-code-server
+FROM code-server-${INSTALL_CODE_SERVER} AS editor-code-server
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
 # Only agent-setup.sh from the workspace's .devcontainer/, if there is one. A
 # mount of the whole directory would rerun the setup whenever any file in it
@@ -108,35 +88,25 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
 # the host's network before the proxy applies. Core files are copied after it.
 RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
-RUN --mount=type=bind,from=code-server,target=/tmp/code-server \
-    if [ -f /tmp/code-server/code-server.tar.gz ]; then \
+RUN --mount=type=bind,from=tode-code-server,target=/tmp/tode-code-server \
+    --mount=type=bind,from=editor-code-server,target=/tmp/editor-code-server \
+    archive=/tmp/editor-code-server/code-server.tar.gz \
+    && if [ ! -f "$archive" ]; then archive=/tmp/tode-code-server/code-server.tar.gz; fi \
+    && if [ -f "$archive" ]; then \
       mkdir -p /opt/code-server \
-      && tar -xzf /tmp/code-server/code-server.tar.gz -C /opt/code-server --strip-components 1 --no-same-owner \
+      && tar -xzf "$archive" -C /opt/code-server --strip-components 1 --no-same-owner \
       && chmod -R u-s,g-s,go-w /opt/code-server \
       && test -x /opt/code-server/bin/code-server; \
     fi
-# The isolated editor's server, root's, so that an image change reaches it.
-# serve-web runs the server it finds at serve-web/<commit> of its data
-# directory, where agent/start-code-server.sh links this one. The terminal
-# starts /bin/bash, as in tode's code-server below, and a link to localhost
-# opens in the Simple Browser: the editor's window opens no other window.
-ARG VSCODE_COMMIT
-RUN --mount=type=bind,from=vscode,target=/tmp/vscode \
-    --mount=type=bind,source=agent/vscode-patches.py,target=/tmp/vscode-patches.py \
-    if [ -f /tmp/vscode/cli.tar.gz ]; then \
-      server=/opt/vscode/serve-web/$VSCODE_COMMIT \
-      && mkdir -p /opt/vscode/bin /opt/vscode/extensions "$server" \
-      && tar -xzf /tmp/vscode/cli.tar.gz -C /opt/vscode/bin --no-same-owner \
-      && tar -xzf /tmp/vscode/server.tar.gz -C "$server" --strip-components 1 --no-same-owner \
-      && python3 /tmp/vscode-patches.py "$server" \
-      && echo "$VSCODE_COMMIT" > /opt/vscode/commit \
+# The isolated editor restores these extensions and Machine settings at startup.
+ARG INSTALL_CODE_SERVER
+RUN if [ "$INSTALL_CODE_SERVER" = 1 ]; then \
+      mkdir -p /opt/code-server/extensions \
       && printf '%s\n' '{"terminal.integrated.profiles.linux":{"bash":{"path":"/bin/bash"}},"terminal.integrated.defaultProfile.linux":"bash",' \
         '"workbench.externalUriOpeners":{"http://localhost:*":"simpleBrowser.open"}}' \
-        > /opt/vscode/machine-settings.json \
-      && chmod -R u-s,g-s,go-w /opt/vscode \
-      && test -x /opt/vscode/bin/code && test -x "$server/bin/code-server"; \
+        > /opt/code-server/machine-settings.json; \
     fi
-RUN install -d -o node -g node /home/node/.vscode /home/node/.vscode-server
+RUN install -d -o node -g node /home/node/.vscode-server
 # tode runs inside this container, Chromium and code-server included, and sends
 # the terminal only pixels; see docs/usage.md. Chromium's own sandbox needs user
 # namespaces or a setuid helper, which seccomp and no-new-privileges deny here,
@@ -202,16 +172,17 @@ RUN if [ -n "$TODE_EXTENSIONS" ]; then \
     fi
 # codeServer.extensions in claude.toml, space-separated, each optionally
 # @version. Installed at build time from the Marketplace (the agent has no
-# runtime access to it), with the server's own CLI, into /opt/vscode/extensions,
+# runtime access to it), with the server's own CLI, into /opt/code-server/extensions,
 # which agent/start-code-server.sh copies for the server at each start. The
 # build fails if an extension is not installed afterwards, compared as
 # publisher.name, or as publisher.name@version when pinned.
 ARG CODE_SERVER_EXTENSIONS=""
 RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
       code_server() { \
-        HOME=/tmp/vscode-install "/opt/vscode/serve-web/$(cat /opt/vscode/commit)/bin/code-server" \
-          --extensions-dir /opt/vscode/extensions --server-data-dir /tmp/vscode-install \
-          --accept-server-license-terms "$@"; \
+        HOME=/tmp/code-server-install \
+        EXTENSIONS_GALLERY='{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","cacheUrl":"https://vscode.blob.core.windows.net/gallery/index","controlUrl":""}' \
+        /opt/code-server/bin/code-server \
+          --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/code-server-install "$@"; \
       } \
       && set -- \
       && for id in $CODE_SERVER_EXTENSIONS; do set -- "$@" --install-extension "$id"; done \
@@ -227,7 +198,7 @@ RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
           exit 1; \
         fi; \
       done \
-      && rm -rf /tmp/vscode-install; \
+      && rm -rf /tmp/code-server-install; \
     fi
 # The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
 COPY --from=sumi /sumi /usr/local/bin/sumi

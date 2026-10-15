@@ -57,9 +57,11 @@ Dev Containers拡張をサンドボックス内で使う案は、どの方式で
 
 ## 提案構成
 
-agent内でIDEのサーバー（`code serve-web`）を動かし、ホストではそれを表示するだけの専用Electronシェルを使う。シェルは、IDEのオリジン以外へのあらゆる通信と遷移を、レンダラーの外側（ブラウザプロセスとネットワークサービス）で拒否する。
+agent内でIDEのサーバー（Coder code-server）を動かし、ホストではそれを表示するだけの専用Electronシェルを使う。シェルは、IDEのオリジン以外へのあらゆる通信と遷移を、レンダラーの外側（ブラウザプロセスとネットワークサービス）で拒否する。
 
-IDEのサーバーには、code-serverやopenvscode-serverではなく、Microsoftの公式ビルドである`code serve-web`を使う。VS Code Marketplaceの拡張を使えるからである。`code serve-web`は起動時にserverをダウンロードするが、agentは外部に接続できない。serverはバージョンとSHA-256を固定してimageのビルド時に入れ、起動時にはダウンロードさせない。
+IDEのサーバーにはCoderのcode-server 4.132.0を使う。以前の`code serve-web`では、webviewの配信先とWorkspace Trustの指定をパッチで変更していた。その保守を減らすため、同一オリジンでwebviewを配信し、`--disable-workspace-trust`を備えるcode-serverへ移行する。配布物はバージョンとSHA-256を固定し、todeと共有する。
+
+Marketplaceはtodeと同じく`EXTENSIONS_GALLERY`で指定し、拡張をビルド時に入れる。Microsoft公式ビルドからCoderのビルドへ信頼対象が変わり、内蔵VS Codeもserve-webの1.142からcode-server同梱版（commit `313bf03…`）へ下がる。Microsoft製品以外からMarketplaceを使う利用条件の懸念もtodeと共通である。code-serverの更新は別に判断する。
 
 ![構成図。部品と、許可する通信の向き](2026-10-15-electron-shell-design.png)
 
@@ -71,13 +73,12 @@ IDE、webview、agent内のWebアプリは、すべて`http://localhost`に置�
 
 | オリジン | 内容 | プロキシの転送先 |
 | --- | --- | --- |
-| `http://localhost:18000` | IDE | agentの`code serve-web` |
-| `http://localhost:18001` | webview | agentの`code serve-web`（webviewのファイル） |
+| `http://localhost:18000` | IDEとwebview | agentのcode-server |
 | `http://localhost:<port>` | agent内のWebアプリ | agentの同じポート |
 
 SameSiteはポートを区別しないので、この割り当てでは、IDE、webview、アプリが同じサイトになる。VS CodeのSimple Browserは、アプリをwebviewのiframeのさらに内側のiframeで表示する。Chromiumは、上位のフレームがすべて最上位のページと同じサイトのときだけ、iframeで`SameSite=Lax`のCookieを送る。localhostのサブドメインはそれぞれ別のサイトとして扱われるので、code-serverのように`ide.localhost`と`port-<port>.localhost`に分けると、ForgejoなどのログインのCookieが送られない。ヘッドレスChromeで、iframeで`SameSite=Lax`のCookieが送られるかを3つの割り当てで比べたところ、この割り当てでは送られた。code-serverと同じ割り当てと、webviewだけを別のホストに置いた割り当てでは、送られなかった。
 
-アプリのURLは、agentの中と同じ`http://localhost:<port>/`になる。たとえばForgejoの`ROOT_URL`は`http://localhost:3000/`のままでよい。18000番と18001番は、アプリには使えない。
+アプリのURLは、agentの中と同じ`http://localhost:<port>/`になる。たとえばForgejoの`ROOT_URL`は`http://localhost:3000/`のままでよい。18000番は、アプリには使えない。
 
 アプリは、IDEやwebviewとオリジンが異なる（ポートが異なる）ので、`X-Frame-Options: SAMEORIGIN`を返すアプリはiframeで表示されない。Forgejoも既定の設定でこのヘッダーを返す。そのため、プロキシは、agent内のWebアプリの応答から`X-Frame-Options`とCSPの`frame-ancestors`を取り除く。アプリはagentの中で動く、攻撃者が制御できるものなので、埋め込みの制限を外しても守るものは減らない。IDEとwebviewの応答は変更しない。
 
@@ -88,7 +89,7 @@ SameSiteはポートを区別しないので、この割り当てでは、IDE、
 
 ### 部品
 
-- IDEサーバー（agent内）：`code serve-web`。agentの127.0.0.1で待ち受け、ホストのポートには公開しない。`code-server-proxy`からの接続は、agentのfirewallがループバックへ転送する（[進め方](#進め方)の2）。接続トークンをかける。拡張機能もターミナルも、すべてここで動く。
+- IDEサーバー（agent内）：code-server。agentの127.0.0.1で待ち受け、ホストのポートには公開しない。`code-server-proxy`からの接続は、agentのfirewallがループバックへ転送する（[進め方](#進め方)の2）。接続トークンをかける。拡張機能もターミナルも、すべてここで動く。
 - Electronシェル（ホスト、信頼する側）：1つのウィンドウにIDEだけを表示する。専用のsession partitionを使い、認証情報は何も持たない。`nodeIntegration: false`、`contextIsolation: true`、`sandbox: true`、`webviewTag: false`、`devTools: false`、`spellcheck: false`とし、preloadスクリプトは使わない。Electronは、バージョンとSHA-256を固定して取得する。シェルのコードは、agentが書き換えられない場所に置く。
 - 許可リストプロキシ：既存の`code-server-proxy`を使う。agentとは別のコンテナで、許可リスト（`proxy.py`）をagentからは書き換えられない。[オリジンの割り当て](#オリジンの割り当て)の`localhost`のオリジン以外は拒否する。agent内のWebアプリの応答からは、`X-Frame-Options`とCSPの`frame-ancestors`を取り除く。
 
@@ -106,7 +107,7 @@ SameSiteはポートを区別しないので、この割り当てでは、IDE、
 | 権限の要求（クリップボードの読み取り、通知など） | `setPermissionRequestHandler`と`setPermissionCheckHandler`で、既定では拒否する |
 | デバイスAPI（WebHID、WebUSB、Web Serial、Web Bluetooth） | `setPermissionRequestHandler`を経由しないので、`setDevicePermissionHandler`で拒否し、`select-hid-device`などの選択イベントでは常に取り消す |
 | 画面の取得 | `setDisplayMediaRequestHandler`で拒否する |
-| webviewのリソース | 既定の`*.vscode-cdn.net`を使わず、webviewのエンドポイントを`localhost:18001`で自前で配信する |
+| webviewのリソース | 既定の`*.vscode-cdn.net`を使わず、webviewのエンドポイントを`localhost:18000`で自前で配信する |
 
 プロキシとナビゲーションの判定は、レンダラーの外側で行う。そのため、レンダラーが攻撃者の制御下に入っても、レンダラーからはこれらの判定を変更できない。
 
@@ -150,8 +151,8 @@ Windowsでは、ホスト側スクリプト群（認証情報の注入、gitのe
 
 Linuxで共通部分（シェルとプロキシ）を完成させ、既存のbubblewrapを流用してLinuxのOS層を足してから、Windowsに対応する。最後に、現行の2つのクライアントを削除する。
 
-1. PoC（Linux）：Electronシェルとagent内の`code serve-web`を、既存の`code-server-proxy`経由で接続し、強制ポイントを実装する。検証項目のうち、OSに依存しないものを確認する。
-2. webviewとagent内のWebアプリ：[オリジンの割り当て](#オリジンの割り当て)のとおりに、webviewのエンドポイントを自前で配信し、プロキシがポートで転送先を決めるようにする。公式のVS Code serverには、code-serverの`--proxy-domain`のようなポートの中継がない。agent内に中継のプロセスは置かず、agentのfirewallが`code-server-proxy`からの接続をすべてagentの127.0.0.1へDNATする。これには`net.ipv4.conf.all.route_localnet=1`が要る。127.0.0.1と0.0.0.0のどちらで待ち受けるアプリにも接続でき、ほかの送信元からの接続は、INPUTの既定のDROPで拒否される。route_localnetを有効にすると、ループバック宛てのパケットをほかのインターフェースからも受け取るので、INPUTの既定はDROPのまま保つ。この組み合わせは、network namespaceとveth、iptables（nf_tables）で動作を確かめた。ForgejoをSimple Browserで開き、ログインできることを確かめる。
+1. PoC（Linux）：Electronシェルとagent内のcode-serverを、既存の`code-server-proxy`経由で接続し、強制ポイントを実装する。検証項目のうち、OSに依存しないものを確認する。
+2. webviewとagent内のWebアプリ：[オリジンの割り当て](#オリジンの割り当て)のとおりに、webviewのエンドポイントを自前で配信し、プロキシがポートで転送先を決めるようにする。code-serverが生成する`/proxy/<port>/...`は、信頼するproxyが`http://localhost:<port>/...`へ302で戻す。パスとクエリを保持し、code-serverのパス中継には渡さない。`VSCODE_PROXY_URI`と`--proxy-domain`は指定しない。agent内に中継のプロセスは置かず、agentのfirewallが`code-server-proxy`からの接続をすべてagentの127.0.0.1へDNATする。これには`net.ipv4.conf.all.route_localnet=1`が要る。127.0.0.1と0.0.0.0のどちらで待ち受けるアプリにも接続でき、ほかの送信元からの接続は、INPUTの既定のDROPで拒否される。route_localnetを有効にすると、ループバック宛てのパケットをほかのインターフェースからも受け取るので、INPUTの既定はDROPのまま保つ。この組み合わせは、network namespaceとveth、iptables（nf_tables）で動作を確かめた。ForgejoをSimple Browserで開き、ログインできることを確かめる。
 3. LinuxのOS層：`linux/client.py`のbubblewrap（`--unshare-net`とUNIXソケットの中継）の中で、VS Codeの代わりにElectronシェルを起動する。Waylandの入力メソッドの指定（text-input-v3）も引き継ぐ。AppArmorの前提条件を整える。
 4. Windows対応：WSL2でホスト側スクリプトとDockerを動かし、シェルをWindowsで動かす。Windows固有の検証項目（外部プロトコル、WebRTC、IME）を確認する。
 5. 置き換え：現行のWindowsクライアント（`windows/`のWebView2、AppContainer、WFP）、Linuxクライアントのresolver拡張とVS Code server（8089番）、code-server（8088番）を削除し、不要になる`codeServer.vscode`の設定も削除する。既存の利用者がWFPのルールとループバック免除を消せるよう、`code-server.sh remove-network`は移行のために残す。`[codeServer]`の設定から有効にできるようにし、`code-server/README.md`と[VS Codeで開く](../../usage.md#vs-codeで開く)を書き換えて、この構成で遮断される経路と残る経路を記載する。

@@ -74,7 +74,7 @@ def flow(host, port, scheme='http', headers=()):
 class ProxyTest(unittest.TestCase):
     def test_ports_map_to_the_agent(self):
         self.assertEqual(proxy.target_for('localhost', 18000), ('agent-code-server', 18000))
-        self.assertEqual(proxy.target_for('localhost', 18001), ('agent-code-server', 18000))
+        self.assertEqual(proxy.target_for('localhost', 18001), ('agent-code-server', 18001))
         self.assertEqual(proxy.target_for('localhost', 3000), ('agent-code-server', 3000))
         for host, port in [('example.com', 80), ('127.0.0.1', 3000), ('ide.localhost', 18000),
                            ('localhost.', 3000), ('agent-code-server', 18000), ('localhost', 0), ('localhost', 65536)]:
@@ -94,7 +94,7 @@ class ProxyTest(unittest.TestCase):
             self.assertEqual(refused.response.status_code, 451)
 
     def test_connect_tunnels_to_the_agent_only(self):
-        tunnel = flow('localhost', 18001)
+        tunnel = flow('localhost', 18000)
         proxy.http_connect(tunnel)
         self.assertEqual(tunnel.server_conn.address, ('agent-code-server', 18000))
         refused = flow('example.com', 443)
@@ -117,15 +117,37 @@ class ProxyTest(unittest.TestCase):
             self.assertEqual(self.answered(3000, 302, [('Location', location)]).status_code, 451, location)
         self.assertEqual(self.answered(18000, 302, [('Location', 'http://example.com/')]).status_code, 451)
 
-    def test_webviews_may_be_framed_by_the_ide_alone(self):
-        # serve-web marks every response as unframeable by another origin,
-        # and a port is another origin: the IDE on 18000 frames 18001.
-        headers = self.answered(18001, 200, [('X-Frame-Options', 'SAMEORIGIN'),
-                                             ('Content-Security-Policy', "frame-ancestors 'self'")]).headers
-        self.assertIsNone(headers.get('x-frame-options'))
-        self.assertEqual(headers.get_all('content-security-policy'), ["frame-ancestors 'self' http://localhost:18000"])
-        headers = self.answered(18001, 200, [('Content-Security-Policy', "default-src 'self'")]).headers
-        self.assertEqual(headers.get_all('content-security-policy'), ["default-src 'self'"])
+    def test_code_server_proxy_paths_redirect_to_app_origins(self):
+        for prefix in ('/proxy', '/absproxy'):
+            for suffix, app_path in [
+                ('/', '/'),
+                ('', '/'),
+                ('?x=1', '/?x=1'),
+                ('?', '/?'),
+                ('/foo/?x=1', '/foo/?x=1'),
+                ('/foo?x=1', '/foo?x=1'),
+                ('/login?next=%2Fhome&x=1', '/login?next=%2Fhome&x=1'),
+                ('//example.com/a', '//example.com/a'),
+            ]:
+                path = f'{prefix}/3000{suffix}'
+                with self.subTest(path=path):
+                    sent = flow('localhost', 18000)
+                    sent.request.path = path
+                    proxy.request(sent)
+                    self.assertEqual(sent.response.status_code, 302)
+                    self.assertEqual(sent.response.headers.get('location'), f'http://localhost:3000{app_path}')
+                    self.assertEqual(sent.request.host, 'localhost')
+            for suffix in ('0/', '65536/', 'example.com/', '3000@evil/', '3000?x=1\r\nInjected: yes'):
+                path = f'{prefix}/{suffix}'
+                with self.subTest(path=path):
+                    sent = flow('localhost', 18000)
+                    sent.request.path = path
+                    proxy.request(sent)
+                    self.assertEqual(sent.response.status_code, 451)
+            app = flow('localhost', 3000)
+            app.request.path = f'{prefix}/4000/login'
+            proxy.request(app)
+            self.assertIsNone(app.response)
 
     def test_apps_may_be_framed_and_the_ide_is_left_alone(self):
         headers = [('X-Frame-Options', 'SAMEORIGIN'),
@@ -145,10 +167,7 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(proxy.frame_ancestors("script-src 'self';FRAME-ANCESTORS x; img-src *"),
                          "script-src 'self'; img-src *")
         self.assertEqual(proxy.frame_ancestors("frame-ancestors a, default-src b"), 'default-src b')
-        self.assertEqual(proxy.frame_ancestors("img-src *; frame-ancestors 'none'", 'http://x'),
-                         'img-src *; frame-ancestors http://x')
-        self.assertEqual(proxy.frame_ancestors("frame-ancestors a, default-src b", 'http://x'),
-                         'frame-ancestors http://x, default-src b')
+
 
 
 if __name__ == '__main__':

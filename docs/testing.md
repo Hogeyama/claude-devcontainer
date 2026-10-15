@@ -238,3 +238,37 @@ serverのCLIがMarketplaceからanthropic.claude-code 2.1.300を`/opt/vscode/ext
 - VS Codeのポートビューは表示されず、ポートの自動転送も起きませんでした。serve-webのworkbenchは、起動オプションでtunnel providerを渡さないためです。各ポートをそれ自身に対応させるtunnel providerを加えるとポートビューが戻ることは確かめましたが、アプリは転送しなくても`http://localhost:<ポート>/`で開けるので、加えないことにしました。
 - エディタやターミナルのlocalhostのリンクは、クリックしても何も起きませんでした。シェルが新しいウィンドウを拒否するためです。Machine設定に`"workbench.externalUriOpeners": {"http://localhost:*": "simpleBrowser.open"}`を置くと、手元の検証環境で、エディタのリンクのCtrl+クリックがSimple Browserのタブで開き、ページが描画されました。設定がなければ何も起きませんでした。拡張機能の`vscode.env.openExternal`はこの設定を使わないので、拡張機能が開くリンクには効きません。
 - Win+Shift+Qでウィンドウを閉じられませんでした。web版VS Codeは、閉じるときに修飾キーが押されていると`beforeunload`で閉じるのを止め（`window.confirmBeforeClose`の既定値`keyboardOnly`）、Electronはそのときウィンドウを黙って開いたままにします。シェルがこの引き留めを無視するようにし、手元の検証環境でCtrlを押したまま閉じてもElectronが終了することを確かめました。直前の編集は自動保存でファイルに書かれていました。
+
+## code-serverへの移行の検証（2026-10-15）
+
+隔離エディタを`code serve-web`からCoder code-server 4.132.0へ移行した。
+以前のserve-webと18001番に関する検証記録は、移行前の構成の記録として残す。
+
+- amd64で、`INSTALL_TODE`と`INSTALL_CODE_SERVER`の4通りすべてをビルドし、必要なときだけcode-serverとtodeが入ることを確認した。todeの画面動作はこの検証の対象外。
+- `CODE_SERVER_EXTENSIONS=anthropic.claude-code@2.1.300`でMarketplaceからのインストールと、インストール後のバージョン照合を確認した。
+- `tests/code_server_integration_test.py`は、新しいagentとproxyのimageで成功した。実際のfirewall、外部接続なしでの起動、64桁トークン、Cookie認証、WebSocket、同一オリジンのwebviewリソース、アプリの転送、`/proxy/3000/`の302を検証する。
+- `tests/electron_shell_test.py`はElectron 44.2.0で成功した。Cookieは18000番の要求に注入され、シェルから外部やホストのループバックへは到達しない。
+- `tests/code_server_browser_test.py`は、実際のcode-server、変更後のmitmproxy、headlessのElectron 44.2.0で成功した。シェルは本番の`main.js`を読み込み、Chromiumのsandboxを有効にしたまま動かした。テスト用のブラウザ側コードで画面を観察し、ポートビューへ3000番を入力した。
+
+画面テストで確認する内容は次のとおり。
+
+| 確認対象 | 確認方法 |
+| --- | --- |
+| ワークベンチの接続 | リモートの検証用拡張が起動して結果を書く |
+| webview | 同一オリジンのwebview内のスクリプトから拡張ホストへメッセージが届く |
+| Simple Browser | `localhost:3000`のページと、絶対パス`/asset.js`が実行される |
+| 変換後のURL | `asExternalUri`が返す`localhost:18000/proxy/3000/`を開き、302を経由して`localhost:3000`に戻り、ページとJavaScriptが表示・実行される |
+| ポートビュー | 3000番の行と、転送先`http://localhost:18000/proxy/3000/`が表示される |
+
+画面テストはLinuxでローカルの18000番と3000番を使い、proxyだけを一時Dockerコンテナで起動する。稼働中のagentは変更しない。単独で再実行する場合は、次のように配布物の実行ファイルを指定する。
+
+```sh
+CODE_SERVER_BROWSER_BINARY=/path/to/code-server/bin/code-server \
+ELECTRON_SHELL_TEST_ELECTRON=/path/to/electron \
+CODE_SERVER_PROXY_TEST_IMAGE=claude-code-server-proxy:test \
+python3 tests/code_server_browser_test.py
+```
+
+全体のPythonテストは239件中39件がスキップされ、4件が失敗した。失敗は、Nix環境でシェルが追加する環境変数に関する`inject_credentials_test.py`の3件と、bubblewrapがない環境でのエラー順序に関する`vscode_client_test.py`の1件。同じ4件は変更前のHEADから取り出したコードでも再現した。Windowsの画面とarm64の実行は今回検証していない。
+
+同日の実環境への反映では、`code-server.sh`と`wait-ready.sh`に旧serverの`/version`チェックが残っていることが分かり、両方を`/healthz`へ変更した。`devcontainer up --workspace-folder . --remove-existing-container`の正常終了を確認し、WindowsのElectronウィンドウを開いた。タイトルは`Welcome - workspace - code-server [agent]`で、server側でもManagementConnectionとExtensionHostConnectionの確立を確認した。Windowsでのwebviewやアプリ表示の手動確認は、この起動確認には含まない。

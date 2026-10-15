@@ -291,7 +291,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagent
 ## ホストのIMEでエディタを使う（隔離エディタ）
 
 `[codeServer] enabled = true` で、agentの`/workspace`をホストの画面とIMEで編集できます。
-agentの中で公式のVS Code（`code serve-web`）を動かし、ホストでは専用のElectronシェルがそれを表示します。
+agentの中でCoderのcode-serverを動かし、ホストでは専用のElectronシェルがそれを表示します。
 シェルは、すべての通信を専用のproxyへ送り、agentのIDEとWebアプリ以外への通信、新規ウィンドウ、外部アプリケーションの起動を拒否します。
 Linux（Wayland）では、シェルをさらにbubblewrapに入れ、ループバックしかないnetwork namespaceで動かします。
 Windows + WSLでは管理者権限を使わないので、この外側の壁はありません。

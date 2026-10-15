@@ -62,7 +62,7 @@ class PolicyTest(unittest.TestCase):
                 'https://file+.vscode-resource.vscode-cdn.net/x': False, 'file:///x': False,
             },
             'isServer': {
-                'http://localhost:18000/': True, 'ws://localhost:18000/x': True, 'http://localhost:18001/x': True,
+                'http://localhost:18000/': True, 'ws://localhost:18000/x': True, 'http://localhost:18001/x': False,
                 'http://localhost:3000/': False, 'http://example.com:18000/': False, 'http://127.0.0.1:18001/': False,
             },
             'allowsPermission': {
@@ -83,14 +83,14 @@ got.allowsRedirect = [
   policy.allowsRedirect('http://localhost:18000/', 'http://localhost:3000/'),
   policy.allowsRedirect('http://[', 'http://localhost:3000/'),
 ];
-got.ideUrl = policy.ideUrl('a&b', '/workspace');
+got.ideUrl = policy.ideUrl('/workspace');
 console.log(JSON.stringify(got));
 '''
         got = json.loads(subprocess.run(['node', '-e', script], capture_output=True, text=True, check=True).stdout)
         for name, inputs in cases.items():
             self.assertEqual(got[name], inputs, name)
         self.assertEqual(got['allowsRedirect'], [True, False, True, False])
-        self.assertEqual(got['ideUrl'], 'http://localhost:18000/?tkn=a%26b&folder=%2Fworkspace')
+        self.assertEqual(got['ideUrl'], 'http://localhost:18000/?folder=%2Fworkspace')
 
 
 class Recorder(socketserver.ThreadingTCPServer):
@@ -142,6 +142,8 @@ class Handler(socketserver.StreamRequestHandler):
         if url.path in ('/worker.js', '/sw.js'):
             name = 'shell_probe_worker.js' if url.path == '/worker.js' else 'shell_probe_sw.js'
             return self.reply(200, (FIXTURES / name).read_bytes(), {'Content-Type': 'text/javascript'})
+        if url.path == '/ok':
+            return self.reply(200, b'webview')
         if url.path == '/redirect-out':
             return self.reply(302, b'', {'Location': 'http://example.com/redirected'})
         if url.path == '/download':
@@ -201,16 +203,16 @@ class EnforcementTest(unittest.TestCase):
         self.assertTrue(recorder.done.is_set(), (tmp / 'electron.log').read_text()[-3000:])
         results = recorder.reports['/report']
 
-        self.assertEqual(recorder.requests[0], ('GET', f'http://localhost:18000/?tkn={TOKEN}&folder=%2Fworkspace'))
+        self.assertEqual(recorder.requests[0], ('GET', f'http://localhost:18000/?folder=%2Fworkspace'))
         # The token goes to the server with every request, those of a worker
         # included, and nowhere else.
         for target, cookie in recorder.cookies.items():
-            if target.startswith(('http://localhost:18000/', 'http://localhost:18001/')):
-                self.assertIn(f'vscode-tkn={TOKEN}', cookie, target)
+            if target.startswith('http://localhost:18000/'):
+                self.assertIn(f'code-server-session={TOKEN}', cookie, target)
             else:
-                self.assertNotIn('vscode-tkn', cookie, target)
+                self.assertNotIn('code-server-session', cookie, target)
         self.assertIn('http://localhost:18000/sw.js', recorder.cookies)
-        self.assertIn('http://localhost:18001/ok', recorder.cookies)
+        self.assertIn('http://localhost:18000/ok', recorder.cookies)
         self.assertEqual(results['fetch_webviews'], 200)
         targets = [target for method, target in recorder.requests]
         # Only the agent's origins reach the proxy; nothing reaches the host's loopback.

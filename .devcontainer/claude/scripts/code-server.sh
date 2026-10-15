@@ -30,7 +30,7 @@ prepare)
 open)
     # Verify the actual backend before opening the window.
     "$scripts/compose.sh" exec -T agent sh -ec \
-      'test "$CLAUDE_DEVCONTAINER_CODE_SERVER" = 1 && curl --fail --silent --noproxy "*" http://127.0.0.1:18000/version >/dev/null'
+      'test "$CLAUDE_DEVCONTAINER_CODE_SERVER" = 1 && curl --fail --silent --noproxy "*" http://127.0.0.1:18000/healthz >/dev/null'
     "$scripts/compose.sh" up -d code-server-proxy
     # The published port: compose takes a free one of its range per workspace.
     port=$("$scripts/compose.sh" port code-server-proxy 8080 | sed 's/.*://')
@@ -45,7 +45,7 @@ port = int(sys.argv[1])
 for attempt in range(60):
     conn = http.client.HTTPConnection('127.0.0.1', port, timeout=1)
     try:
-        conn.request('GET', 'http://localhost:18000/version')
+        conn.request('GET', 'http://localhost:18000/healthz')
         if conn.getresponse().status == 200:
             break
     except (OSError, http.client.HTTPException):
