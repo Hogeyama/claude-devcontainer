@@ -224,7 +224,7 @@ serverのCLIがMarketplaceからanthropic.claude-code 2.1.300を`/opt/vscode/ext
 - Linuxクライアント：bubblewrapの中でのElectronの起動（Chromiumのサンドボックスの入れ子）、Waylandでのウィンドウ表示、日本語IME。中継にUnixソケットを使うため、`tests/vscode_client_test.py`のbubblewrapの2件もこのサンドボックスでは失敗し、ほかの8件は通った。
 - Windows：シェルの起動、外部プロトコル、WebRTC、IME。
 - ユーザーの操作が要るもの：キーボードでの貼り付け、WebHIDなどの選択画面。
-- Forgejoそのものでのログイン。上の確認は代わりのサーバーで行った。
+- Forgejoそのものでのログイン。上の確認は代わりのサーバーで行った。後の「Forgejoでのレビュー」で確認した。
 
 ## Linuxで隔離エディタを開く
 
@@ -273,3 +273,13 @@ python3 tests/code_server_browser_test.py
 同日の実環境への反映では、`code-server.sh`と`wait-ready.sh`に旧serverの`/version`チェックが残っていることが分かり、両方を`/healthz`へ変更した。`devcontainer up --workspace-folder . --remove-existing-container`の正常終了を確認し、WindowsのElectronウィンドウを開いた。タイトルは`Welcome - workspace - code-server [agent]`で、server側でもManagementConnectionとExtensionHostConnectionの確立を確認した。Windowsでのwebviewやアプリ表示の手動確認は、この起動確認には含まない。
 
 その後、認証情報の読み込みでシェル起動時の環境変数を除外するよう修正し、Linuxクライアントでは起動トークンを依存ツールより先に検査するよう変更した。回帰テストを3件追加し、全体のPythonテストは242件、失敗なし、39件スキップで完了した。また、WindowsのTerminalでCtrl-VがClipboard APIの読み取り拒否により失敗するという利用者の報告を受け、READMEの「キーボードでの貼り付けは動く」という説明を訂正した。クリップボードの権限は変更していない。
+
+## Forgejoでのレビュー（2026-10-15）
+
+code-server、Dev Container、Forgejoを組み合わせて、レビューを通しで確認しました。
+
+- agentの中で、nixのユーザープロファイルにあるForgejo 16.0.1を、SQLiteと`0.0.0.0:3000`で起動しました。`forgejo admin user create`で`reviewer`のアカウントを作り、このリポジトリの`acp-shared`をHTTPでpushしました。
+- 直近3コミット（`d100588`、`b14238a`、`9981ab3`）の親`f012497`を`review-base`ブランチとしてpushし、`acp-shared`から`review-base`へのPRを作りました。PRには、この3コミットだけが入りました。
+- 利用者は、code-serverとDev Containerの環境から`http://localhost:3000/`を開いて`reviewer`でログインし、PRの「Files changed」で行にコメントを付けて、レビューを送りました。
+- agentは、Forgejoの API（`/pulls/1/reviews`と各レビューの`/comments`）から、コメントのファイル、行、コミット、本文を読み取れました。
+- Forgejoとデータは、そのセッションの一時領域に置いたもので、リポジトリには残っていません。
