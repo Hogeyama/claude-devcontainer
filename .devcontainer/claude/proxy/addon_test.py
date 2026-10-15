@@ -8,9 +8,14 @@ from unittest.mock import patch
 from mitmproxy import connection, http
 from mitmproxy.test import tflow
 
-import addon
-from addon import PolicyAddon
 import policy
+import workspace_config
+
+# addon reads on import the proxy.json that the image build installs, which a
+# run outside the image lacks; each test sets the routes it needs.
+with patch.object(workspace_config, 'installed', return_value=policy.parse({})):
+    import addon
+    from addon import PolicyAddon
 
 CREDENTIALS = ('managed-anthropic', 'api-key')
 # The GitHub part of template/claude.toml.

@@ -2,7 +2,8 @@ The proxy policy is defined in `addon.py`, with host settings for workspace
 hosts, connectors and web search. Rebuild the image from the host to change
 the code; never mount an agent-editable addon into the running proxy.
 
-Run unit tests with Python and `proxy/requirements.txt` installed:
+Run unit tests from `.devcontainer/claude`, with Python and
+`proxy/requirements.txt` installed:
 
 ```sh
 python -m unittest discover -s proxy -p '*_test.py' -v
