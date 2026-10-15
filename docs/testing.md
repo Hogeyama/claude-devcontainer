@@ -202,7 +202,7 @@ workspace側の拡張機能として、webviewを開いてからSimple Browser�
 
 - webviewの`index.html`は、自分のホスト名が親のオリジンのハッシュでないと起動しない。`localhost:18001`では起動しなかった。
 - IDEのページのCSPは、`frame-src`を`*.vscode-cdn.net`に限っていた。
-- webviewはService Workerをmoduleとして登録する。module形式のService Workerのスクリプトは、仕様上Cookieなしで取得されるので、接続トークンがなく403になった。classic形式で登録すると、Cookieが付いて200になった。スクリプトにmodule構文はない。
+- webviewはService Workerをmoduleとして登録する。module形式のService Workerのスクリプトは、仕様上Cookieなしで取得されるので、接続トークンがなく403になった。classic形式で登録すると、Cookieが付いて200になった。スクリプトにmodule構文はない。その後、シェルがserverへのすべての要求にトークンのCookieを付けるようにして、この書き換えはやめた。module形式のままで、webviewが表示されることを確かめた。
 
 ### Dockerでの確認
 

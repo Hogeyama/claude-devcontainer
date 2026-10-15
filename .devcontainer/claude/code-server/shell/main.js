@@ -55,6 +55,18 @@ async function lockDown(ses) {
   ses.webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: !policy.allowsRequest(details.url) });
   });
+  // The connection token goes with every request to the server, also those
+  // that a page sends without cookies, as a module service worker's script.
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = details.requestHeaders;
+    if (policy.isServer(details.url)) {
+      const name = Object.keys(headers).find((key) => key.toLowerCase() === 'cookie') || 'Cookie';
+      const cookies = (headers[name] || '').split(';').map((cookie) => cookie.trim())
+        .filter((cookie) => cookie && !cookie.startsWith('vscode-tkn='));
+      headers[name] = [...cookies, `vscode-tkn=${token}`].join('; ');
+    }
+    callback({ requestHeaders: headers });
+  });
   // A redirect is checked as the response arrives, before it is followed.
   ses.webRequest.onHeadersReceived((details, callback) => {
     const location = Object.entries(details.responseHeaders || {})

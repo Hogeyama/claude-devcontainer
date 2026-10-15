@@ -61,6 +61,10 @@ class PolicyTest(unittest.TestCase):
                 'wss://localhost:18000/': False, 'ws://example.com/': False, 'http://127.0.0.1:18000/': False,
                 'https://file+.vscode-resource.vscode-cdn.net/x': False, 'file:///x': False,
             },
+            'isServer': {
+                'http://localhost:18000/': True, 'ws://localhost:18000/x': True, 'http://localhost:18001/x': True,
+                'http://localhost:3000/': False, 'http://example.com:18000/': False, 'http://127.0.0.1:18001/': False,
+            },
             'allowsPermission': {
                 'clipboard-sanitized-write': True, 'clipboard-read': False, 'notifications': False,
                 'openExternal': False, 'media': False, 'geolocation': False, 'fullscreen': False, 'hid': False,
@@ -97,6 +101,7 @@ class Recorder(socketserver.ThreadingTCPServer):
     def __init__(self, canary):
         self.canary = canary
         self.requests = []
+        self.cookies = {}
         self.reports = {}
         self.done = threading.Event()
         super().__init__(('127.0.0.1', 0), Handler)
@@ -114,6 +119,7 @@ class Handler(socketserver.StreamRequestHandler):
         method, target, _ = line.split(' ', 2)
         body = self.rfile.read(int(headers.get('content-length', 0)))
         self.server.requests.append((method, target))
+        self.server.cookies[target] = headers.get('cookie', '')
         if method == 'CONNECT':
             self.wfile.write(b'HTTP/1.1 200 Connection established\r\n\r\n')
             return
@@ -196,6 +202,16 @@ class EnforcementTest(unittest.TestCase):
         results = recorder.reports['/report']
 
         self.assertEqual(recorder.requests[0], ('GET', f'http://localhost:18000/?tkn={TOKEN}&folder=%2Fworkspace'))
+        # The token goes to the server with every request, those of a worker
+        # included, and nowhere else.
+        for target, cookie in recorder.cookies.items():
+            if target.startswith(('http://localhost:18000/', 'http://localhost:18001/')):
+                self.assertIn(f'vscode-tkn={TOKEN}', cookie, target)
+            else:
+                self.assertNotIn('vscode-tkn', cookie, target)
+        self.assertIn('http://localhost:18000/sw.js', recorder.cookies)
+        self.assertIn('http://localhost:18001/ok', recorder.cookies)
+        self.assertEqual(results['fetch_webviews'], 200)
         targets = [target for method, target in recorder.requests]
         # Only the agent's origins reach the proxy; nothing reaches the host's loopback.
         self.assertEqual([t for t in targets if not t.startswith(('http://localhost:', 'localhost:'))], [])

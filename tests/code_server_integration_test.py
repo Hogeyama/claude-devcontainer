@@ -138,7 +138,9 @@ class CodeServerIntegrationTest(unittest.TestCase):
             if 'frame-ancestors' in policy:
                 self.assertIn("frame-ancestors 'self' http://localhost:18000", policy)
         self.assertIn(b"location.origin === 'http://localhost:18001' && parentOrigin === 'http://localhost:18000'", body)
-        self.assertNotIn(b"type: 'module'", body)
+        # The script needs the token, as every file of the server does. The webview
+        # fetches the script of its module service worker without cookies;
+        # the shell's own cookie (shell/main.js) carries the token then.
         self.assertEqual(request('GET', f'http://localhost:18001/stable-{commit}/{PRE}/service-worker.js', cookie)[0], 200)
         upgrade(['localhost:18000',
                  f'GET /stable-{commit}?reconnectionToken=test&reconnection=false&skipWebSocketFrames=false HTTP/1.1',

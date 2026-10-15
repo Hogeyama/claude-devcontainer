@@ -40,6 +40,7 @@ async function report(path, body) {
 
 (async () => {
   await attempt('fetch_app', () => status('http://localhost:3000/ok'));
+  await attempt('fetch_webviews', () => status('http://localhost:18001/ok'));
   await attempt('fetch_external', () => status('http://example.com/fetch'));
   await attempt('fetch_loopback', () => status(`http://127.0.0.1:${CANARY}/fetch`));
   await attempt('fetch_localhost_subdomain', () => status('http://app.localhost:3000/fetch'));

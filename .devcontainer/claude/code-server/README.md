@@ -130,7 +130,7 @@ agentでは、`agent/start-code-server.sh`が`code serve-web`を127.0.0.1の1800
 
 - VS CodeのCLIとweb版serverは、`agent/Dockerfile`がcommitとSHA-256を固定してimageのビルド時に入れます。serve-webは起動時にserverをダウンロードしようとしますが、同じcommitのserverを見つけるとダウンロードしません。agentは外部に接続できないので、取得はビルド時に限ります。
 - `codeServer.extensions` は、ビルド時にserverのCLIでMarketplaceから入れます。見つからない拡張や、指定したバージョンが入らなかった場合はビルドが失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直すので、リストの内容に戻ります。
-- 接続トークンはagentの起動のたびに作り直し、`/run/claude-devcontainer/vscode-token`に置きます。`open`がこれを読んでシェルに渡し、シェルは最初のURLでserverに渡します。以後はCookieで送ります。
+- 接続トークンはagentの起動のたびに作り直し、`/run/claude-devcontainer/vscode-token`に置きます。`open`がこれを読んでシェルに渡し、シェルはserver（18000番と18001番）へのすべての要求にトークンのCookieを付けます。webviewのService Workerのスクリプトのように、ページがCookieを付けずに送る要求も含みます。
 - VS Codeのweb版は、webviewのページを`*.vscode-cdn.net`から読み込みます。この構成では`localhost:18001`から配信するため、`agent/vscode-patches.py`がビルド時にserverの3つのファイルを書き換えます。serve-webはすべての応答に、別のオリジンのiframeに入れることを禁じるヘッダーを付けます。ポートが違えばオリジンも違うので、proxyは18001番の応答だけ、IDE（18000番）のiframeに入れることを許すよう書き換えます。
 - Workspace Trustは無効にしてあり、制限モードにはなりません。agentのworkspaceはもともと攻撃者が書き換えられるもので、agentのClaude Codeも最初から信頼しています。制限モードは、agentの中の拡張機能を止めるだけで、ホストを守りません。serve-webにはserverへこの指定を渡す方法がないので、同じスクリプトがserverの起動スクリプトに`--disable-workspace-trust`を加えます。
 - VS Codeを更新するときは、Dockerfileのcommitとハッシュを変えてください。`agent/vscode-patches.py`が書き換える文字列が見つからなければ、ビルドが失敗します。

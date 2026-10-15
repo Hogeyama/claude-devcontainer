@@ -26,10 +26,8 @@ server as the IDE's localhost:18000, which serves the webview's files under
   frames of vscode-cdn.net.
 - the webview's index.html: it starts only on a host named after a hash of
   the page's origin. Here every page is on localhost, so the check proves
-  nothing; it accepts the IDE's origin. It registers its service worker as
-  a module, whose script is fetched without cookies, and so without the
-  connection token; a classic one is fetched with them, and the script has
-  no module syntax. The CSP takes the script's new hash.
+  nothing; it accepts the IDE's origin, and the CSP takes the script's new
+  hash.
 
 Usage: vscode-patches.py SERVER_DIRECTORY
 """
@@ -65,8 +63,6 @@ def patch_index(text):
     script = replace(match[2], "if (hostname === parentOriginHash || hostname.startsWith(parentOriginHash + '.')) {",
                      f"if (location.origin === '{WEBVIEWS}' && parentOrigin === '{IDE}') {{",
                      1, PRE + 'index.html')
-    script = replace(script, "navigator.serviceWorker.register(swPath, { type: 'module', updateViaCache: 'none' })",
-                     "navigator.serviceWorker.register(swPath, { updateViaCache: 'none' })", 1, PRE + 'index.html')
     text = replace(text, script_hash(match[2]), script_hash(script), 1, PRE + 'index.html')
     return text[:match.start(2)] + script + text[match.end(2):]
 

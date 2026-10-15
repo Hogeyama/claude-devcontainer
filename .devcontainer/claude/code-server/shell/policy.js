@@ -41,6 +41,12 @@ function isAgentBlob(url) {
     && parse(url.slice('blob:'.length)).protocol === 'http:';
 }
 
+// A URL of the server's: the IDE or its webviews.
+function isServer(url) {
+  const parsed = isAgent(url) ? parse(url) : null;
+  return parsed !== null && [String(IDE_PORT), String(WEBVIEW_PORT)].includes(parsed.port);
+}
+
 // A frame may show the agent's pages, its own blob: URLs, and the empty
 // documents that iframes start with. Nothing else: no other site, file: or
 // data: document, and no external protocol (vscode:, ms-settings:, mailto:).
@@ -82,5 +88,5 @@ function ideUrl(token, folder) {
 }
 
 module.exports = {
-  IDE_PORT, WEBVIEW_PORT, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, ideUrl,
+  IDE_PORT, WEBVIEW_PORT, isServer, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, ideUrl,
 };
