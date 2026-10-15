@@ -340,6 +340,9 @@ def report(bwrap, electron, wayland):
 
 async def outside(args):
     """On the host: the bridge socket to the proxy, and bwrap around inside()."""
+    token = os.environ.get(TOKEN, '')
+    if not token and not (args.probe or args.check or args.prepare):
+        fail(f'no connection token in {TOKEN}; open the editor with code-server.sh open')
     bwrap = shutil.which('bwrap') or fail('bubblewrap (bwrap) is required on the host')
     wayland = None if args.probe else wayland_socket()
     if args.check:
@@ -350,9 +353,6 @@ async def outside(args):
     if args.prepare:
         report(bwrap, ensure_electron(), wayland)
         return 0
-    token = os.environ.get(TOKEN, '')
-    if not token and not args.probe:
-        fail(f'no connection token in {TOKEN}; open the editor with code-server.sh open')
     electron = None if args.probe else ensure_electron()
     home = state_directory() / 'home'
     home.mkdir(mode=0o700, parents=True, exist_ok=True)

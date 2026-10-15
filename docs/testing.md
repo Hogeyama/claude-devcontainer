@@ -272,3 +272,5 @@ python3 tests/code_server_browser_test.py
 全体のPythonテストは239件中39件がスキップされ、4件が失敗した。失敗は、Nix環境でシェルが追加する環境変数に関する`inject_credentials_test.py`の3件と、bubblewrapがない環境でのエラー順序に関する`vscode_client_test.py`の1件。同じ4件は変更前のHEADから取り出したコードでも再現した。Windowsの画面とarm64の実行は今回検証していない。
 
 同日の実環境への反映では、`code-server.sh`と`wait-ready.sh`に旧serverの`/version`チェックが残っていることが分かり、両方を`/healthz`へ変更した。`devcontainer up --workspace-folder . --remove-existing-container`の正常終了を確認し、WindowsのElectronウィンドウを開いた。タイトルは`Welcome - workspace - code-server [agent]`で、server側でもManagementConnectionとExtensionHostConnectionの確立を確認した。Windowsでのwebviewやアプリ表示の手動確認は、この起動確認には含まない。
+
+その後、認証情報の読み込みでシェル起動時の環境変数を除外するよう修正し、Linuxクライアントでは起動トークンを依存ツールより先に検査するよう変更した。回帰テストを3件追加し、全体のPythonテストは242件、失敗なし、39件スキップで完了した。また、WindowsのTerminalでCtrl-VがClipboard APIの読み取り拒否により失敗するという利用者の報告を受け、READMEの「キーボードでの貼り付けは動く」という説明を訂正した。クリップボードの権限は変更していない。

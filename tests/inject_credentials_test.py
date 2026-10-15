@@ -4,6 +4,8 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -245,6 +247,26 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(snapshot, {'anthropic_token': 't', 'auth_mode': 'api-key', 'secrets': {'GITHUB_TOKEN': 'pat'}})
         self.assertIn('REDMINE_API_KEY', str(log.call_args))
         self.assertNotIn('pat', str(log.call_args))
+
+    def test_shell_launcher_environment_is_not_a_secret(self):
+        shell = shutil.which('sh')
+        bin_dir = self.config.parent / 'bin'
+        bin_dir.mkdir()
+        wrapper = bin_dir / 'sh'
+        wrapper.write_text(
+            f'#!{sys.executable}\n'
+            'import os, sys\n'
+            'os.environ["STARTUP_ONLY"] = "from-wrapper"\n'
+            'os.environ["OVERRIDDEN"] = "from-wrapper"\n'
+            f'os.execv({shell!r}, [{shell!r}, *sys.argv[1:]])\n')
+        wrapper.chmod(0o755)
+        values = self.load('GITHUB_TOKEN=gh\nOVERRIDDEN=from-file\n',
+                           PATH=f'{bin_dir}:{os.environ["PATH"]}')
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh', 'OVERRIDDEN': 'from-file'})
+
+    def test_failed_credentials_file_is_not_used(self):
+        with self.assertRaisesRegex(inject_credentials.Unavailable, 'exit code 1'):
+            self.load('GITHUB_TOKEN=partial\nfalse\n')
 
 
 class WatchTest(unittest.TestCase):

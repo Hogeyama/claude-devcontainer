@@ -1,4 +1,6 @@
 """The Linux client's sandbox (code-server/linux/client.py); bwrap on the host runs the probe."""
+import argparse
+import asyncio
 import importlib.util
 import json
 import os
@@ -105,6 +107,16 @@ class ClientTest(unittest.TestCase):
                                 env=env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(client.TOKEN, result.stderr)
+
+    def test_diagnostic_modes_do_not_need_the_token(self):
+        for mode in ('check', 'prepare', 'probe'):
+            with self.subTest(mode=mode):
+                args = argparse.Namespace(check=False, prepare=False, probe=False)
+                setattr(args, mode, True)
+                with (mock.patch.dict(os.environ, {}, clear=True),
+                      mock.patch.object(client.shutil, 'which', return_value=None)):
+                    with self.assertRaisesRegex(SystemExit, 'bubblewrap'):
+                        asyncio.run(client.outside(args))
 
     @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap is not installed')
     def test_bwrap_probe_reaches_only_the_relay(self):

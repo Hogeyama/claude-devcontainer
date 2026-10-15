@@ -174,7 +174,7 @@ proxyは、アプリの応答から`X-Frame-Options`とCSPの`frame-ancestors`�
 - Windowsでは、シェルの判定とproxyの許可リストのほかに壁がありません。Linuxでは、その外側にbubblewrapがあります。
 - Electronのセキュリティ修正に追従するため、`electron.py`のバージョンとハッシュを更新し続ける必要があります。
 - GitHubへのログイン、Settings Sync、実行時のMarketplaceへの接続、外部サイトのプレビューは使えません。
-- 右クリックメニューからの貼り付けは、クリップボードの読み取り権限が要るので動きません。キーボードでの貼り付けとコピーは動きます。
+- Clipboard APIの読み取りを拒否しているため、右クリックメニューからの貼り付けとTerminalのCtrl-Vは動きません。TerminalのCtrl-Vは`Unable to read from the browser's clipboard`というエラーになります。通常のpasteイベントを使う操作とは別の経路です。Shift+Insertで回避できるという[code-server側の報告](https://github.com/coder/code-server/discussions/6623)はありますが、このシェルでは未確認です。
 - すべてのwebviewが同じオリジン（`localhost:18000`）になります。VS Codeの既定では、webviewごとにオリジンが分かれます。
 - Cookieはポートを区別しないので、IDEの接続トークンのCookieは、agent内のWebアプリにも送られます。agentはもともとIDEのserverを動かしているので、トークンを得ても新たにできることはありません。
 - proxyはローカル認証なしです。同一ホスト上の他ユーザーを敵とする環境や、EC2などへ公開するための認証やTLSの構成には対応していません。接続トークンは、ホストの同じユーザーなら読めます。
