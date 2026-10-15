@@ -14,31 +14,32 @@
 
 ## 構成
 
-すべてコミット対象で、agentのcloneにも入る。
+すべてコミット対象で、agentのcloneにも入る。アプリとそのComposeファイルは`demos/`配下に置く。以下のワークフローのコマンドは`demos/`を作業ディレクトリとして実行する。
 
 ```
-frontend/               # React + Viteのpnpmパッケージ(単独プロジェクト、workspaceではない)
-  package.json          #   react, react-dom / vite, @vitejs/plugin-react, vitest, testcontainers
-  pnpm-workspace.yaml   #   verifyDepsBeforeRun: warn, allowBuilds
-  vite.config.js, index.html, src/…
-  test/containers.test.js   # vitest + testcontainers: busybox httpdを起動しfetchで検証
-  Dockerfile            # FROM nginx:alpine, COPY dist + nginx.conf
-  nginx.conf            # 静的配信 + /api/をbackend:8080へproxy
-backend/                # JavalinのGradleプロジェクト(application plugin + installDist)
-  gradlew, gradle/wrapper/…, settings.gradle, build.gradle
-  src/main/java/…       # GET /api/messageがPostgresのメッセージを返す
-                        # (起動時にCREATE TABLE + seed INSERT)
-  src/test/java/…       # JUnit5 + Testcontainers: PostgreSQLContainerでrepositoryを検証
-  src/test/resources/testcontainers.properties  # ryukを0.14.0に固定
-  Dockerfile            # FROM eclipse-temurin:17-jre-alpine, COPY build/install/backend
-compose.yaml            # DinD側のアプリスタック(db + backend + frontend)
+demos/
+  frontend/               # React + Viteのpnpmパッケージ(単独プロジェクト、workspaceではない)
+    package.json          #   react, react-dom / vite, @vitejs/plugin-react, vitest, testcontainers
+    pnpm-workspace.yaml   #   verifyDepsBeforeRun: warn, allowBuilds
+    vite.config.js, index.html, src/…
+    test/containers.test.js   # vitest + testcontainers: busybox httpdを起動しfetchで検証
+    Dockerfile            # FROM nginx:alpine, COPY dist + nginx.conf
+    nginx.conf            # 静的配信 + /api/をbackend:8080へproxy
+  backend/                # JavalinのGradleプロジェクト(application plugin + installDist)
+    gradlew, gradle/wrapper/…, settings.gradle, build.gradle
+    src/main/java/…       # GET /api/messageがPostgresのメッセージを返す
+                          # (起動時にCREATE TABLE + seed INSERT)
+    src/test/java/…       # JUnit5 + Testcontainers: PostgreSQLContainerでrepositoryを検証
+    src/test/resources/testcontainers.properties  # ryukを0.14.0に固定
+    Dockerfile            # FROM eclipse-temurin:17-jre-alpine, COPY build/install/backend
+  compose.yaml            # DinD側のアプリスタック(db + backend + frontend)
 .devcontainer/
   prepare-deps.sh       # overlay用ディレクトリ作成と.envへのlowerdir書き出し
-  compose.yaml          # frontend/node_modules用の第2 overlay volumeを追加
+  compose.yaml          # demos/frontend/node_modules用の第2 overlay volumeを追加
   devcontainer.json     # initializeCommandがprepare-deps.shを呼ぶ
 ```
 
-### ルートcompose.yaml
+### demos/compose.yaml
 
 - `db`: postgres:16-alpine、healthcheckは`pg_isready`
 - `backend`: `build: ./backend`、JDBC接続先は環境変数、`depends_on: db: service_healthy`
@@ -64,7 +65,7 @@ aptの`gradle`行を削り`openjdk-17`のみにする。4.4.1ではプロジェ�
 
 ### .gitignore
 
-`node_modules/`、`frontend/dist/`、`backend/build/`、`backend/.gradle/`を追加する。
+`node_modules/`、`demos/frontend/dist/`、`demos/backend/build/`、`demos/backend/.gradle/`を追加する。
 
 ### ドキュメント
 

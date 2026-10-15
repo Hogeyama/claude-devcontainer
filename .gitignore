@@ -9,6 +9,6 @@ __pycache__/
 claude.local.toml
 node_modules/
 .pnpm-store/
-/frontend/dist/
-/backend/build/
-/backend/.gradle/
+/demos/frontend/dist/
+/demos/backend/build/
+/demos/backend/.gradle/

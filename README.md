@@ -342,16 +342,17 @@ sumiのデモ用の公開値を`.secrets/sumi/secrets.txt`にコミットして�
 
 `.devcontainer/`直下のファイルは、取り込んだ後の状態を示す例です。たとえば`agent-setup.sh`はJDKを入れ、`compose.yaml`はホストの`~/.gradle`をagentの`~/.gradle`にcopy-on-writeでmountします。agentのGradleはホストで取得済みの配布物と依存でオフラインに動き、agentが書き込んだものは`~/.local/state/claude-devcontainer/gradle-home/upper`に残ってホストの`~/.gradle`には入りません。agentの起動中は、ホストでGradleを実行しないでください（overlayfsは、mount中に下の層が変わったときの動作を定めていません）。どれもこのリポジトリの開発には使いません。自分のリポジトリでは`.devcontainer/claude/template/`のテンプレートから始めてください。
 
-依存の共有とDinDのデモとして、ルートに小さなアプリを置いています。
+依存の共有とDinDのデモとして、`demos/`に小さなアプリを置いています。
 
-- `frontend/`: pnpmで管理するReact+Viteのフロントエンド。`frontend/node_modules`は`compose.yaml`が追加する2番目のoverlayでホストとCoW共有します（lowerdirは`prepare-deps.sh`が`.devcontainer/.env`に書き出す絶対パス）。vitestとtestcontainersのテストがあり、DinD上にbusyboxを起動してHTTPを検証します
-- `backend/`: Javalinのバックエンド。Gradleはwrapper経由で、配布物と依存はホストの`~/.gradle`から供給します。`/api/message`がPostgresの値を返します。JUnitとTestcontainersのテストがあり、DinD上に`postgres:16-alpine`を起動します
-- `compose.yaml`: 上の2つとPostgresを協調して起動するアプリ用のスタック。agentの中ではDinDで動き、`3000:80`のpublishがdind-bridgeでagentの`127.0.0.1:3000`に中継されます。ホストでもそのまま起動できます
+- `demos/frontend/`: pnpmで管理するReact+Viteのフロントエンド。`demos/frontend/node_modules`は`.devcontainer/compose.yaml`が追加する2番目のoverlayでホストとCoW共有します（lowerdirは`prepare-deps.sh`が`.devcontainer/.env`に書き出す絶対パス）。vitestとtestcontainersのテストがあり、DinD上にbusyboxを起動してHTTPを検証します
+- `demos/backend/`: Javalinのバックエンド。Gradleはwrapper経由で、配布物と依存はホストの`~/.gradle`から供給します。`/api/message`がPostgresの値を返します。JUnitとTestcontainersのテストがあり、DinD上に`postgres:16-alpine`を起動します
+- `demos/compose.yaml`: 上の2つとPostgresを協調して起動するアプリ用のスタック。agentの中ではDinDで動き、`3000:80`のpublishがdind-bridgeでagentの`127.0.0.1:3000`に中継されます。ホストでもそのまま起動できます
 
 依存の取得ができるのはホストだけなので、先にホストで用意します。
 
 ```sh
-# ホスト（nix developの中）
+# ホスト（リポジトリルートでnix developに入った後）
+cd demos
 pnpm -C frontend install
 cd backend && ./gradlew build
 ```
@@ -359,6 +360,7 @@ cd backend && ./gradlew build
 agentの中では、共有された依存でテストと起動ができます。
 
 ```sh
+cd /workspace/demos
 pnpm -C frontend test                          # busyboxコンテナへのfetch
 cd backend && ./gradlew --offline test; cd ..  # Testcontainers + postgres
 pnpm -C frontend build && cd backend && ./gradlew --offline installDist && cd ..
@@ -366,6 +368,8 @@ docker compose up -d                           # DinD上でdb→backend→fronte
 playwright-cli open http://localhost:3000
 playwright-cli screenshot --filename demo.png
 ```
+
+`demos/`への移動前から使っている環境では、`devcontainer up --remove-existing-container`でマウント先を更新してください。frontendの依存共有には、新しい`demos-frontend-node-modules` volumeと専用のupper/workディレクトリを使います。
 
 agentに必要なイメージは`claude.toml`の`docker.images`に書いてあります。
 

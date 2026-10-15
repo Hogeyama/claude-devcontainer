@@ -2,6 +2,7 @@
 # together. Inside the agent it runs on DinD (DOCKER_HOST=tcp://127.0.0.1:2375);
 # on the host it uses the local Docker. Build the artifacts first:
 #
+#   cd demos
 #   pnpm -C frontend build
 #   cd backend && ./gradlew installDist   # --offline inside the agent
 services:
