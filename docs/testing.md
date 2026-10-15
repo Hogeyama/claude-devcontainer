@@ -1,12 +1,12 @@
 # テストと動作確認の結果
 
-2026-10-12にagentの中（DinD）で行った、デモアプリのテストとcompose stackの確認結果です。
+2026-10-12にagentの中（DinD）で行った、デモアプリのテストとcompose stackの確認結果です。当時はデモアプリがリポジトリ直下（`frontend/`、`backend/`、`compose.yaml`）にあり、コマンドやネットワーク名はその配置でのものです。現在は`demos/`の下にあります。
 
 ## テスト
 
 | 対象 | 結果 | 内容 |
 | --- | --- | --- |
-| frontend | 1 file, 1 test passed | [frontend/test/containers.test.js](../demos/frontend/test/containers.test.js)。busyboxコンテナのHTTP応答（`dind-ok`）を確認。テスト本体は549ms、vitest全体は812ms |
+| frontend | 1 file, 1 test passed | [demos/frontend/test/containers.test.js](../demos/frontend/test/containers.test.js)。busyboxコンテナのHTTP応答（`dind-ok`）を確認。テスト本体は549ms、vitest全体は812ms |
 | backend | BUILD SUCCESSFUL。1 test, 0 failures, 0 errors, 0 skipped | [MessageRepositoryTest.java](../demos/backend/src/test/java/demo/MessageRepositoryTest.java)。`readsTheSeededMessage`が2.071秒で成功。内訳は Ryuk の起動約0.46秒、postgres の起動約1.06秒 |
 
 frontendの実行時に`node_modules are out of sync with your lockfile`のWARNが出ましたが、テストは通りました。`pnpm-workspace.yaml`の`verifyDepsBeforeRun: warn`による表示です。
@@ -28,7 +28,7 @@ frontendの実行時に`node_modules are out of sync with your lockfile`のWARN�
 ## 画面のスクリーンショット
 
 - `http://127.0.0.1:3000/`の表示は、見出し「claude-devcontainer demo」と本文「backend says: hello from postgres」でした。
-- 保存したスクリーンショットは[demo-compose.png](../.local/tmp/claude-1000/-workspace/40e692b9-cf2a-4dc8-a924-f66ca82d2558/scratchpad/demo-compose.png)です。
+- スクリーンショットは当時のセッションの一時領域に保存したもので、リポジトリには残っていません。
 - 最初に待たずに撮った画像は、描画前の状態でした。後で待ってから撮り直し、同じファイル名で上書きしました。
 
 ## 停止
