@@ -4,8 +4,8 @@
 # The variables below come from .devcontainer/.generated/settings.env, which
 # initializeCommand writes from .devcontainer/claude.toml and claude.local.toml
 # (scripts/settings.py describes them and the names); never set them otherwise.
-# Features are 0 or 1: compose can neither add a service nor a mount
-# conditionally, so the values select a scale and a path instead.
+# Optional services use a scale of 0 or 1. Conditional mounts are written
+# to .generated/workspace.compose.yaml by scripts/settings.py.
 services:
   agent:
     labels:
@@ -88,12 +88,6 @@ services:
       # The isolated editor's server data: Machine settings and the state of
       # its extensions. The user settings are the editor window's own.
       - vscode-server-data:/home/node/.vscode-server
-      # features/nix-1 links to /nix/store; features/nix-0 is empty.
-      - type: bind
-        source: ./features/nix-${CLAUDE_DEVCONTAINER_NIX:-0}
-        target: /nix/store
-        read_only: true
-        bind: {create_host_path: false}
     # Markers of the host's startup work, which wait-ready.sh waits for. A
     # restart clears them, so a stale one cannot end the wait early.
     tmpfs:
