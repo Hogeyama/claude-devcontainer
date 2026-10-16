@@ -17,7 +17,7 @@ they read to .devcontainer/.generated/:
   proxy.json    the merged proxy.hosts, which the proxy image build installs.
   images.txt    docker.images, one per line, for load-images.py and wait-ready.sh.
   agent.env     the dummy tokens that proxy.hosts' env names, for the agent.
-  workspace.compose.yaml  the /workspace mount selected by git.isolation.
+  workspace.compose.yaml  workspace mounts and the optional Nix store mount.
   hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
 The settings come from these files only. A variable of settings.env in the
@@ -439,6 +439,9 @@ def workspace_compose(settings, root):
         mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),
                    'target': '/workspace', 'bind': {'create_host_path': False}}]
         mounts += shared_mounts(settings, root)
+    if settings['nix']['enabled']:
+        mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
+                       'read_only': True, 'bind': {'create_host_path': False}})
     # JSON is YAML; escape Compose interpolation separately from serialization.
     return json.dumps({'services': {'agent': {'volumes': mounts}}}, indent=2).replace('$', '$$') + '\n'
 

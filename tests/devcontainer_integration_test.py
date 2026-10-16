@@ -331,11 +331,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         for mount in actual:
             if mount['Type'] == 'bind' and Path(mount['Source']).is_relative_to(self.workspace):
                 self.assertFalse(mount['RW'])
-                if mount['Destination'] == '/nix/store':
-                    # The disabled Nix feature mounts this empty core directory.
-                    self.assertEqual(mount['Source'], str(self.workspace / '.devcontainer/claude/features/nix-0'))
-                else:
-                    self.assertIn(mount['Destination'], ('/run/host/generated', '/run/host/nix-env'))
+                self.assertIn(mount['Destination'], ('/run/host/generated', '/run/host/nix-env'))
+        self.assertFalse(any(m['Destination'] == '/nix/store' for m in actual))
 
     def test_read_only_dependency_bind(self):
         # The entrypoint and the initial clone accepted it during setUpClass.

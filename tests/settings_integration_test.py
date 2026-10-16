@@ -79,6 +79,26 @@ class SettingsIntegrationTest(unittest.TestCase):
                                  capture_output=True, text=True, check=True)
         return json.loads(compose.stdout)
 
+    def test_nix_store_mount_is_conditional_in_both_workspace_modes(self):
+        self.initialize()
+        for mode in ('clone', 'shared'):
+            for enabled in (False, True, False):
+                with self.subTest(mode=mode, enabled=enabled):
+                    self.write('claude.toml', f'[git]\nisolation = "{mode}"\n'
+                               f'[nix]\nenabled = {str(enabled).lower()}\n')
+                    subprocess.run(['python3', str(self.config / 'claude/scripts/settings.py'), 'generate'],
+                                   cwd=self.root, env=self.env, check=True, capture_output=True)
+                    agent = self.compose_config()['services']['agent']
+                    mounts = [m for m in agent['volumes'] if m['target'] == '/nix/store']
+                    if enabled:
+                        self.assertEqual(len(mounts), 1)
+                        self.assertEqual(mounts[0]['type'], 'bind')
+                        self.assertEqual(mounts[0]['source'], '/nix/store')
+                        self.assertTrue(mounts[0]['read_only'])
+                        self.assertFalse(mounts[0].get('bind', {}).get('create_host_path', False))
+                    else:
+                        self.assertEqual(mounts, [])
+
     def test_sumi_relative_path_matches_compose(self):
         secrets = self.root / '.secrets/sumi'
         secrets.mkdir(parents=True)
