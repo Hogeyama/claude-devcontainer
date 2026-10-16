@@ -2,7 +2,7 @@
 """Expose the running container's Claude over ACP, without host tool access.
 
 Run this on the host. stdout is exclusively newline-delimited JSON-RPC.
-Needs git.isolation = "shared": the agent's /workspace is then the host's
+Needs git.isolation = "shared" or "unsafe_shared": the agent's /workspace is then the host's
 working tree, so the paths the client and the agent exchange name the same
 files. The host owns this boundary: it lives in .devcontainer, which shared
 mode mounts read-only for the agent.
@@ -312,8 +312,8 @@ def main():
     git_agent = load_git_agent()
     container = git_agent.running_container(root)
     # The running container's mounts, not the TOML edited for its next creation.
-    if git_agent.check_container(container, root) != 'shared':
-        raise ValueError('ACP needs git.isolation = "shared"; set it and acp.enabled, then run '
+    if git_agent.check_container(container, root) not in ('shared', 'unsafe_shared'):
+        raise ValueError('ACP needs git.isolation = "shared" or "unsafe_shared"; set it and acp.enabled, then run '
                          'devcontainer up --remove-existing-container.')
     return relay(['docker', 'exec', '-i', '--user', 'node', '--workdir', '/workspace',
                   '--env', 'CLAUDE_CODE_EXECUTABLE=/usr/local/bin/claude',

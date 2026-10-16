@@ -20,6 +20,8 @@
 # volume; the host's .git is read-only at /run/host/git. The agent commits
 # there, and the host reviews with `git fetch agent` and moves HEAD and the
 # index with `git reset --mixed COMMIT`.
+# "unsafe_shared": share the host index, refs and objects too; protect Git
+# configuration/hooks and .devcontainer. Commits immediately affect the host.
 # Use clone to develop .devcontainer. Recreate the container after changing it.
 # isolation = "clone"
 # Existing files/directories to hide in shared mode, relative to the repository
@@ -38,7 +40,7 @@
 
 [acp]
 # Install claude-agent-acp for host ACP clients (agent-shell, Avante, etc.),
-# which connect through scripts/acp-agent.py. Needs git.isolation = "shared":
+# which connect through scripts/acp-agent.py. Needs git.isolation = "shared" or "unsafe_shared":
 # the client's files are then the agent's. Changes need an image rebuild.
 # enabled = false
 # Exact package version; tags such as "latest" and ranges are not accepted.
