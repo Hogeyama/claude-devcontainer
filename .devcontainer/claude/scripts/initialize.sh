@@ -13,9 +13,11 @@ setting() {
     sed -n "s/^$1='\\(.*\\)'\$/\\1/p" .devcontainer/.generated/settings.env
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND)
-# Both modes seed independent agent Git and register its remote.
-python3 "$(dirname "$0")/workspace-source.py"
-python3 "$(dirname "$0")/git-agent.py" register
+# Only independent Git modes need a snapshot and an agent remote.
+if [ "$(setting CLAUDE_DEVCONTAINER_GIT_ISOLATION)" != unsafe_shared ]; then
+    python3 "$(dirname "$0")/workspace-source.py"
+    python3 "$(dirname "$0")/git-agent.py" register
+fi
 
 # compose.yaml reads the internal subnets from .generated/networks.env unless
 # claude.toml sets them; a free pair is chosen once and kept.

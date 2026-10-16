@@ -201,6 +201,18 @@ else:
             {'Destination': '/workspace/.git', 'Type': 'volume', 'Name': 'fixture_agent-git', 'RW': True}]
         self.env['FAKE_INSPECT'] = json.dumps([self.inspect])
 
+    def test_unsafe_shared_refuses_remote_exchange(self):
+        self.register()
+        self.use_shared()
+        self.inspect['Config']['Labels']['dev.claude-devcontainer.git-isolation'] = 'unsafe_shared'
+        self.inspect['Mounts'][1] = {'Destination': '/workspace/.git', 'Type': 'bind',
+                                    'Source': str(self.host / '.git'), 'RW': True}
+        self.env['FAKE_INSPECT'] = json.dumps([self.inspect])
+        for args in (('fetch', 'agent'), ('push', 'agent', 'HEAD:probe')):
+            result = self.git(*args, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('uses the host Git directly', result.stderr)
+
     def test_shared_serves_fetch_but_refuses_push(self):
         self.register()
         self.use_shared()

@@ -48,6 +48,9 @@ shared)
     echo 'Git isolation: shared; edits reach the host; .git is this container'"'"'s own, with the host'"'"'s read-only at /run/host/git. Commit here; the host fetches, reviews, and runs git reset --mixed.' >&2
     python3 /usr/local/bin/workspace_mounts.py --check-shared
     python3 /usr/local/bin/clone-workspace.py ;;
+unsafe_shared)
+    echo 'Git isolation: unsafe_shared; working tree, index and refs are shared with the host.' >&2
+    python3 /usr/local/bin/workspace_mounts.py --check-shared ;;
 *)
     echo 'error: unknown CLAUDE_DEVCONTAINER_GIT_ISOLATION' >&2
     exit 1 ;;

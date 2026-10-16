@@ -4,7 +4,7 @@
 
 ## Gitの共有と分離
 
-モードは`clone`と`shared`の2種類。旧`worktree`設定は`shared`に変更する。従来のshared（ホストの`.git`を直接read-onlyで参照する方式）は廃止した。更新後はコンテナを再作成する。
+モードは`clone`、`shared`、`unsafe_shared`の3種類。旧`worktree`設定は`shared`に変更する。従来のshared（ホストの`.git`を直接read-onlyで参照する方式）は廃止した。更新後はコンテナを再作成する。
 
 `.devcontainer/claude.toml`、またはホストだけの`.devcontainer/claude.local.toml`で指定する。省略時は従来どおり`clone`。ローカル設定が優先される。
 
@@ -17,6 +17,7 @@ isolation = "clone" # "shared" にするとホストの作業ツリーを共有
 | --- | --- | --- |
 | `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストから`git fetch/push agent` |
 | `shared` | ホストの作業ツリーを`/workspace`へread-write mount | `/workspace/.git`はagent専用のvolume。ホストの`.git`は`/run/host/git`にread-only。ホストから`git fetch agent`と`git reset --mixed` |
+| `unsafe_shared` | ホストの作業ツリーをread-write mount | ホストのindex・refs・objectsも直接共有。設定・hooksなどは保護 |
 
 設定変更後はコンテナを再作成する。
 
@@ -58,6 +59,21 @@ include:
   - path: [claude/compose.yaml, .generated/workspace.compose.yaml]
     env_file: [.generated/networks.env, .generated/settings.env]
 ```
+
+### Gitも直接共有する unsafe_shared
+
+```toml
+[git]
+isolation = "unsafe_shared"
+```
+
+作業ツリーに加え、index・HEAD・refs・objects・reflogをホストとRW共有する。add・commit・reset・switchはホストのGit状態を直接変更する。起動時にindexを初期化せず、既存のステージ済み変更も保持する。agentリモートの登録・fetch/pushによる受け渡しは不要。ACPも利用できる。
+
+rebase-todoを含む`.git/rebase-merge`・`.git/rebase-apply`・`.git/sequencer`もRW共有し、履歴編集を制限しない。ホストで`git rebase --continue`すると、共有されたtodoの`exec`もホストで実行される。これはunsafe_sharedで許容する共有範囲に含まれる。
+
+`.devcontainer`と既存の秘密マスクは維持する。`.git/config`と`.git/config.worktree`をread-onlyにし、`.git/hooks`、`.git/info`、`.git/objects/info`は空のread-only mountで覆う。不在の保護用ディレクトリと空のconfig.worktreeは設定生成時に作成する。独自のcore.hooksPathやinclude/includeIf設定は拒否する。通常リポジトリのみ対応し、linked worktreeやalternatesは使えない。
+
+このモードはホストのGit状態を隔離しない。agentによるindexのフラグ操作や履歴変更もホストへ反映される。ホストとagentの同時Git操作を避ける。秘匿した追跡ファイルは空または削除として見えるが、ホストのindexへskip-worktreeを付けることはしないため、包括的なgit addで取り込まないこと。保護対象以外の共有ファイルをホストが実行するリスクも残る。
 
 ## 初回起動（clone、shared）
 
@@ -290,7 +306,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagent
 
 ## ACPクライアントから使う
 
-ホストのEmacs、Neovimなどから、コンテナ内の[claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)へ接続できます。[`git.isolation = "shared"`](#gitの共有と分離)が前提です。agentの`/workspace`がホストの作業ツリーそのものになるので、エディタとagentが同じファイルを指せます。`.devcontainer/claude.toml`か`claude.local.toml`で両方を有効にしてください。
+ホストのEmacs、Neovimなどから、コンテナ内の[claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)へ接続できます。[`git.isolation = "shared"`](#gitの共有と分離)または`unsafe_shared`が前提です。agentの`/workspace`がホストの作業ツリーそのものになるので、エディタとagentが同じファイルを指せます。`.devcontainer/claude.toml`か`claude.local.toml`で両方を有効にしてください。
 
 ```toml
 [git]

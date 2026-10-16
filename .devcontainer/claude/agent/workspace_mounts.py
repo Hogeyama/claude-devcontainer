@@ -8,7 +8,7 @@ import re
 import sys
 
 # The modes that mount the host's working tree as /workspace.
-SHARED_MODES = ('shared',)
+SHARED_MODES = ('shared', 'unsafe_shared')
 # Where shared mode shows the agent the host's Git, read-only.
 HOST_GIT = Path('/run/host/git')
 MOUNTINFO = Path('/proc/self/mountinfo')
@@ -92,8 +92,13 @@ def check_shared(workspace, isolation='shared', mountinfo=MOUNTINFO):
     if not os.access(workspace, os.R_OK | os.W_OK | os.X_OK):
         raise ValueError(f'{workspace} is not writable to {os.getuid()}:{os.getgid()}; '
                          'set agent.uid and agent.gid in claude.local.toml to the host owner.')
-    host_git = HOST_GIT
-    for path in (workspace / '.devcontainer', host_git):
+    host_git = workspace / '.git' if isolation == 'unsafe_shared' else HOST_GIT
+    protected = [workspace / '.devcontainer']
+    if isolation == 'unsafe_shared':
+        protected += [host_git / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree')]
+    else:
+        protected.append(host_git)
+    for path in protected:
         if not os.statvfs(path).f_flag & os.ST_RDONLY or os.access(path, os.W_OK):
             raise ValueError(f'{path} must be mounted read-only in {isolation} mode; regenerate settings and recreate the container.')
     paths = [workspace / '.devcontainer', host_git, host_git / 'objects', host_git / 'refs']
@@ -103,6 +108,9 @@ def check_shared(workspace, isolation='shared', mountinfo=MOUNTINFO):
         if not os.access(path, access):
             raise ValueError(f'{path} is not accessible to {os.getuid()}:{os.getgid()}; '
                              'set agent.uid and agent.gid in claude.local.toml to the host owner.')
+    if isolation == 'unsafe_shared':
+        if os.statvfs(host_git).f_flag & os.ST_RDONLY or not os.access(host_git, os.R_OK | os.W_OK | os.X_OK):
+            raise ValueError('unsafe_shared needs writable host Git; check agent.uid and agent.gid.')
     if isolation == 'shared':
         git = workspace / '.git'
         if (git not in mount_points(mountinfo) or os.statvfs(git).f_flag & os.ST_RDONLY

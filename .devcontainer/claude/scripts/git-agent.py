@@ -50,6 +50,14 @@ def check_container(container, root=ROOT):
     mounts = {mount['Destination']: mount for mount in details.get('Mounts', [])}
     workspace = mounts.get('/workspace', {})
     project = labels.get('com.docker.compose.project')
+    if mode == 'unsafe_shared':
+        git = mounts.get('/workspace/.git', {})
+        if (not project or workspace.get('Type') != 'bind' or not workspace.get('RW')
+                or Path(workspace.get('Source', '')) != Path(root).resolve()
+                or git.get('Type') != 'bind' or not git.get('RW')
+                or Path(git.get('Source', '')) != Path(root).resolve() / '.git'):
+            raise ValueError('Cannot verify the agent unsafe_shared mounts; recreate the container.')
+        return mode
     if mode == 'shared':
         git = mounts.get('/workspace/.git', {})
         if (not project or workspace.get('Type') != 'bind' or not workspace.get('RW')
@@ -81,6 +89,8 @@ def serve(service, root=ROOT):
         raise ValueError('Only Git upload-pack and receive-pack are supported.')
     container = running_container(root)
     mode = check_container(container, root)
+    if mode == 'unsafe_shared':
+        raise ValueError('unsafe_shared uses the host Git directly; the agent remote is unnecessary.')
     command = [service]
     if service == 'git-receive-pack':
         if mode == 'shared':

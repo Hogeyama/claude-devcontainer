@@ -208,7 +208,9 @@ if __name__ == '__main__':
     if os.geteuid() == 0:
         sys.exit('error: run workspace initialization as node, never root.')
     try:
-        if os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone') == 'shared':
+        if os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION') == 'unsafe_shared':
+            pass  # Host Git is already initialized; never reset its shared index.
+        elif os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone') == 'shared':
             attach('/run/host/generated/workspace.json', '/workspace')
         else:
             clone('/run/host/generated/workspace.json', '/workspace')

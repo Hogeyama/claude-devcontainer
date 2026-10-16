@@ -103,7 +103,7 @@ Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）�
 
 #### agent-shell・AvanteなどのACPクライアントを使う場合
 
-`git.isolation = "shared"`の環境で、`claude.toml`の`[acp]`を`enabled = true`にすると、`claude-agent-acp`をagentのimageに入れます。ホストのエディタからは、`.devcontainer/claude/scripts/acp-agent.py`をACPの起動コマンドに指定してください。agentはホストと同じ作業ツリーを編集するので、ツールの対象ファイルや差分をエディタでそのまま開けます。ツールはコンテナ内で実行し、認証は既存のproxyを使います。[接続方法とagent-shell・Avanteの設定例](docs/usage.md#acpクライアントから使う)を参照してください。
+`git.isolation = "shared"`または`"unsafe_shared"`の環境で、`claude.toml`の`[acp]`を`enabled = true`にすると、`claude-agent-acp`をagentのimageに入れます。ホストのエディタからは、`.devcontainer/claude/scripts/acp-agent.py`をACPの起動コマンドに指定してください。agentはホストと同じ作業ツリーを編集するので、ツールの対象ファイルや差分をエディタでそのまま開けます。ツールはコンテナ内で実行し、認証は既存のproxyを使います。[接続方法とagent-shell・Avanteの設定例](docs/usage.md#acpクライアントから使う)を参照してください。
 
 #### VS Codeを使う場合
 

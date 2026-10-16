@@ -25,7 +25,7 @@ When a dependency cannot be downloaded, do not keep retrying or try mirrors. Rep
 
 ## Files and Git
 
-Check the Git mode first: `echo "$CLAUDE_DEVCONTAINER_GIT_ISOLATION"` prints `clone` or `shared`, the mode the container was created with. Do not infer it from `claude.toml`: the host's `claude.local.toml` can override it, and a change applies only after the container is recreated. Follow the rules for both modes and the subsection for your mode only; the other mode's paths, remotes and exchange steps do not work for you.
+Check the Git mode first: `echo "$CLAUDE_DEVCONTAINER_GIT_ISOLATION"` prints `clone`, `shared` or `unsafe_shared`, the mode the container was created with. Do not infer it from `claude.toml`: the host's `claude.local.toml` can override it, and a change applies only after the container is recreated. Follow the rules for both modes and the subsection for your mode only; the other mode's paths, remotes and exchange steps do not work for you.
 
 In both modes:
 
@@ -34,6 +34,10 @@ In both modes:
 - `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Mount changes require container recreation. Run Git as node, never root.
 - If `$CLAUDE_DEVCONTAINER_NIX` is `1`, Bash reads what the nix dev shell exported when the container started, after its shellHook ran in `/workspace`. When a dev shell tool or variable is missing, the shellHook's output is in `/run/claude-devcontainer/nix-env.log`.
 - If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte (a 24-byte secret reads as 24 `*`). This is deliberate, and a run of `*` is the masking working, not a change to report. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.
+
+### `unsafe_shared`
+
+The working tree AND Git index, HEAD, refs and objects are the host's. Commits immediately affect the host; do not use the agent remote or the shared-mode fetch/reset workflow. Startup preserves the host index. Coordinate Git operations with the host. Git configuration is read-only; hooks, info and objects/info are masked. .devcontainer and configured secret masks remain protected. Hidden tracked paths can appear deleted or empty; never stage them with a blanket add. Index flags and history changes affect the host too. Rebase state (including rebase-todo), rebase-apply and sequencer remain writable and shared; continuing a rebase on the host also executes its todo exec commands there.
 
 ### `shared`
 

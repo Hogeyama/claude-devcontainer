@@ -208,3 +208,7 @@ connectors = ["mcpsrv_01AbCdEf"]
 proxyはAnthropicの要求本文全体を受信してから検査・転送します。AnthropicとGitの要求本文には上限を設けていないため、大きな要求や同時接続でメモリを使い切る可能性が残ります。proxyのメモリ上限は512 MiBで、停止した場合は通信も停止します。
 
 [READMEに戻る](../README.md)
+
+### unsafe_sharedで共有されるもの
+
+`git.isolation = "unsafe_shared"`は作業ツリーだけでなくホストのindex・refs・objectsをRW共有します。agentのcommitやindexフラグ操作はホストにも直接反映され、Git状態の隔離はありません。`.devcontainer`、秘密マスク、Git設定・hooksなどの保護は維持します。詳細と制限は[利用方法](usage.md#gitも直接共有する-unsafe_shared)を参照してください。

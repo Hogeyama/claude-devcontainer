@@ -89,6 +89,56 @@ class GitIsolationTest(unittest.TestCase):
     def use_shared(self):
         (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nisolation = "shared"\n')
 
+    def use_unsafe_shared(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text(
+            '[git]\nisolation = "unsafe_shared"\n[acp]\nenabled = true\n')
+
+    def test_unsafe_shared_preserves_git_and_protects_configuration(self):
+        self.use_unsafe_shared()
+        self.git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-qm', 'fixture')
+        (self.root / 'staged').write_text('pending')
+        self.git('add', 'staged')
+        before = {name: (self.root / '.git' / name).read_bytes() for name in ('HEAD', 'index', 'config')}
+        generated = self.generated_mounts()
+        self.assertEqual(generated['/workspace/.git']['source'], str(self.root / '.git'))
+        self.assertEqual(generated['/workspace/.git/objects']['source'], str(self.root / '.git/objects'))
+        self.assertNotIn('/run/host/git', generated)
+        for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree'):
+            self.assertTrue(generated['/workspace/.git/' + name]['read_only'])
+        self.assertTrue(generated['/workspace/.devcontainer']['read_only'])
+        self.assertEqual(before, {name: (self.root / '.git' / name).read_bytes() for name in before})
+        self.assertEqual(self.git('diff', '--cached', '--name-only').stdout.strip(), 'staged')
+        self.generated_mounts()  # Idempotent, including reserved config.worktree.
+
+    def test_unsafe_shared_rejects_unprotected_hooks_and_config(self):
+        self.use_unsafe_shared()
+        for key, value in (('core.hooksPath', 'scripts'), ('include.path', '../other-config')):
+            self.git('config', key, value)
+            with self.assertRaisesRegex(ValueError, 'does not support'):
+                self.generated_mounts()
+            self.git('config', '--unset', key)
+
+    def test_unsafe_shared_never_chowns_host_git(self):
+        self.use_unsafe_shared()
+        with patch.object(mounts.os, 'fchown') as chown:
+            mounts.prepare(self.root, os.getuid() + 1, os.getgid(), 'unsafe_shared', self.mountinfo())
+        chown.assert_not_called()
+
+    def test_unsafe_shared_checks_every_protected_mount(self):
+        self.use_unsafe_shared()
+        self.generated_mounts()
+        protected = {self.root / '.devcontainer'}
+        protected.update(self.root / '.git' / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree'))
+        def access(path, mode):
+            return not (Path(path) in protected and mode & os.W_OK)
+        def statvfs(path):
+            return SimpleNamespace(f_flag=os.ST_RDONLY if Path(path) in protected else 0)
+        with patch.object(mounts.os, 'access', side_effect=access), patch.object(mounts.os, 'statvfs', side_effect=statvfs):
+            mounts.check_shared(self.root, 'unsafe_shared')
+            protected.remove(self.root / '.git/config')
+            with self.assertRaisesRegex(ValueError, 'must be mounted read-only'):
+                mounts.check_shared(self.root, 'unsafe_shared')
+
     def test_shared_gives_the_agent_its_own_git_volume(self):
         self.use_shared()
         generated = self.generated_mounts()

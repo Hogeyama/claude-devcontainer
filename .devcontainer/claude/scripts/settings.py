@@ -65,9 +65,9 @@ DEFAULTS = {
     'subnets': {'proxy': '', 'dind': ''},
 }
 HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
-ISOLATION_MODES = ('clone', 'shared')
+ISOLATION_MODES = ('clone', 'shared', 'unsafe_shared')
 # The modes that mount the host's working tree as /workspace.
-SHARED_MODES = ('shared',)
+SHARED_MODES = ('shared', 'unsafe_shared')
 # Where shared mode shows the agent the host's Git, read-only.
 HOST_GIT = '/run/host/git'
 # compose's names, which settings.env writes. Only these may not come from
@@ -154,7 +154,7 @@ def check(data, source):
             if isinstance(value, str) and ('\n' in value or "'" in value):
                 raise ValueError(f"{where}: newlines and ' are not allowed")
     if data.get('git', {}).get('isolation', 'clone') not in ISOLATION_MODES:
-        raise ValueError(f'{source}: git.isolation: expected "clone" or "shared"')
+        raise ValueError(f'{source}: git.isolation: expected "clone" or "shared" or "unsafe_shared"')
     for value in data.get('git', {}).get('shared_hidden_paths', []):
         path = Path(value)
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
@@ -233,7 +233,7 @@ def load(root=ROOT):
     # The ACP bridge maps the agent's /workspace paths to the host's files and
     # back, which only holds while the agent edits the host's working tree.
     if settings['acp']['enabled'] and settings['git']['isolation'] not in SHARED_MODES:
-        raise ValueError('acp.enabled: needs git.isolation = "shared"')
+        raise ValueError('acp.enabled: needs git.isolation = "shared" or "unsafe_shared"')
     settings['sumi']['secrets'] = resolve(settings['sumi']['secrets'], directory)
     settings['proxy']['ca'] = settings['proxy']['ca'] and resolve(settings['proxy']['ca'], directory)
     # ~ may bring them in, and settings.env cannot hold them.
@@ -343,6 +343,17 @@ def check_shared_repository(root, mode='shared'):
                              capture_output=True, text=True)
     if worktree.returncode not in (0, 1) or (worktree.returncode == 0 and Path(worktree.stdout.strip()).is_absolute()):
         raise ValueError(f'{advice} Absolute core.worktree paths cannot be used inside /workspace.')
+    if mode == 'unsafe_shared':
+        for config in ('config', 'config.worktree'):
+            if not (git / config).exists():
+                continue
+            custom = subprocess.run(
+                ['git', 'config', '--file', str(git / config), '--no-includes', '--get-regexp',
+                 r'^(core\.hookspath|include\.path|includeif\..*\.path)$'],
+                capture_output=True, text=True)
+            if custom.returncode != 1:
+                raise ValueError('unsafe_shared does not support core.hooksPath or included Git configuration; '
+                                 'use clone or shared.')
     # Alternates and symlinks may refer to paths absent from /workspace.
     for directory, dirs, files in os.walk(git):
         for name in dirs + files:
@@ -364,7 +375,7 @@ def check_mount_path(root, relative):
 
 
 def shared_mounts(settings, root):
-    """Mandatory protections and existing secret paths; no host files are created."""
+    """Mandatory protections and secret masks; reserve unsafe_shared protection paths."""
     root = Path(root).resolve()
     for name in ('.git', '.devcontainer'):
         if not check_mount_path(root, Path(name)).is_dir():
@@ -374,11 +385,32 @@ def shared_mounts(settings, root):
         return {'type': 'bind', 'source': str(root / name), 'target': target,
                 'read_only': True, 'bind': {'create_host_path': False}}
     mounts = [read_only('.devcontainer', '/workspace/.devcontainer')]
-    # The agent's own Git. Docker seeds a new volume from the image, never
-    # from the host's .git bound beneath it; nocopy states that.
-    mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
-                   'volume': {'nocopy': True}})
-    mounts.append(read_only('.git', HOST_GIT))
+    if settings['git']['isolation'] == 'unsafe_shared':
+        # Pin ancestors too: otherwise renaming .git or objects could bypass
+        # the protected children by creating a replacement directory.
+        for name in ('.git', '.git/objects'):
+            mounts.append({'type': 'bind', 'source': str(root / name),
+                           'target': '/workspace/' + name, 'bind': {'create_host_path': False}})
+        # Pin configuration files against replacement and mask executable hooks
+        # and auxiliary configuration (attributes, alternates).
+        for name in ('hooks', 'info', 'objects/info'):
+            path = check_mount_path(root, Path('.git') / name)
+            path.mkdir(exist_ok=True)
+            mounts.append({'type': 'tmpfs', 'target': '/workspace/.git/' + name,
+                           'read_only': True, 'tmpfs': {'size': 4096, 'mode': 0o555}})
+        for name in ('config', 'config.worktree'):
+            path = check_mount_path(root, Path('.git') / name)
+            # Reserve absent files too, so they cannot be introduced by the agent.
+            if not path.exists():
+                with path.open('x'):
+                    pass
+            if not path.is_file():
+                raise ValueError(f'Expected a Git configuration file: {path}')
+            mounts.append(read_only('.git/' + name, '/workspace/.git/' + name))
+    else:
+        mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
+                       'volume': {'nocopy': True}})
+        mounts.append(read_only('.git', HOST_GIT))
     for relative in hidden_paths(settings, root):
         path = root / relative
         target = '/workspace/' + relative.as_posix()

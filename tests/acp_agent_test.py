@@ -249,6 +249,9 @@ if args[0] == 'inspect':
                {'Destination': '/workspace/.git', 'Type': 'volume', 'RW': True, 'Name': 'p_agent-git'}]
               if mode == 'shared' else
               [{'Destination': '/workspace', 'Type': 'volume', 'RW': True, 'Name': 'p_workspace'}])
+    if mode == 'unsafe_shared':
+        mounts = [{'Destination': '/workspace', 'Type': 'bind', 'RW': True, 'Source': os.environ['ROOT']},
+                  {'Destination': '/workspace/.git', 'Type': 'bind', 'RW': True, 'Source': os.environ['ROOT'] + '/.git'}]
     print(json.dumps([{'Config': {'Labels': {'com.docker.compose.project': 'p',
         'dev.claude-devcontainer.git-isolation': mode}}, 'Mounts': mounts}]))
     sys.exit()
@@ -302,6 +305,10 @@ for line in sys.stdin:
         self.assertEqual(process.stdout.read(), b'')
         process.stdout.close()
         process.stderr.close()
+
+    def test_unsafe_shared_supports_protocol(self):
+        self.env['MODE'] = 'unsafe_shared'
+        self.test_bidirectional_protocol_cancel_and_eof()
 
     def test_nonfinite_numbers_are_not_forwarded_in_either_direction(self):
         for constant in ('NaN', 'Infinity', '-Infinity', '1e999'):

@@ -129,6 +129,51 @@ class GitIsolationIntegrationTest(unittest.TestCase):
                     'sleep 0.1; done; exit 1')
         self.execute('sh', '/usr/local/bin/wait-ready.sh')
 
+    def test_unsafe_shared_commits_reach_host_and_protections_hold(self):
+        (self.host / 'tracked').write_text('staged on host\n')
+        self.git('add', 'tracked')
+        before = (self.host / '.git/index').read_bytes()
+        self.start('unsafe_shared')
+        self.assertEqual((self.host / '.git/index').read_bytes(), before)
+        self.execute('git', '-C', '/workspace', 'commit', '-qm', 'shared commit')
+        self.assertEqual(self.git('log', '-1', '--format=%s').stdout.strip(), 'shared commit')
+        self.assertEqual(self.git('show', 'HEAD:tracked').stdout, 'staged on host\n')
+        self.assert_shared_protections()
+        self.execute('python3', '-c', '''
+import errno, os
+for path in ('/workspace/.git/objects', '/workspace/.git/config', '/workspace/.git/config.worktree'):
+    try:
+        os.rename(path, path + '-moved')
+    except OSError as error:
+        assert error.errno in (errno.EBUSY, errno.EROFS), (path, error)
+    else:
+        raise AssertionError(path)
+''')
+        for name in ('config', 'config.worktree', 'hooks/pre-commit', 'info/attributes', 'objects/info/alternates'):
+            result = self.execute('python3', '-c',
+                                  'from pathlib import Path; Path("/workspace/.git/" + ' + repr(name) +
+                                  ').write_text("tampered")', check=False)
+            self.assertNotEqual(result.returncode, 0, name)
+        result = self.execute('git', '-C', '/workspace', 'config', '--local', 'core.hooksPath', '/tmp/hooks', check=False)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_unsafe_shared_rebase_todo_is_writable_and_shared(self):
+        (self.host / 'tracked').write_text('rebase fixture\n')
+        self.git('add', 'tracked')
+        self.git('commit', '-qm', 'rebase fixture')
+        self.start('unsafe_shared')
+        result = self.execute('git', '-C', '/workspace', 'rebase', '--exec', 'false', 'HEAD~1', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        todo = self.host / '.git/rebase-merge/git-rebase-todo'
+        self.assertTrue(todo.is_file())
+        self.execute('python3', '-c',
+                     'from pathlib import Path; Path("/workspace/.git/rebase-merge/git-rebase-todo")'
+                     '.write_text("exec true\\n")')
+        self.assertEqual(todo.read_text(), 'exec true\n')
+        self.git('rebase', '--continue')
+        self.assertFalse(todo.parent.exists())
+        self.assertEqual(self.git('show', 'HEAD:tracked').stdout, 'rebase fixture\n')
+
     def assert_shared_protections(self):
         self.execute('python3', '-c', '''
 import ctypes, errno, os, sys
