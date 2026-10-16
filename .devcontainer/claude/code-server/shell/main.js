@@ -11,6 +11,7 @@
 // The proxy's port is on the host's 127.0.0.1 on both Windows and Linux.
 const { app, BrowserWindow, Menu, session } = require('electron');
 const policy = require('./policy');
+const { installPasteShortcut } = require('./paste');
 
 const PARTITION = 'persist:ide';
 
@@ -172,6 +173,7 @@ app.whenReady().then(async () => {
       safeDialogs: true,
     },
   });
+  installPasteShortcut(window.webContents);
   // The page names itself after the workspace; the suffix tells this window
   // from the host's own VS Code.
   window.on('page-title-updated', (details, title) => {

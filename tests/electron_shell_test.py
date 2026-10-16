@@ -42,6 +42,41 @@ class PolicyTest(unittest.TestCase):
     """policy.js, which main.js applies to every navigation, request and permission."""
 
     @unittest.skipUnless(shutil.which('node'), 'Node is not installed')
+    def test_native_paste_shortcuts(self):
+        script = r"""
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const { installPasteShortcut } = require(process.argv[1]);
+const contents = new EventEmitter();
+let pastes = 0;
+contents.paste = () => { pastes++; };
+installPasteShortcut(contents);
+for (const [input, expected] of [
+  [{ key: 'v', control: true }, true],
+  [{ key: 'V', control: true, shift: true }, true],
+  [{ key: 'Insert', shift: true }, true],
+  [{ key: 'v' }, false],
+  [{ key: 'v', control: true, alt: true }, false],
+  [{ key: 'v', control: true, meta: true }, false],
+  [{ key: 'Insert', control: true, shift: true }, false],
+  [{ key: 'c', control: true }, false],
+  [{ key: 'v', control: true, type: 'keyUp' }, false],
+]) {
+  const before = pastes;
+  let prevented = false;
+  contents.emit('before-input-event', { preventDefault() { prevented = true; } },
+    { type: 'keyDown', ...input });
+  assert.equal(prevented, expected, JSON.stringify(input));
+  assert.equal(pastes - before, Number(expected), JSON.stringify(input));
+}
+// A page's synthetic DOM event is not an Electron before-input-event.
+contents.emit('keydown', { key: 'v', ctrlKey: true });
+assert.equal(pastes, 3);
+"""
+        subprocess.run(['node', '-e', script, str(SHELL / 'paste.js')],
+                       capture_output=True, text=True, check=True)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is not installed')
     def test_policy(self):
         cases = {
             'allowsNavigation': {
