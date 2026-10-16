@@ -11,8 +11,8 @@
 
 const IDE_PORT = 18000;
 // The only permission granted: copying in the IDE writes the clipboard.
-// Reading it is denied, including the Terminal's Ctrl-V command, which uses
-// the Clipboard API rather than the browser's native paste event.
+// Reading it is denied. paste.js handles physical paste shortcuts through
+// native paste events, including in the Terminal, without granting API access.
 const PERMISSIONS = new Set(['clipboard-sanitized-write']);
 
 function parse(url) {
