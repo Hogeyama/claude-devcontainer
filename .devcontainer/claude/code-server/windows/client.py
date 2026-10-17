@@ -70,7 +70,7 @@ def shell_command(executable, shell, profile, port, folder):
 def open_window(port, folder):
     token = os.environ.get(TOKEN, '')
     if not token:
-        fail(f'no connection token in {TOKEN}; open the editor with code-server.sh open')
+        fail(f'no connection token in {TOKEN}; open the editor with code-server.sh')
     base = base_directory()
     directory = electron.ensure(base / 'electron', PLATFORM)
     state = workspace_directory(base)

@@ -41,8 +41,8 @@ todeのサポートは削除しました。以前の設定に`[tode]`がある�
 3. ホストの信頼できるチェックアウトから起動します。`code-server.sh` はWSLならWindowsのシェルを、それ以外のLinuxならWaylandまたはX11でシェルを開きます。
 
    ```sh
-   .devcontainer/claude/scripts/code-server.sh prepare  # Electronの取得だけ。省略するとopenが取得します
-   .devcontainer/claude/scripts/code-server.sh open
+   .devcontainer/claude/scripts/code-server.sh prepare  # Electronの取得だけ。省略すると下の起動時に取得します
+   .devcontainer/claude/scripts/code-server.sh
    ```
 
 どちらのOSでも管理者権限は使いません。
@@ -71,7 +71,7 @@ IDEのページはコンテナが配信するので、その中のスクリプ�
 ホストに必要なのはPython 3.11以上とWaylandまたはX11セッションです。
 `WAYLAND_DISPLAY`が設定されていればWaylandを優先し、なければ`DISPLAY`を使ってX11で起動します。指定されたWaylandソケットが存在しない場合はエラーにします。
 Waylandではtext-input-v3でホストのIMEを使います。X11では`DISPLAY`、`XAUTHORITY`、入力メソッドの環境変数を引き継ぎます。X11での日本語入力は実機未確認です。
-両方が設定された環境でX11を選ぶ場合は、`env -u WAYLAND_DISPLAY .devcontainer/claude/scripts/code-server.sh open`で起動できます（WSLではWindows版を起動します）。
+両方が設定された環境でX11を選ぶ場合は、`env -u WAYLAND_DISPLAY .devcontainer/claude/scripts/code-server.sh`で起動できます（WSLではWindows版を起動します）。
 `prepare` はElectronを `~/.cache/claude-devcontainer/electron/` に取得します。
 
 `open` はElectronをホストで直接起動し、専用proxyの公開ポートに接続します。

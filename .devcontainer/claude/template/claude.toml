@@ -135,7 +135,7 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # (Coder code-server) in a dedicated Electron window that reaches nothing but
 # the agent, on Windows + WSL and on Linux (Wayland or X11).
 # Rebuild after changing this setting,
-# then open with claude/scripts/code-server.sh open; no administrator rights.
+# then open with claude/scripts/code-server.sh; no administrator rights.
 # See claude/code-server/README.md.
 enabled = false
 # Marketplace IDs, optionally @version,

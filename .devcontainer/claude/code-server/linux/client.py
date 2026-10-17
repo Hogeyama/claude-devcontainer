@@ -191,7 +191,7 @@ def main():
             report(ensure_electron(), os.environ.get('WAYLAND_DISPLAY') or os.environ.get('DISPLAY') or 'not set')
             return
         if not args.check and not os.environ.get(TOKEN):
-            fail(f'no connection token in {TOKEN}; open the editor with code-server.sh open')
+            fail(f'no connection token in {TOKEN}; open the editor with code-server.sh')
         args.backend, display = display_backend()
         if args.check:
             cache, platform = electron_directory()
