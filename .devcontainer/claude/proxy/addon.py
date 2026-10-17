@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 from mitmproxy import http
 from credentials import read_secrets, read_snapshot
@@ -179,12 +179,21 @@ def host_routes(host):
     return None
 
 
+def url_path(req):
+    """The request target without the query, as the upstream reads it.
+
+    Not urlsplit: it takes the x of //x/... for a host, so the check would see
+    a path other than the one sent.
+    """
+    return req.path.partition('?')[0]
+
+
 def check_request(req):
     """Check what is known from the headers and return the URL path."""
     routes = host_routes(req.host)
     require(req.scheme == 'https' and routes is not None and req.port == 443, 'host')
     require('upgrade' not in req.headers, 'upgrade')
-    path = urlsplit(req.path).path
+    path = url_path(req)
     decoded = unquote(path)
     # An upstream may normalize what this check sees, as GitHub does /repos/... paths.
     require(not re.search(r'[\x00-\x1f\x7f%\\]', decoded) and '//' not in decoded
@@ -219,7 +228,7 @@ class PolicyAddon:
         # The query is left out: it is the likeliest part of a URL to hold a secret.
         req = flow.request
         detail = str(error) if isinstance(error, Denied) else type(error).__name__ if error else reason
-        LOG.warning('request-denied %s %s%s (%s)', req.method, req.pretty_host, urlsplit(req.path).path, detail)
+        LOG.warning('request-denied %s %s%s (%s)', req.method, req.pretty_host, url_path(req), detail)
         flow.response = http.Response.make(403, b'blocked: ' + reason.encode(), {'Content-Type': 'text/plain'})
         flow.metadata['denied'] = True
 
@@ -315,7 +324,7 @@ class PolicyAddon:
         # As with denials, the query is left out.
         req, res = flow.request, flow.response
         LOG.warning('upstream %d %s %s%s %s', res.status_code, req.method, req.pretty_host,
-                    urlsplit(req.path).path, res.headers.get('request-id', '-'))
+                    url_path(req), res.headers.get('request-id', '-'))
 
 
 addons = [PolicyAddon()]
