@@ -1,5 +1,11 @@
 # VS Codeを隔離するElectronシェル（Windows/Linux共通）
 
+> この文書は当初の設計記録。[進め方](#進め方)の1〜5は実施済みで、その後に次の変更を加えた。現在の構成と制約は[隔離エディタの手順](../../../.devcontainer/claude/code-server/README.md)を参照。
+>
+> - Linuxでもbubblewrapを使わず、シェルをホストで直接起動する。WindowsもLinuxも、Electron全体を囲むOS層の壁はなく、[OS別の隔離層](#os別の隔離層)のLinuxの列と進め方の3は現状と異なる。WaylandのほかX11でも起動できる。
+> - todeのサポートは削除した。
+> - 検証項目の結果は[残るリスクと検証項目](#残るリスクと検証項目)に記入した。
+
 ## 背景と目的
 
 IDEのクライアントを、許可したオリジンにしか接続できない専用のElectronシェルにする。WindowsでもLinuxでも、コンテナ内のコードにホストでコマンドを実行させず、proxyを経由しない通信もさせずに、GUIのエディタをホストのIMEで使えるようにする。
@@ -132,18 +138,32 @@ Windowsでは、ホスト側スクリプト群（認証情報の注入、gitのe
 
 最大の残余リスクは、Windowsではシェルのポリシーの実装だけが壁になることである。以下は実装の前後に実機で確かめる。
 
-- [ ] 外部プロトコルのURL（`vscode://`、`ms-settings:`など）への遷移が、リンク、`location`の変更、iframe、サーバーからのリダイレクトのどれでも、OSのハンドラを一切起動せずに拒否されること
-- [ ] `localhost`、`*.localhost`、127.0.0.1の任意のポートへのfetchとWebSocketが、プロキシを通って拒否されること
-- [ ] Service WorkerとWeb Workerからのfetch、WebSocketが、すべてプロキシを通ること
-- [ ] `disable_non_proxied_udp`の指定下で、WebRTCがホストの外へ出ないこと
-- [ ] DNSプリフェッチや`<link rel=prefetch>`がプロキシを迂回しないこと
+結果は2026-10-17時点の[テストと動作確認の結果](../../testing.md)による。Linuxの結果の多くは、headlessのElectronで`tests/electron_shell_test.py`と`tests/code_server_browser_test.py`を動かして得た。Windowsでは、シェルの起動とIDEへの接続だけを確認している。
+
+- [x] 外部プロトコルのURL（`vscode://`、`ms-settings:`など）への遷移が、リンク、`location`の変更、iframe、サーバーからのリダイレクトのどれでも、OSのハンドラを一切起動せずに拒否されること
+  - Linuxで確認した（[シェルの判定](../../testing.md#シェルの判定)）。Windowsは未確認。
+- [x] `localhost`、`*.localhost`、127.0.0.1の任意のポートへのfetchとWebSocketが、プロキシを通って拒否されること
+  - Linuxで確認した。ホストのループバックへの接続は0件。
+- [x] Service WorkerとWeb Workerからのfetch、WebSocketが、すべてプロキシを通ること
+  - Linuxで確認した。
+- [x] `disable_non_proxied_udp`の指定下で、WebRTCがホストの外へ出ないこと
+  - Linuxで確認した。STUNサーバーを指定してもICE候補は0件。Windowsは未確認。
+- [x] DNSプリフェッチや`<link rel=prefetch>`がプロキシを迂回しないこと
+  - Linuxで確認した。
 - [ ] WebHID、WebUSB、Web Serial、Web Bluetoothの要求が、選択画面を出さずに拒否されること
-- [ ] webviewのエンドポイントを自前で配信した状態で、拡張機能のwebviewが表示されること
-- [ ] ForgejoをSimple Browserで開き、ログインできること（`X-Frame-Options`の除去と、`SameSite=Lax`のCookie）
-- [ ] クリップボードの貼り付けが、読み取り権限を許可しなくても、実用上困らない範囲で動くこと
+  - 実装済み。選択画面は利用者の操作が要るので、実機では確かめていない。
+- [x] webviewのエンドポイントを自前で配信した状態で、拡張機能のwebviewが表示されること
+  - code-serverへの移行後は、webviewをIDEと同じ`localhost:18000`から配信する。`tests/code_server_browser_test.py`で確認した（[code-serverへの移行の検証](../../testing.md#code-serverへの移行の検証2026-10-15)）。
+- [x] ForgejoをSimple Browserで開き、ログインできること（`X-Frame-Options`の除去と、`SameSite=Lax`のCookie）
+  - 利用者の環境で確認した（[Forgejoでのレビュー](../../testing.md#forgejoでのレビュー2026-10-15)）。
+- [x] クリップボードの貼り付けが、読み取り権限を許可しなくても、実用上困らない範囲で動くこと
+  - Ctrl-V、Ctrl-Shift-V、Shift-Insertは、シェルがElectronのpasteでフォーカス中のフレームへ渡す。読み取り権限は拒否したままなので、右クリックメニューからは貼り付けられない。
 - [ ] 日本語IME（WindowsのIME、Waylandのtext-input-v3）で、候補位置、インライン変換、再変換が動くこと
-- [ ] Linuxで、bubblewrapの中のElectronが、レンダラーのサンドボックスを有効にしたまま起動すること（namespaceの入れ子）。[削除済みのbrowser-ide試作の検証](../../testing.md#ローカルブラウザからcode-serverを使う境界検証)で、bubblewrap内のChromiumがnamespaceとseccomp-BPFのサンドボックスを有効にしたまま動くことは確認した。AppArmorが非特権user namespaceを制限するUbuntu 23.10以降では未確認である。
+  - Waylandでは、エディタ、Ctrl+Pの入力欄、統合ターミナルで入力できた（[Linuxで隔離エディタを開く](../../testing.md#linuxで隔離エディタを開く)）。候補位置と再変換は個別には確かめていない。WindowsとX11は未確認。
+- [ ] ~~Linuxで、bubblewrapの中のElectronが、レンダラーのサンドボックスを有効にしたまま起動すること（namespaceの入れ子）~~
+  - bubblewrapをやめたので対象外。bubblewrapなしでは、レンダラーのサンドボックスを有効にしたまま起動することを確認した。AppArmorが非特権user namespaceを制限するUbuntu 23.10以降では未確認で、`prepare`がこの制限を検出して警告する。
 - [ ] usage.mdの経路表にある各経路が、この構成で実際に遮断されていること
+  - 経路表はDev Containers拡張が作る経路で、この構成はDev Containers拡張を使わない。経路ごとの実機確認はしていない。
 
 このほか、Electronのセキュリティ更新に追従し続けることが、運用上の継続的なコストになる。
 
