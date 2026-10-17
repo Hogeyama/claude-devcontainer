@@ -129,6 +129,14 @@ class PolicyTest(unittest.TestCase):
                             ('https://api.github.com:8443/user', 'GET'), ('https://example.com/user', 'GET')]:
             with self.subTest(url=url):
                 self.denied(flow(url, method))
+        # A URL parser takes "gists" for a host and checks only /repos/a/b.
+        # Set the path directly: a URL with "//" there is built as "////".
+        for host, path in [('api.github.com', '//gists/repos/a/b'), ('api.github.com', '//x/repos/o/r?y=1'),
+                           ('github.com', '//x/o/r.git/info/refs')]:
+            with self.subTest(path=path):
+                f = flow(f'https://{host}/')
+                f.request.path = path
+                self.denied(f)
         self.denied(flow(headers=[('Upgrade', 'websocket')]))
 
     def test_anthropic_local_tools_and_inline_content(self):
