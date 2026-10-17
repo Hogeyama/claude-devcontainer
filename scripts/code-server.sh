@@ -4,9 +4,10 @@
 # (code-server/shell/), never an unrestricted browser or VS Code.
 set -eu
 scripts=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-case "${1:-open}" in
-prepare|open) action=${1:-open} ;;
-*) echo "usage: $0 [prepare|open]" >&2; exit 2 ;;
+case "${1-}" in
+'') action=open ;;
+prepare) action=prepare ;;
+*) echo "usage: $0 [prepare]" >&2; exit 2 ;;
 esac
 python3 - "$scripts" <<'PY'
 import sys
