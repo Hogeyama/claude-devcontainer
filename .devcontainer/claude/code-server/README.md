@@ -28,7 +28,6 @@ todeのサポートは削除しました。以前の設定に`[tode]`がある�
    ```toml
    [codeServer]
    enabled = true
-   extensions = ["anthropic.claude-code"]
    ```
 
 2. イメージをビルドし、agentを再作成します。
@@ -112,6 +111,7 @@ agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番�
 ホストのポートには公開しません。
 
 - code-server 4.141.0は、`agent/Dockerfile`がバージョンとSHA-256を固定してビルド時に入れます。`codeServer.enabled`が有効な場合だけ取得します。
+- Claude Codeの拡張（`anthropic.claude-code`）は常に入れます。全ワークスペースで同じimageレイヤーを共有するように、`codeServer.extensions`とは別に入れます。
 - `codeServer.extensions` は、ビルド時にcode-serverのCLIで、標準のOpen VSXから入れます。Open VSXで公開されている拡張とバージョンを指定してください。指定した拡張やバージョンが入らなければビルドは失敗します。拡張は起動のたびに`~/.vscode-server/extensions`へコピーし直します。
 - 起動のたびに64桁の16進トークンを作り、従来と同じ`/run/claude-devcontainer/vscode-token`に置きます。serverには`HASHED_PASSWORD`として渡し、シェルは18000番へのすべての要求に`code-server-session` Cookieとして付けます。Cookieなしで取得されるService Workerのスクリプトも含みます。最初のURLにはフォルダだけを指定します。
 - webviewはIDEと同じ`localhost:18000`から配信されます。serverへのパッチとwebview専用ポートは不要です。

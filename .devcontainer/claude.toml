@@ -24,7 +24,6 @@ secrets = "../.secrets/sumi/secrets.txt"
 
 [codeServer]
 enabled = true
-extensions = ["anthropic.claude-code"]
 
 # GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories to
 # share: REST for those repositories, GraphQL, and Git over HTTPS.
