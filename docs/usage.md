@@ -2,6 +2,19 @@
 
 基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、取り込んだリポジトリのルートで実行してください。認証情報は、ホストのClaude Codeのログインと`~/.config/claude-devcontainer/credentials`から読みます。
 
+`.devcontainer`を取り込まずに[`claude-devcontainer`](../README.md#devcontainerなしで使う)で起動した環境では、次のように読み替えてください。
+
+| この文書の記述 | `claude-devcontainer`で起動した環境 |
+| --- | --- |
+| `.devcontainer/claude.toml`、`claude.local.toml` | `~/.config/claude-devcontainer/claude.toml`だけ。リポジトリ内の設定は読まない |
+| `devcontainer up` | `claude-devcontainer up` |
+| `devcontainer up --remove-existing-container` | `claude-devcontainer down`のあと`claude-devcontainer up` |
+| `.devcontainer/claude/scripts/compose.sh ARGS` | `claude-devcontainer compose ARGS` |
+| `.devcontainer/claude/scripts/code-server.sh` | `claude-devcontainer code-server` |
+| `.devcontainer/.generated/` | `~/.local/state/claude-devcontainer/workspaces/<ID>/.generated/` |
+
+`.devcontainer/compose.yaml`や`agent-setup.sh`への追加、`inject-credentials.py`・`load-images.py`・`acp-agent.py`の直接実行は、この方法では使えません。
+
 ## Gitの共有と分離
 
 モードは`clone`、`shared`、`unsafe_shared`の3種類。旧`worktree`設定は`shared`に変更する。従来のshared（ホストの`.git`を直接read-onlyで参照する方式）は廃止した。更新後はコンテナを再作成する。

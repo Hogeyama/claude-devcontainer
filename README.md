@@ -353,6 +353,7 @@ claude-devcontainer          # 起動して、agentの中でclaudeを開く
 claude-devcontainer up       # 起動だけ
 claude-devcontainer down     # 止める
 claude-devcontainer code-server  # 起動して、隔離エディタを開く(codeServer.enabled が必要)
+claude-devcontainer compose logs proxy  # この環境の docker compose
 ```
 
 - 設定は`~/.config/claude-devcontainer/claude.toml`だけを読みます。書き方は`claude.toml`と同じです。リポジトリ内の`.devcontainer/`(`claude.toml`や`agent-setup.sh`)は読みません。
