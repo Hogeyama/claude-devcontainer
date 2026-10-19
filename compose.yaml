@@ -13,10 +13,9 @@ services:
     build:
       context: .
       dockerfile: agent/Dockerfile
-      # The workspace's .devcontainer/, for its optional agent-setup.sh; in
-      # host mode, the host command's state directory (scripts/layout.py).
+      # The workspace's .devcontainer/, for its optional agent-setup.sh.
       additional_contexts:
-        workspace-config: ${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}
+        workspace-config: ..
       args:
         AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
@@ -70,7 +69,7 @@ services:
     # The workspace's own dummies, such as GH_TOKEN: env of each host in
     # proxy.hosts of claude.toml.
     env_file:
-      - path: ${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}/.generated/agent.env
+      - path: ../.generated/agent.env
         required: false
     volumes:
       - workspace:/workspace
@@ -78,8 +77,8 @@ services:
         source: node-modules
         target: /workspace/node_modules
         volume: {nocopy: true}
-      - {type: bind, source: "${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}/.generated", target: /run/host/generated, read_only: true, bind: {create_host_path: false}}
-      - {type: bind, source: "${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}/.nix-env", target: /run/host/nix-env, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ../.generated, target: /run/host/generated, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ../.nix-env, target: /run/host/nix-env, read_only: true, bind: {create_host_path: false}}
       - public-ca:/public-ca:ro
       - dind-run:/var/run/dind:ro
       # Read-only, so that the agent cannot swap the broker's socket for its own.
@@ -146,7 +145,7 @@ services:
       context: proxy
       # The workspace's .devcontainer/, for its .generated/proxy.json.
       additional_contexts:
-        workspace-config: ${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}
+        workspace-config: ..
     mem_limit: 512m
     cap_drop: [ALL]
     security_opt: [no-new-privileges=true]
@@ -221,7 +220,7 @@ services:
       dockerfile: agent/Dockerfile
       target: sumi-serve
       additional_contexts:
-        workspace-config: ${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}
+        workspace-config: ..
     # The owner of the secrets file, which must be 0600; and of the socket,
     # which the agent connects to.
     user: ${CLAUDE_DEVCONTAINER_UID:-1000}:${CLAUDE_DEVCONTAINER_GID:-1000}

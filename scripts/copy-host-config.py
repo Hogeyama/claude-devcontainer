@@ -31,11 +31,8 @@ import sys
 import tarfile
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import layout  # noqa: E402
-
-# The workspace root (scripts/layout.py).
-ROOT = layout.workspace_root()
+# The workspace root: this script is .devcontainer/claude/scripts/ in it.
+ROOT = Path(__file__).resolve().parents[3]
 SOURCE = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
 EXTRA = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/extra'
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/copy-config.log'

@@ -4,9 +4,8 @@
 Docker cannot pick them: the agent's firewall and proxy settings name the proxy
 and DinD by fixed addresses in them. So the first free pair in 10.231.x (outside
 Docker's default pools) is chosen once, kept while it stays free, and written
-to .generated/networks.env of the workspace's settings (scripts/layout.py),
-which compose reads below settings.env. A value set in subnets of claude.toml
-is used instead.
+to .devcontainer/.generated/networks.env, which compose reads below
+settings.env. A value set in subnets of claude.toml is used instead.
 
 Usage: pick-networks.py PROXY_NET DIND_NET, each the set value or empty; run
 from the workspace root (initializeCommand).
@@ -18,16 +17,9 @@ from pathlib import Path
 import subprocess
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import layout  # noqa: E402
-
+OUT = Path('.devcontainer/.generated/networks.env')
 NAMES = ('CLAUDE_DEVCONTAINER_PROXY_NET', 'CLAUDE_DEVCONTAINER_DIND_NET')
 CANDIDATES = [f'10.231.{third}' for third in range(70, 256)]
-
-
-def out():
-    """networks.env, from the workspace root, which is the working directory."""
-    return layout.config_dir(Path('.')) / '.generated/networks.env'
 
 
 def docker(*arguments):
@@ -58,7 +50,7 @@ def used_subnets(root):
 def previous():
     """The pair written last time."""
     try:
-        lines = out().read_text().splitlines()
+        lines = OUT.read_text().splitlines()
     except FileNotFoundError:
         return {}
     return dict(line.split('=', 1) for line in lines if '=' in line and not line.startswith('#'))
@@ -90,15 +82,14 @@ def main():
     except (OSError, subprocess.CalledProcessError) as error:
         raise SystemExit(f'error: cannot list Docker networks to choose subnets: {error}')
     chosen = choose(set_values, previous(), used)
-    path = out()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    (path.parent / '.gitignore').write_text('*\n')
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    (OUT.parent / '.gitignore').write_text('*\n')
     text = ('# Written by initializeCommand (scripts/pick-networks.py). subnets in\n'
             '# claude.toml, through settings.env, replaces these.\n'
             + ''.join(f'{name}={net}\n' for name, net in chosen.items()))
-    temporary = path.with_name(path.name + '.tmp')
+    temporary = OUT.with_name(OUT.name + '.tmp')
     temporary.write_text(text)
-    temporary.replace(path)
+    temporary.replace(OUT)
 
 
 if __name__ == '__main__':

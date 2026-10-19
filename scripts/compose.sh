@@ -10,14 +10,7 @@ if [ $# -eq 0 ]; then
     echo "usage: $0 <docker compose arguments>, e.g. down, logs proxy" >&2
     exit 2
 fi
-scripts=$(cd "$(dirname "$0")" && pwd -P)
-root=${CLAUDE_DEVCONTAINER_WORKSPACE:-$(cd "$scripts/../../.." && pwd -P)}
-# The host command's environments use the core's own compose file.
-if [ -n "${CLAUDE_DEVCONTAINER_CONFIG_DIR-}" ]; then
-    file=$scripts/../host/compose.yaml
-else
-    file=$root/.devcontainer/compose.yaml
-fi
+root=$(cd "$(dirname "$0")/../../.." && pwd -P)
 # -a so that down also finds an environment whose containers have stopped.
 projects=$(docker ps -a --filter "label=devcontainer.local_folder=$root" \
     --filter 'label=com.docker.compose.service=agent' \
@@ -31,14 +24,14 @@ case "$projects" in
     exit 1 ;;
 esac
 compose() {
-    exec docker compose -p "$projects" -f "$file" "$@"
+    exec docker compose -p "$projects" -f "$root/.devcontainer/compose.yaml" "$@"
 }
 # initializeCommand does not run here; bring .generated/ up to date with
 # claude.toml as it would.
-if python3 "$scripts/settings.py" generate; then
+if python3 "$root/.devcontainer/claude/scripts/settings.py" generate; then
     case "$1" in
     up|create|start|restart)
-        python3 "$scripts/settings.py" check-shared-mounts ;;
+        python3 "$root/.devcontainer/claude/scripts/settings.py" check-shared-mounts ;;
     esac
     compose "$@"
 fi
@@ -49,10 +42,10 @@ case "$1" in
 down|stop|kill|ps|logs)
     echo "warning: the settings are invalid; running $1 with the previous ones." >&2
     for name in $(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import settings; print(*settings.VARIABLES)' \
-            "$scripts"); do
+            "$root/.devcontainer/claude/scripts"); do
         unset "$name"
     done
-    exec docker compose --env-file /dev/null -p "$projects" -f "$file" "$@" ;;
+    exec docker compose --env-file /dev/null -p "$projects" -f "$root/.devcontainer/compose.yaml" "$@" ;;
 *)
     echo "error: fix the settings first; only down, stop, kill, ps and logs run with invalid ones." >&2
     exit 1 ;;

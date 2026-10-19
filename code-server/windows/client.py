@@ -35,8 +35,6 @@ PLATFORM = 'win32-x64'
 
 sys.path.insert(0, str(HERE.parent))
 import electron  # noqa: E402
-sys.path.insert(0, str(HERE.parents[1] / 'scripts'))
-import layout  # noqa: E402
 
 
 def fail(message):
@@ -59,8 +57,7 @@ def base_directory():
 
 
 def workspace_directory(base, root=None):
-    # The repository, also in host mode, where the core is installed elsewhere.
-    root = Path(root or layout.workspace_root()).resolve()
+    root = Path(root or HERE.parents[3]).resolve()
     return base / 'workspaces' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
 
 

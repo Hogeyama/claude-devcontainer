@@ -20,11 +20,7 @@ import sys
 import time
 from urllib.parse import unquote, urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import layout  # noqa: E402
-
-# The workspace root (scripts/layout.py).
-ROOT = layout.workspace_root()
+ROOT = Path(__file__).resolve().parents[3]
 MAX_FRAME = 32 * 1024 * 1024
 # The agent's own .git, a volume over the host's: the same path names
 # different files on either side.

@@ -48,11 +48,8 @@ import shlex
 import subprocess
 import tomllib
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import layout  # noqa: E402
-
-# The workspace root (scripts/layout.py).
-ROOT = layout.workspace_root()
+# The workspace root: this script is .devcontainer/claude/scripts/ in it.
+ROOT = Path(__file__).resolve().parents[3]
 FILES = ('claude.toml', 'claude.local.toml')
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
 # {table: {key: default}}; the defaults also give each setting's type.
@@ -214,11 +211,9 @@ def resolve(value, base):
 
 def load(root=ROOT):
     """The checked settings of root's workspace, with the defaults and paths resolved."""
-    directory = layout.config_dir(root)
+    directory = Path(root) / '.devcontainer'
     settings = copy.deepcopy(DEFAULTS)
-    # Host mode reads no file of the repository, which may be anyone's.
-    workspace = () if layout.host_mode() else tuple(directory / name for name in FILES)
-    for source in (CONFIG / 'claude.toml', *workspace):
+    for source in (CONFIG / 'claude.toml', *(directory / name for name in FILES)):
         data = read(source)
         check(data, str(source))
         # Resolve relative file paths against the file that supplied them.
@@ -252,7 +247,7 @@ def outside_settings(root=ROOT, environ=os.environ):
     """The names of settings.env's variables that the environment or .devcontainer/.env sets."""
     found = [f'{name} in the environment' for name in VARIABLES if name in environ]
     try:
-        lines = (layout.config_dir(root) / '.env').read_text().splitlines()
+        lines = (Path(root) / '.devcontainer/.env').read_text().splitlines()
     except FileNotFoundError:
         lines = []
     # compose's dotenv takes KEY=value, KEY: value and export KEY=value.
@@ -382,17 +377,14 @@ def check_mount_path(root, relative):
 def shared_mounts(settings, root):
     """Mandatory protections and secret masks; reserve unsafe_shared protection paths."""
     root = Path(root).resolve()
-    # Host mode keeps its state outside the repository, so there is no
-    # .devcontainer to protect.
-    managed = () if layout.host_mode() else ('.devcontainer',)
-    for name in ('.git', *managed):
+    for name in ('.git', '.devcontainer'):
         if not check_mount_path(root, Path(name)).is_dir():
             raise ValueError(f'shared workspace mount needs a directory: {root / name}')
 
     def read_only(name, target):
         return {'type': 'bind', 'source': str(root / name), 'target': target,
                 'read_only': True, 'bind': {'create_host_path': False}}
-    mounts = [read_only(name, '/workspace/' + name) for name in managed]
+    mounts = [read_only('.devcontainer', '/workspace/.devcontainer')]
     if settings['git']['isolation'] == 'unsafe_shared':
         # Pin ancestors too: otherwise renaming .git or objects could bypass
         # the protected children by creating a replacement directory.
@@ -426,7 +418,7 @@ def shared_mounts(settings, root):
             mounts.append({'type': 'tmpfs', 'target': target, 'read_only': True,
                            'tmpfs': {'size': 4096, 'mode': 0o555}})
         else:
-            mounts.append({'type': 'bind', 'source': str(layout.config_dir(root) / '.generated/empty-secret'),
+            mounts.append({'type': 'bind', 'source': str(root / '.devcontainer/.generated/empty-secret'),
                            'target': target, 'read_only': True, 'bind': {'create_host_path': False}})
     return mounts
 
@@ -492,7 +484,7 @@ def check_shared_mounts(root=ROOT):
     mode = settings['git']['isolation']
     if mode not in SHARED_MODES:
         return
-    result = subprocess.run(['docker', 'compose', '-f', str(layout.compose_file(root)),
+    result = subprocess.run(['docker', 'compose', '-f', str(Path(root) / '.devcontainer/compose.yaml'),
                              'config', '--format', 'json'], check=True, capture_output=True, text=True)
     config = json.loads(result.stdout)
     agent = config['services']['agent']
@@ -549,7 +541,7 @@ def generate(root=ROOT, environ=os.environ):
     ca = settings['proxy']['ca']
     if ca and not ca.is_file():
         raise ValueError(f'proxy.ca names {ca}, which is not a file.')
-    out = layout.config_dir(root) / '.generated'
+    out = Path(root) / '.devcontainer/.generated'
     out.mkdir(parents=True, exist_ok=True)
     (out / '.gitignore').write_text('*\n')
     if settings['git']['isolation'] in SHARED_MODES:

@@ -8,11 +8,7 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import layout  # noqa: E402
-
-# The workspace root (scripts/layout.py).
-ROOT = layout.workspace_root()
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def write(root=ROOT):
@@ -35,7 +31,7 @@ def write(root=ROOT):
         raise ValueError('Host HEAD does not reference a branch.')
     data = {'commit': commit, 'seed': f'workspace-{commit}.git',
             'branch': reference.removeprefix('refs/heads/') if branch.returncode == 0 else ''}
-    directory = layout.config_dir(root) / '.generated'
+    directory = root / '.devcontainer/.generated'
     directory.mkdir(parents=True, exist_ok=True)
     seed = directory / data['seed']
     if not seed.exists():
