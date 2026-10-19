@@ -36,6 +36,7 @@ class GitAgentTest(unittest.TestCase):
         self.transport = self.host / '.devcontainer/claude/scripts/git-agent.py'
         self.transport.parent.mkdir(parents=True)
         shutil.copy(SCRIPT, self.transport)
+        shutil.copy(SCRIPT.with_name('layout.py'), self.transport.with_name('layout.py'))
         binary = self.root / 'bin'
         binary.mkdir()
         docker = binary / 'docker'
@@ -151,6 +152,7 @@ else:
         transport = linked / '.devcontainer/claude/scripts/git-agent.py'
         transport.parent.mkdir(parents=True)
         shutil.copy(SCRIPT, transport)
+        shutil.copy(SCRIPT.with_name('layout.py'), transport.with_name('layout.py'))
         subprocess.run([sys.executable, str(transport), 'register'], env=self.env,
                        check=True, capture_output=True, text=True)
         for workspace in (linked, self.host):
@@ -161,6 +163,43 @@ else:
             calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
             discovery = [call for call in calls if call[0] == 'ps'][-1]
             self.assertIn('label=devcontainer.local_folder=' + str(workspace), discovery)
+
+    def test_host_mode_remote_runs_the_installed_core(self):
+        data = self.root / 'data'
+        scripts = data / 'claude-devcontainer/current/scripts'
+        scripts.mkdir(parents=True)
+        for name in ('git-agent.py', 'layout.py'):
+            shutil.copy(SCRIPT.with_name(name), scripts / name)
+        shutil.rmtree(self.host / '.devcontainer')
+        self.env['XDG_DATA_HOME'] = str(data)
+        subprocess.run([sys.executable, str(scripts / 'git-agent.py'), 'register'], check=True,
+                       env=dict(self.env, CLAUDE_DEVCONTAINER_WORKSPACE=str(self.host),
+                                CLAUDE_DEVCONTAINER_CONFIG_DIR=str(self.root / 'state')))
+        self.assertIn(str(scripts / 'git-agent.py').replace(' ', '% '),
+                      self.git('config', 'remote.agent.url').stdout)
+        self.git('fetch', 'agent')
+        self.assertEqual(self.git('rev-parse', 'agent/main').stdout, self.git('rev-parse', 'HEAD').stdout)
+        calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
+        self.assertTrue(any('label=devcontainer.local_folder=' + str(self.host) in call for call in calls))
+
+    def test_registration_switches_between_its_own_remotes(self):
+        # A repository used in repository mode, then by the host command, and back.
+        data = self.root / 'data'
+        scripts = data / 'claude-devcontainer/current/scripts'
+        scripts.mkdir(parents=True)
+        for name in ('git-agent.py', 'layout.py'):
+            shutil.copy(SCRIPT.with_name(name), scripts / name)
+        self.env['XDG_DATA_HOME'] = str(data)
+        self.register()
+        repository_url = self.git('config', 'remote.agent.url').stdout
+        subprocess.run([sys.executable, str(scripts / 'git-agent.py'), 'register'], check=True,
+                       env=dict(self.env, CLAUDE_DEVCONTAINER_WORKSPACE=str(self.host),
+                                CLAUDE_DEVCONTAINER_CONFIG_DIR=str(self.root / 'state')))
+        self.assertIn(str(scripts / 'git-agent.py').replace(' ', '% '),
+                      self.git('config', 'remote.agent.url').stdout)
+        self.register()
+        self.assertEqual(self.git('config', 'remote.agent.url').stdout, repository_url)
+        self.assertEqual(self.git('config', '--get-all', 'remote.agent.url').stdout.count('\n'), 1)
 
     def test_unknown_service_is_rejected_before_docker(self):
         result = subprocess.run([sys.executable, str(self.transport), 'sh'], env=self.env,
