@@ -338,6 +338,28 @@ dind = "10.99.1"       # agentとDinDの間のネットワーク。既定は自�
 
 UIDを変えると、workspace、DinD、Claudeの履歴、依存のupperに古い所有者が残ります。先にホストへ未取得のコミットと未コミットの作業を退避し、停止後に対象データの所有者を移行してください。`down --volumes`で消す場合は、workspaceの作業も失われます。
 
+## .devcontainerなしで使う
+
+たまにしか触らないリポジトリでは、`.devcontainer`を取り込まずに起動できます。このリポジトリ(またはコアを取り込んだリポジトリ)で一度だけインストールします。
+
+```sh
+sh .devcontainer/claude/scripts/install-host.sh
+```
+
+`~/.local/share/claude-devcontainer/`にコミット済みのコアを置き、`~/.local/bin/claude-devcontainer`を作ります。あとは任意のGitリポジトリで実行します。
+
+```sh
+claude-devcontainer          # 起動して、agentの中でclaudeを開く
+claude-devcontainer up       # 起動だけ
+claude-devcontainer down     # 止める
+```
+
+- 設定は`~/.config/claude-devcontainer/claude.toml`だけを読みます。書き方は`claude.toml`と同じです。リポジトリ内の`.devcontainer/`(`claude.toml`や`agent-setup.sh`)は読みません。
+- 生成するファイルは`~/.local/state/claude-devcontainer/workspaces/`に置きます。リポジトリに書くのは、変更を受け渡す`agent`リモートの設定(`.git/config`)だけです。
+- イメージは、設定が同じならリポジトリ間で共有されます。ビルドに時間がかかるのは、最初の1回と、コアかホストの設定を変えたときだけです。
+- コアを更新するには、新しい版をチェックアウトしてインストールし直します。古い版は、そこから起動した環境が使っているあいだ残しておき、不要になったら`~/.local/share/claude-devcontainer/`から消してください。
+- 同じリポジトリを、`.devcontainer`を使う方法と同時には起動できません。
+
 ## 更新する
 
 ```sh
