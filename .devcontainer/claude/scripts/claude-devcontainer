@@ -46,24 +46,33 @@ def environment(root):
     })
 
 
-def check_alone(root):
+def check_alone(root, config):
     """Refuse when the folder has a repository mode environment: the scripts find
-    an environment by its folder, and would find two."""
+    an environment by its folder, and would find two. Refuse also when its own
+    environment was started from another installed core: devcontainer up would
+    recreate the agent, which stops the claude sessions in it."""
     result = subprocess.run(['docker', 'ps', '-a', '--filter', f'label=devcontainer.local_folder={root}',
                              '--filter', 'label=com.docker.compose.service=agent',
-                             '--format', '{{.Label "com.docker.compose.project"}}'],
+                             '--format', '{{.Label "com.docker.compose.project"}}\t{{.Label "devcontainer.config_file"}}'],
                             capture_output=True, text=True, check=True)
-    others = sorted(set(result.stdout.split()) - {'cdc-' + layout.workspace_id(root)})
+    own = 'cdc-' + layout.workspace_id(root)
+    agents = [line.partition('\t')[::2] for line in result.stdout.splitlines() if line.strip()]
+    others = sorted({project for project, _ in agents} - {own})
     if others:
         sys.exit(f'error: {root} already has an environment of its own .devcontainer ({", ".join(others)}); '
                  'stop it with .devcontainer/claude/scripts/compose.sh down first.')
+    older = sorted({file for project, file in agents if file and file != str(config)})
+    if older:
+        sys.exit(f'error: the environment of {root} was started from another core ({", ".join(older)}); '
+                 'run claude-devcontainer down, then start it again.')
 
 
 def start(root, env):
     if not shutil.which('devcontainer'):
         sys.exit('error: claude-devcontainer needs the devcontainer CLI (npm install -g @devcontainers/cli).')
-    check_alone(root)
-    target = ['--workspace-folder', str(root), '--config', str(layout.CORE / 'host/devcontainer.json')]
+    config = layout.CORE / 'host/devcontainer.json'
+    check_alone(root, config)
+    target = ['--workspace-folder', str(root), '--config', str(config)]
     if subprocess.run(['devcontainer', 'up', *target], env=env).returncode:
         sys.exit(1)
     return target
@@ -83,7 +92,9 @@ def main():
             start(root, env)
         os.execve('/bin/sh', ['sh', str(layout.CORE / 'scripts/code-server.sh'), *args[1:]], env)
     if command in ('down', 'compose'):
-        rest = args[1:] if command == 'compose' else ['down']
+        # An environment of an earlier core may have services that this one's
+        # compose file no longer has; down removes them too.
+        rest = args[1:] if command == 'compose' else ['down', '--remove-orphans']
         compose = layout.CORE / 'scripts/compose.sh'
         os.execve('/bin/sh', ['sh', str(compose), *rest], env)
     target = start(root, env)

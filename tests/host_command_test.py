@@ -132,6 +132,26 @@ class HostCommandTest(unittest.TestCase):
         self.assertIn('repo_devcontainer', result.stderr)
         self.assertFalse(any(call['argv'][0] == 'devcontainer' for call in self.calls()))
 
+    def test_refuses_its_environment_from_another_core(self):
+        self.env['FAKE_PROJECTS'] = f'{self.project()}\t/old/core/host/devcontainer.json\n'
+        result = self.run_command('up', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('/old/core/host/devcontainer.json', result.stderr)
+        self.assertIn('claude-devcontainer down', result.stderr)
+        self.assertFalse(any(call['argv'][0] == 'devcontainer' for call in self.calls()))
+
+    def test_keeps_its_environment_from_this_core(self):
+        self.env['FAKE_PROJECTS'] = f'{self.project()}\t{CORE / "host/devcontainer.json"}\n'
+        self.run_command('up')
+        self.assertTrue(any(call['argv'][:2] == ['devcontainer', 'up'] for call in self.calls()))
+
+    def test_down_removes_the_services_of_an_earlier_core(self):
+        self.env['FAKE_PROJECTS'] = self.project() + '\n'
+        self.run_command('down', check=False)
+        compose = [call['argv'] for call in self.calls() if call['argv'][:2] == ['docker', 'compose']]
+        self.assertTrue(compose)
+        self.assertEqual(compose[-1][-2:], ['down', '--remove-orphans'])
+
 
 class InstallTest(unittest.TestCase):
     def test_installs_the_committed_core_and_links_the_command(self):

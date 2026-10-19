@@ -358,7 +358,7 @@ claude-devcontainer code-server  # 起動して、隔離エディタを開く(co
 - 設定は`~/.config/claude-devcontainer/claude.toml`だけを読みます。書き方は`claude.toml`と同じです。リポジトリ内の`.devcontainer/`(`claude.toml`や`agent-setup.sh`)は読みません。
 - 生成するファイルは`~/.local/state/claude-devcontainer/workspaces/`に置きます。リポジトリに書くのは、変更を受け渡す`agent`リモートの設定(`.git/config`)だけです。
 - イメージは、設定が同じならリポジトリ間で共有されます。ビルドに時間がかかるのは、最初の1回と、コアかホストの設定を変えたときだけです。
-- コアを更新するには、新しい版をチェックアウトしてインストールし直します。古い版は、そこから起動した環境が使っているあいだ残しておき、不要になったら`~/.local/share/claude-devcontainer/`から消してください。
+- コアを更新するには、新しい版をチェックアウトしてインストールし直します。すべてのリポジトリが次の`claude-devcontainer`から新しい版を使います。古い版で動いている環境は、そのリポジトリで`claude-devcontainer down`してから起動し直してください(インストール時に一覧を表示します。止めないまま起動しようとするとエラーになります)。古い版は自動では消えないので、不要になったら`~/.local/share/claude-devcontainer/`から消してください。
 - 同じリポジトリを、`.devcontainer`を使う方法と同時には起動できません。
 - 設定を変えたら、`claude-devcontainer down`のあと`claude-devcontainer up`で作り直してください。
 
