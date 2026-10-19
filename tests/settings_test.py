@@ -1,8 +1,10 @@
 """How settings.py reads claude.toml and claude.local.toml and what it writes; no Docker needed."""
+import copy
 import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,6 +51,31 @@ class SettingsTest(unittest.TestCase):
         (settings.CONFIG / 'claude.toml').unlink()
         self.generate()
         self.assertEqual((out / 'shell-path.sh').read_text(), '')
+
+    def test_host_mode_reads_only_the_global_settings(self):
+        state = self.root / 'state'
+        self.write('claude.toml', '[docker]\nenabled = true\n')
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'claude.toml').write_text('[agent]\nuid = 1234\n')
+        with mock.patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_CONFIG_DIR': str(state)}):
+            loaded = settings.generate(self.root, {})
+        self.assertFalse(loaded['docker']['enabled'])
+        self.assertEqual(loaded['agent']['uid'], 1234)
+        self.assertTrue((state / '.generated/settings.env').is_file())
+        self.assertFalse((self.root / '.devcontainer/.generated').exists())
+
+    def test_host_mode_shared_mounts_skip_devcontainer(self):
+        shutil.rmtree(self.root / '.devcontainer')
+        (self.root / '.git').mkdir()
+        state = self.root / 'state'
+        loaded = copy.deepcopy(settings.DEFAULTS)
+        loaded['git']['isolation'] = 'shared'
+        loaded['sumi']['secrets'] = Path('/nonexistent/secrets.txt')
+        with mock.patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_CONFIG_DIR': str(state)}):
+            mounts = settings.shared_mounts(loaded, self.root)
+        targets = [mount['target'] for mount in mounts]
+        self.assertNotIn('/workspace/.devcontainer', targets)
+        self.assertIn('/workspace/.git', targets)
 
     def test_user_path_rejects_invalid_settings(self):
         settings.CONFIG.mkdir()

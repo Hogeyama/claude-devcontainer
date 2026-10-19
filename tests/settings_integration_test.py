@@ -52,7 +52,7 @@ class SettingsIntegrationTest(unittest.TestCase):
         shutil.copy(CORE / 'compose.yaml', self.config / 'claude/compose.yaml')
         shutil.copy(CORE / 'template/compose.yaml', self.config / 'compose.yaml')
         shutil.copy(CORE / 'proxy/policy.py', self.config / 'claude/proxy/policy.py')
-        for script in ('initialize.sh', 'settings.py', 'compose.sh', 'workspace-source.py', 'git-agent.py'):
+        for script in ('initialize.sh', 'settings.py', 'compose.sh', 'workspace-source.py', 'git-agent.py', 'layout.py'):
             shutil.copy(CORE / 'scripts' / script, scripts / script)
         # Replace background side effects, keeping the real initialization
         # script and its decision to load images.
