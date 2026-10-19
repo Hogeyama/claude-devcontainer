@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Run the agent for the Git repository here, which needs no .devcontainer.
+
+The core is the one this file belongs to, installed by install-host.sh. The
+settings are the host's claude.toml alone, and what initializeCommand writes
+goes to a state directory of this repository outside it (scripts/layout.py).
+
+Usage: claude-devcontainer          start, then open claude in the agent
+       claude-devcontainer up       start only
+       claude-devcontainer down     stop and remove the containers
+       claude-devcontainer code-server   start, then open the isolated editor (code-server.sh)
+       claude-devcontainer code-server prepare   download the editor's Electron only
+       claude-devcontainer compose ARGS...   docker compose for this environment
+"""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import layout  # noqa: E402
+
+USAGE = 'usage: claude-devcontainer [up | down | code-server [prepare] | compose ARGS...]'
+
+
+def repository():
+    result = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    if result.returncode:
+        sys.exit('error: run claude-devcontainer in a Git working tree.')
+    root = Path(result.stdout.strip()).resolve()
+    if subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'],
+                      capture_output=True).returncode:
+        sys.exit('error: the repository needs a commit; the agent starts from it.')
+    return root
+
+
+def environment(root):
+    state = layout.state_dir(root)
+    state.mkdir(parents=True, exist_ok=True)
+    return dict(os.environ, **{
+        layout.WORKSPACE: str(root),
+        layout.CONFIG_DIR: str(state),
+        'CLAUDE_DEVCONTAINER_WORKSPACE_ID': layout.workspace_id(root),
+        'CLAUDE_DEVCONTAINER_CORE': str(layout.CORE),
+    })
+
+
+def check_alone(root, config):
+    """Refuse when the folder has a repository mode environment: the scripts find
+    an environment by its folder, and would find two. Refuse also when its own
+    environment was started from another installed core: devcontainer up would
+    recreate the agent, which stops the claude sessions in it."""
+    result = subprocess.run(['docker', 'ps', '-a', '--filter', f'label=devcontainer.local_folder={root}',
+                             '--filter', 'label=com.docker.compose.service=agent',
+                             '--format', '{{.Label "com.docker.compose.project"}}\t{{.Label "devcontainer.config_file"}}'],
+                            capture_output=True, text=True, check=True)
+    own = 'cdc-' + layout.workspace_id(root)
+    agents = [line.partition('\t')[::2] for line in result.stdout.splitlines() if line.strip()]
+    others = sorted({project for project, _ in agents} - {own})
+    if others:
+        sys.exit(f'error: {root} already has an environment of its own .devcontainer ({", ".join(others)}); '
+                 'stop it with .devcontainer/claude/scripts/compose.sh down first.')
+    older = sorted({file for project, file in agents if file and file != str(config)})
+    if older:
+        sys.exit(f'error: the environment of {root} was started from another core ({", ".join(older)}); '
+                 'run claude-devcontainer down, then start it again.')
+
+
+def start(root, env):
+    if not shutil.which('devcontainer'):
+        sys.exit('error: claude-devcontainer needs the devcontainer CLI (npm install -g @devcontainers/cli).')
+    config = layout.CORE / 'host/devcontainer.json'
+    check_alone(root, config)
+    target = ['--workspace-folder', str(root), '--config', str(config)]
+    if subprocess.run(['devcontainer', 'up', *target], env=env).returncode:
+        sys.exit(1)
+    return target
+
+
+def main():
+    args = sys.argv[1:]
+    command = args[0] if args else ''
+    if command not in ('', 'up', 'down', 'code-server', 'compose') or (command in ('up', 'down') and len(args) > 1) \
+            or args == ['compose'] or (command == 'code-server' and args[1:] not in ([], ['prepare'])):
+        sys.exit(USAGE)
+    root = repository()
+    env = environment(root)
+    if command == 'code-server':
+        # Quick when the environment runs already: devcontainer up keeps it.
+        if args[1:] != ['prepare']:
+            start(root, env)
+        os.execve('/bin/sh', ['sh', str(layout.CORE / 'scripts/code-server.sh'), *args[1:]], env)
+    if command in ('down', 'compose'):
+        # An environment of an earlier core may have services that this one's
+        # compose file no longer has; down removes them too.
+        rest = args[1:] if command == 'compose' else ['down', '--remove-orphans']
+        compose = layout.CORE / 'scripts/compose.sh'
+        os.execve('/bin/sh', ['sh', str(compose), *rest], env)
+    target = start(root, env)
+    if not command:
+        os.execvpe('devcontainer', ['devcontainer', 'exec', *target, 'claude'], env)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, subprocess.SubprocessError) as error:
+        sys.exit(f'error: {error}')
