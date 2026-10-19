@@ -138,7 +138,7 @@ class ArchiveTest(unittest.TestCase):
             self.members()
         script = self.root / '.devcontainer/claude/scripts'
         script.mkdir(parents=True)
-        for name in ('copy-host-config.py', 'settings.py'):
+        for name in ('copy-host-config.py', 'settings.py', 'layout.py'):
             shutil.copy(ROOT / '.devcontainer/claude/scripts' / name, script / name)
         (self.root / '.devcontainer/claude/proxy').mkdir()
         shutil.copy(ROOT / '.devcontainer/claude/proxy/policy.py', self.root / '.devcontainer/claude/proxy/policy.py')

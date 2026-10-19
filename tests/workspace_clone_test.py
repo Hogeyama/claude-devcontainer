@@ -57,6 +57,13 @@ class WorkspaceCloneTest(unittest.TestCase):
         self.git(self.host, 'add', 'package.json')
         self.git(self.host, 'commit', '-m', message)
 
+    def test_host_mode_writes_the_snapshot_to_the_state_directory(self):
+        state = self.root / 'state'
+        with patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_CONFIG_DIR': str(state)}):
+            data = source.write(self.host)
+        self.assertTrue((state / '.generated/workspace.json').is_file())
+        self.assertTrue((state / '.generated' / data['seed']).is_dir())
+
     def test_first_start_uses_exact_host_commit(self):
         (self.host / 'package.json').write_text('later\n')
         self.commit('host advances after metadata was written')

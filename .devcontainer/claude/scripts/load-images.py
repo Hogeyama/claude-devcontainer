@@ -22,8 +22,11 @@ import subprocess
 import sys
 import time
 
-# The workspace root: this script is .devcontainer/claude/scripts/ in it.
-ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import layout  # noqa: E402
+
+# The workspace root (scripts/layout.py).
+ROOT = layout.workspace_root()
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/load-images.log'
 # Kept in DinD's data volume, so that images survive rebuilds without being sent
 # again. DinD's own image IDs cannot be compared: it uses the containerd image

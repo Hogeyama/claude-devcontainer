@@ -69,15 +69,22 @@ class MainTest(unittest.TestCase):
         with mock.patch.object(pick_networks, 'docker', side_effect=self.docker), \
                 mock.patch('sys.argv', ['pick-networks.py', *argv]):
             pick_networks.main()
-        return pick_networks.OUT.read_text()
+        return pick_networks.out().read_text()
 
     def test_writes_an_ignored_env_file(self):
         text = self.run_main('', '')
         self.assertIn(f'{PROXY}=10.231.70\n{DIND}=10.231.73\n', text)
-        self.assertEqual((pick_networks.OUT.parent / '.gitignore').read_text(), '*\n')
+        self.assertEqual((pick_networks.out().parent / '.gitignore').read_text(), '*\n')
         # Kept on the next run.
         self.networks.append({'Labels': {}, 'IPAM': {'Config': [{'Subnet': '10.231.74.0/24'}]}})
         self.assertEqual(self.run_main('', ''), text)
+
+    def test_host_mode_writes_to_the_state_directory(self):
+        state = Path(os.getcwd()) / 'state'
+        with mock.patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_CONFIG_DIR': str(state)}):
+            self.run_main('', '')
+        self.assertTrue((state / '.generated/networks.env').is_file())
+        self.assertFalse(Path('.devcontainer').exists())
 
     def test_set_values_are_not_written(self):
         text = self.run_main('10.231.80', '10.231.81')
