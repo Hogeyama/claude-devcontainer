@@ -1,4 +1,5 @@
 """The host command, with stand-ins for devcontainer and Docker."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -65,6 +66,36 @@ class HostCommandTest(unittest.TestCase):
         argv = [call['argv'] for call in self.calls() if call['argv'][0] == 'devcontainer']
         self.assertEqual([a[1] for a in argv], ['up', 'exec'])
         self.assertEqual(argv[1][-1], 'claude')
+
+    def test_code_server_points_to_the_host_settings(self):
+        self.env['XDG_CONFIG_HOME'] = str(self.top / 'config')
+        result = self.run_command('code-server', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(self.top / 'config/claude-devcontainer/claude.toml'), result.stderr)
+        self.assertIn('claude-devcontainer down', result.stderr)
+
+    def test_code_server_explains_an_agent_created_without_it(self):
+        config = self.top / 'config/claude-devcontainer'
+        config.mkdir(parents=True)
+        (config / 'claude.toml').write_text('[codeServer]\nenabled = true\n')
+        # This repository's own environment, which compose.sh finds.
+        project = 'cdc-' + hashlib.sha256(os.fsencode(self.repo.resolve())).hexdigest()[:16]
+        self.env.update(XDG_CONFIG_HOME=str(self.top / 'config'), FAKE_PROJECTS=project + '\n')
+        result = self.run_command('code-server', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('created without codeServer.enabled', result.stderr)
+        self.assertIn('claude-devcontainer down', result.stderr)
+
+    def test_code_server_starts_the_environment_first(self):
+        self.env['XDG_CONFIG_HOME'] = str(self.top / 'config')
+        self.run_command('code-server', check=False)
+        argv = [call['argv'] for call in self.calls() if call['argv'][0] == 'devcontainer']
+        self.assertEqual([a[1] for a in argv], ['up'])
+
+    def test_code_server_prepare_starts_nothing(self):
+        self.env['XDG_CONFIG_HOME'] = str(self.top / 'config')
+        self.run_command('code-server', 'prepare', check=False)
+        self.assertFalse(self.log.exists() and any(call['argv'][0] == 'devcontainer' for call in self.calls()))
 
     def test_runs_from_a_subdirectory(self):
         (self.repo / 'nested').mkdir()

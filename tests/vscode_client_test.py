@@ -75,6 +75,10 @@ class ClientTest(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(first, client.state_directory(self.tmp / 'a', environ))
 
+    def test_host_mode_names_the_repository_not_the_core(self):
+        with mock.patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_WORKSPACE': str(self.tmp / 'repo')}):
+            self.assertEqual(client.workspace_root(), self.tmp / 'repo')
+
     def test_shell_command_uses_host_proxy_and_existing_profile(self):
         cmd = client.shell_command(self.tmp / 'electron', self.tmp / 'shell',
                                    self.tmp / 'home/shell', 18123, '/workspace', 'wayland')

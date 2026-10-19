@@ -33,6 +33,10 @@ class WindowsClientTest(unittest.TestCase):
         self.assertNotEqual(first, client.workspace_directory(self.tmp, self.tmp / 'b'))
         self.assertEqual(first, client.workspace_directory(self.tmp, self.tmp / 'a'))
 
+    def test_host_mode_names_the_repository_not_the_core(self):
+        with mock.patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_WORKSPACE': str(self.tmp / 'a')}):
+            self.assertEqual(client.workspace_directory(self.tmp), client.workspace_directory(self.tmp, self.tmp / 'a'))
+
     def test_shell_command_takes_windows_paths(self):
         with mock.patch.object(client, 'wslpath', wslpath):
             cmd = client.shell_command(Path('/mnt/c/d/electron/electron.exe'), Path('/mnt/c/d/w/shell'),

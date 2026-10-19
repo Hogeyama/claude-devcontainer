@@ -14,6 +14,9 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import settings
 if not settings.load()['codeServer']['enabled']:
+    if settings.layout.host_mode():
+        sys.exit(f'error: set [codeServer] enabled = true in {settings.CONFIG / "claude.toml"}, '
+                 'then run claude-devcontainer down and claude-devcontainer up')
     sys.exit('error: set [codeServer] enabled = true in .devcontainer/claude.local.toml and rebuild first')
 PY
 # WSL opens the shell on Windows; any other Linux, in a Wayland or X11 session on Linux.
@@ -30,8 +33,22 @@ prepare)
     exec python3 "$client" --prepare ;;
 open)
     # Verify the actual backend before opening the window.
-    "$scripts/compose.sh" exec -T agent sh -ec \
-      'test "$CLAUDE_DEVCONTAINER_CODE_SERVER" = 1 && curl --fail --silent --noproxy "*" http://127.0.0.1:18000/healthz >/dev/null'
+    # A setting turned on after the agent was created reaches it only when
+    # the agent is created again.
+    if [ -n "${CLAUDE_DEVCONTAINER_CONFIG_DIR-}" ]; then
+        recreate='claude-devcontainer down, then claude-devcontainer up'
+    else
+        recreate='devcontainer up --remove-existing-container'
+    fi
+    enabled=$("$scripts/compose.sh" exec -T agent printenv CLAUDE_DEVCONTAINER_CODE_SERVER || true)
+    if [ "$enabled" != 1 ]; then
+        echo "error: the agent was created without codeServer.enabled; create it again with $recreate" >&2
+        exit 1
+    fi
+    if ! "$scripts/compose.sh" exec -T agent curl --fail --silent --noproxy '*' http://127.0.0.1:18000/healthz >/dev/null; then
+        echo "error: the editor's server in the agent is not up; see /run/claude-devcontainer/code-server.log in it" >&2
+        exit 1
+    fi
     "$scripts/compose.sh" up -d code-server-proxy
     # The published port: compose takes a free one of its range per workspace.
     port=$("$scripts/compose.sh" port code-server-proxy 8080 | sed 's/.*://')

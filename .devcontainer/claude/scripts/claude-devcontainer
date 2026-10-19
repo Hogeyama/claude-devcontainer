@@ -8,6 +8,8 @@ goes to a state directory of this repository outside it (scripts/layout.py).
 Usage: claude-devcontainer          start, then open claude in the agent
        claude-devcontainer up       start only
        claude-devcontainer down     stop and remove the containers
+       claude-devcontainer code-server   start, then open the isolated editor (code-server.sh)
+       claude-devcontainer code-server prepare   download the editor's Electron only
        claude-devcontainer compose ARGS...   docker compose for this environment
 """
 import os
@@ -19,7 +21,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
 
-USAGE = 'usage: claude-devcontainer [up | down | compose ARGS...]'
+USAGE = 'usage: claude-devcontainer [up | down | code-server [prepare] | compose ARGS...]'
 
 
 def repository():
@@ -57,24 +59,34 @@ def check_alone(root):
                  'stop it with .devcontainer/claude/scripts/compose.sh down first.')
 
 
-def main():
-    args = sys.argv[1:]
-    command = args[0] if args else ''
-    if command not in ('', 'up', 'down', 'compose') or (command in ('up', 'down') and len(args) > 1) \
-            or args == ['compose']:
-        sys.exit(USAGE)
-    root = repository()
-    env = environment(root)
-    if command in ('down', 'compose'):
-        rest = args[1:] if command == 'compose' else ['down']
-        compose = layout.CORE / 'scripts/compose.sh'
-        os.execve('/bin/sh', ['sh', str(compose), *rest], env)
+def start(root, env):
     if not shutil.which('devcontainer'):
         sys.exit('error: claude-devcontainer needs the devcontainer CLI (npm install -g @devcontainers/cli).')
     check_alone(root)
     target = ['--workspace-folder', str(root), '--config', str(layout.CORE / 'host/devcontainer.json')]
     if subprocess.run(['devcontainer', 'up', *target], env=env).returncode:
         sys.exit(1)
+    return target
+
+
+def main():
+    args = sys.argv[1:]
+    command = args[0] if args else ''
+    if command not in ('', 'up', 'down', 'code-server', 'compose') or (command in ('up', 'down') and len(args) > 1) \
+            or args == ['compose'] or (command == 'code-server' and args[1:] not in ([], ['prepare'])):
+        sys.exit(USAGE)
+    root = repository()
+    env = environment(root)
+    if command == 'code-server':
+        # Quick when the environment runs already: devcontainer up keeps it.
+        if args[1:] != ['prepare']:
+            start(root, env)
+        os.execve('/bin/sh', ['sh', str(layout.CORE / 'scripts/code-server.sh'), *args[1:]], env)
+    if command in ('down', 'compose'):
+        rest = args[1:] if command == 'compose' else ['down']
+        compose = layout.CORE / 'scripts/compose.sh'
+        os.execve('/bin/sh', ['sh', str(compose), *rest], env)
+    target = start(root, env)
     if not command:
         os.execvpe('devcontainer', ['devcontainer', 'exec', *target, 'claude'], env)
 
