@@ -17,6 +17,9 @@ import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1] / 'scripts'))
+import layout  # noqa: E402
+
 SHELL = HERE.parent / 'shell'
 PROXY_PORT = 18086
 TOKEN = 'CLAUDE_DEVCONTAINER_VSCODE_TOKEN'
@@ -76,7 +79,8 @@ def display_backend(environ=os.environ):
 
 
 def workspace_root():
-    return HERE.parents[3]
+    # The repository, also in host mode, where the core is installed elsewhere.
+    return layout.workspace_root()
 
 
 def state_directory(root=None, environ=os.environ):

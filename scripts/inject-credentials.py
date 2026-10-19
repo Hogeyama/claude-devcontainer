@@ -20,8 +20,11 @@ import threading
 import time
 import urllib.request
 
-# The workspace root: this script is .devcontainer/claude/scripts/ in it.
-ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import layout  # noqa: E402
+
+# The workspace root (scripts/layout.py).
+ROOT = layout.workspace_root()
 # Shell assignments such as GITHUB_TOKEN=$(pass github/token): the Claude
 # credential, and the secrets that proxy.hosts of the workspace's claude.toml
 # injects as ${NAME}. The host runs it, so it must stay outside the workspace, which the

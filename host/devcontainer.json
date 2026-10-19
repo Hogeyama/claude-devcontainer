@@ -1,0 +1,14 @@
+{
+  "name": "Claude with mandatory proxy and offline Docker",
+  "dockerComposeFile": "compose.yaml",
+  "service": "agent",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "node",
+  "updateRemoteUserUID": false,
+  "overrideCommand": false,
+  "shutdownAction": "stopCompose",
+  "initializeCommand": ["${localEnv:CLAUDE_DEVCONTAINER_CORE}/scripts/initialize.sh"],
+  "postStartCommand": "wait-ready.sh",
+  "waitFor": "postStartCommand",
+  "userEnvProbe": "none"
+}

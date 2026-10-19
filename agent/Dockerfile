@@ -29,27 +29,49 @@ FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b0
 FROM scratch AS workspace-setup
 COPY --from=workspace-config agent-setup.s[h] /
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+# Layers are shared between workspaces' images only up to the first that
+# differs, so what every workspace builds alike and is large comes first, and
+# what claude.toml or agent-setup.sh varies comes last.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates openssl git gh curl jq ripgrep python3 iptables \
     util-linux procps \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code@2.1.295 \
-    && npm cache clean --force
-# acp.enabled / acp.version in claude.toml. Disabled builds fetch no ACP packages.
-ARG INSTALL_ACP=0
-ARG ACP_VERSION=0.90.0
-RUN if [ "$INSTALL_ACP" = 1 ]; then \
-      npm install -g "@agentclientprotocol/claude-agent-acp@$ACP_VERSION" \
-      && npm cache clean --force; \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
+# Before Claude Code, so that its frequent updates do not unpack this again.
+RUN --mount=type=bind,from=editor-code-server,target=/tmp/editor-code-server \
+    archive=/tmp/editor-code-server/code-server.tar.gz \
+    && if [ -f "$archive" ]; then \
+      mkdir -p /opt/code-server \
+      && tar -xzf "$archive" -C /opt/code-server --strip-components 1 --no-same-owner \
+      && chmod -R u-s,g-s,go-w /opt/code-server \
+      && test -x /opt/code-server/bin/code-server; \
     fi
+# The isolated editor's Claude Code extension, which every workspace with
+# code-server needs: here, so that their images share it, unlike the
+# codeServer.extensions each adds below.
+RUN if [ -x /opt/code-server/bin/code-server ]; then \
+      # Readable by the agent: the server's CLI would create it 0700.
+      install -d -m 755 /opt/code-server/extensions \
+      && HOME=/tmp/code-server-install /opt/code-server/bin/code-server \
+        --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/code-server-install \
+        --install-extension anthropic.claude-code \
+      && test -n "$(find /opt/code-server/extensions -maxdepth 1 -iname 'anthropic.claude-code-*')" \
+      && rm -rf /tmp/code-server-install; \
+    fi
+RUN npm install -g @anthropic-ai/claude-code@2.1.295 \
+    && npm cache clean --force
+# The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
+COPY --from=sumi /sumi /usr/local/bin/sumi
+RUN sumi init --agent claude --server /run/sumi/mask.sock --shell /bin/bash --settings /tmp/sumi/settings.json \
+    && install -D -m 644 /tmp/sumi/settings.json /usr/local/share/claude-devcontainer/sumi-settings.json \
+    && rm -rf /tmp/sumi
 # The workspace's owner on the host (agent.uid and agent.gid in claude.toml).
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 RUN if [ "$AGENT_UID" -le 0 ]; then echo "error: agent.uid must be positive." >&2; exit 1; fi \
     && groupmod -o -g "$AGENT_GID" node \
     && usermod -o -u "$AGENT_UID" -g "$AGENT_GID" node
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 COPY dind-bridge/src/ /opt/dind-bridge/
 RUN chmod 755 /opt/dind-bridge/main.mjs \
     && ln -s /opt/dind-bridge/main.mjs /usr/local/bin/dind-bridge \
@@ -59,23 +81,19 @@ RUN chmod 755 /opt/dind-bridge/main.mjs \
     && install -d -o node -g node /workspace \
     # The claude-projects volume copies this owner when it is first created.
     && install -d -o node -g node /home/node/.claude /home/node/.claude/projects \
+    && install -d -o node -g node /home/node/.vscode-server \
     # Interactive shells, including Nix's Bash launched by VS Code, and Bash
     # that takes itself for a command run by rshd, which reads ~/.bashrc in
     # place of BASH_ENV: one with a socket for stdin and no SHLVL, as Claude
     # Code's Bash tool is when VS Code starts Claude. At the top, since
     # Debian's ~/.bashrc returns early unless the shell is interactive.
     && sed -i '1i . /etc/bash-env.sh' /home/node/.bashrc
-# The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
-# the host's network before the proxy applies. Core files are copied after it.
-RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
-    if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
-RUN --mount=type=bind,from=editor-code-server,target=/tmp/editor-code-server \
-    archive=/tmp/editor-code-server/code-server.tar.gz \
-    && if [ -f "$archive" ]; then \
-      mkdir -p /opt/code-server \
-      && tar -xzf "$archive" -C /opt/code-server --strip-components 1 --no-same-owner \
-      && chmod -R u-s,g-s,go-w /opt/code-server \
-      && test -x /opt/code-server/bin/code-server; \
+# acp.enabled / acp.version in claude.toml. Disabled builds fetch no ACP packages.
+ARG INSTALL_ACP=0
+ARG ACP_VERSION=0.90.0
+RUN if [ "$INSTALL_ACP" = 1 ]; then \
+      npm install -g "@agentclientprotocol/claude-agent-acp@$ACP_VERSION" \
+      && npm cache clean --force; \
     fi
 # The isolated editor restores these extensions and Machine settings at startup.
 ARG INSTALL_CODE_SERVER
@@ -85,9 +103,9 @@ RUN if [ "$INSTALL_CODE_SERVER" = 1 ]; then \
         '"workbench.externalUriOpeners":{"http://localhost:*":"simpleBrowser.open"}}' \
         > /opt/code-server/machine-settings.json; \
     fi
-RUN install -d -o node -g node /home/node/.vscode-server
 # codeServer.extensions in claude.toml, space-separated, each optionally
-# @version. Installed at build time from code-server's default Open VSX (the agent has no
+# @version, besides anthropic.claude-code above. Installed at build time
+# from code-server's default Open VSX (the agent has no
 # runtime access to it), with the server's own CLI, into /opt/code-server/extensions,
 # which agent/start-code-server.sh copies for the server at each start. The
 # build fails if an extension is not installed afterwards, compared as
@@ -115,11 +133,10 @@ RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
       done \
       && rm -rf /tmp/code-server-install; \
     fi
-# The entrypoint puts these hooks in managed-settings.d when the sumi service runs.
-COPY --from=sumi /sumi /usr/local/bin/sumi
-RUN sumi init --agent claude --server /run/sumi/mask.sock --shell /bin/bash --settings /tmp/sumi/settings.json \
-    && install -D -m 644 /tmp/sumi/settings.json /usr/local/share/claude-devcontainer/sumi-settings.json \
-    && rm -rf /tmp/sumi
+# The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
+# the host's network before the proxy applies. Core files are copied after it.
+RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
+    if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 # With an OAuth token, an unfinished onboarding makes the CLI check
 # platform.claude.com, which the proxy does not allow, and refuse to start.
 # /workspace is trusted up front: the container and the proxy are the

@@ -6,11 +6,13 @@ set -eu
 # the proxy build and the scripts below read to .devcontainer/.generated/.
 python3 "$(dirname "$0")/settings.py" generate
 python3 "$(dirname "$0")/settings.py" prepare-dependencies
-mkdir -p .devcontainer/.nix-env
+# .devcontainer/, or the host command's state directory (scripts/layout.py).
+config=${CLAUDE_DEVCONTAINER_CONFIG_DIR:-.devcontainer}
+mkdir -p "$config/.nix-env"
 
 # A setting as settings.py wrote it for compose: NAME='value', never with '.
 setting() {
-    sed -n "s/^$1='\\(.*\\)'\$/\\1/p" .devcontainer/.generated/settings.env
+    sed -n "s/^$1='\\(.*\\)'\$/\\1/p" "$config/.generated/settings.env"
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND)
 # Only independent Git modes need a snapshot and an agent remote.
@@ -30,7 +32,7 @@ python3 "$(dirname "$0")/settings.py" check-shared-mounts
 # script `nix develop` reads; the agent runs it, shellHook included, once it
 # starts (agent/nix-env.py).
 if [ "$(setting CLAUDE_DEVCONTAINER_NIX)" = 1 ]; then
-    out=.devcontainer/.nix-env
+    out=$config/.nix-env
     ref=$(setting CLAUDE_DEVCONTAINER_NIX_REF)
     shell=$(setting CLAUDE_DEVCONTAINER_NIX_SHELL)
     mkdir -p "$out"

@@ -140,5 +140,5 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 enabled = false
 # Marketplace IDs, optionally @version,
 # installed into the agent's image at build time (rebuild and recreate the
-# agent after a change).
-extensions = [] # e.g. ["anthropic.claude-code"]
+# agent after a change). anthropic.claude-code is always installed.
+extensions = [] # e.g. ["ms-python.python"]
