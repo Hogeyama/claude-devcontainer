@@ -18,6 +18,8 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
                           'env': {{k: v for k, v in os.environ.items() if k.startswith('CLAUDE_DEVCONTAINER_')}}}}) + '\\n')
 if os.path.basename(sys.argv[0]) == 'docker' and sys.argv[1] == 'ps':
     print(os.environ.get('FAKE_PROJECTS', ''), end='')
+if os.path.basename(sys.argv[0]) == 'docker' and 'exec' in sys.argv and os.environ.get('FAKE_AGENT_STOPPED'):
+    sys.exit('service "agent" is not running')
 '''
 
 
@@ -43,6 +45,9 @@ class HostCommandTest(unittest.TestCase):
     def run_command(self, *args, cwd=None, check=True):
         return subprocess.run([sys.executable, str(COMMAND), *args], cwd=cwd or self.repo, env=self.env,
                               capture_output=True, text=True, check=check)
+
+    def project(self):
+        return 'cdc-' + hashlib.sha256(os.fsencode(self.repo.resolve())).hexdigest()[:16]
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
@@ -79,12 +84,22 @@ class HostCommandTest(unittest.TestCase):
         config.mkdir(parents=True)
         (config / 'claude.toml').write_text('[codeServer]\nenabled = true\n')
         # This repository's own environment, which compose.sh finds.
-        project = 'cdc-' + hashlib.sha256(os.fsencode(self.repo.resolve())).hexdigest()[:16]
-        self.env.update(XDG_CONFIG_HOME=str(self.top / 'config'), FAKE_PROJECTS=project + '\n')
+        self.env.update(XDG_CONFIG_HOME=str(self.top / 'config'), FAKE_PROJECTS=self.project() + '\n')
         result = self.run_command('code-server', check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('created without codeServer.enabled', result.stderr)
         self.assertIn('claude-devcontainer down', result.stderr)
+
+    def test_code_server_tells_a_stopped_agent_apart(self):
+        config = self.top / 'config/claude-devcontainer'
+        config.mkdir(parents=True)
+        (config / 'claude.toml').write_text('[codeServer]\nenabled = true\n')
+        self.env.update(XDG_CONFIG_HOME=str(self.top / 'config'), FAKE_PROJECTS=self.project() + '\n',
+                        FAKE_AGENT_STOPPED='1')
+        result = self.run_command('code-server', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('the agent is not running', result.stderr)
+        self.assertNotIn('created without codeServer.enabled', result.stderr)
 
     def test_code_server_starts_the_environment_first(self):
         self.env['XDG_CONFIG_HOME'] = str(self.top / 'config')

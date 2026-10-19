@@ -36,9 +36,16 @@ open)
     # A setting turned on after the agent was created reaches it only when
     # the agent is created again.
     if [ -n "${CLAUDE_DEVCONTAINER_CONFIG_DIR-}" ]; then
+        start='claude-devcontainer up'
         recreate='claude-devcontainer down, then claude-devcontainer up'
     else
+        start='devcontainer up'
         recreate='devcontainer up --remove-existing-container'
+    fi
+    # printenv prints nothing in a stopped agent as well; tell the two apart.
+    if ! "$scripts/compose.sh" exec -T agent true >/dev/null; then
+        echo "error: the agent is not running; start it with $start" >&2
+        exit 1
     fi
     enabled=$("$scripts/compose.sh" exec -T agent printenv CLAUDE_DEVCONTAINER_CODE_SERVER || true)
     if [ "$enabled" != 1 ]; then
