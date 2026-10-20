@@ -315,7 +315,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         self.exec('sh', '-ec', 'echo writable > packages/app/node_modules/probe')
         self.assertEqual(self.exec('git', 'rev-parse', 'HEAD').stdout.strip(), self.initial_commit)
         self.assertEqual(self.exec('git', 'branch', '--show-current').stdout.strip(), self.initial_branch)
-        self.assertEqual(self.exec('git', 'remote').stdout.strip(), '')
+        self.assertEqual(self.exec('git', 'remote').stdout.strip(), 'host')
+        self.assertEqual(self.exec('git', 'remote', 'get-url', 'host').stdout.strip(), '/run/host/git')
         remote = subprocess.check_output(['git', '-C', str(self.workspace), 'remote', 'get-url', 'agent'], text=True)
         self.assertTrue(remote.startswith('ext::'))
         for path in ('/run/host/generated/workspace.json', '/run/host/generated/images.txt', '/run/host/nix-env/probe'):
@@ -325,13 +326,17 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         self.assertEqual(mounts['/workspace']['type'], 'volume')
         self.assertEqual(mounts['/workspace/node_modules']['type'], 'volume')
         self.assertFalse(any(p.startswith('/workspace/.git') for p in mounts))
+        self.assertTrue(mounts['/run/host/git']['read_only'])
+        self.assertNotEqual(self.exec('sh', '-c', 'echo x >> /run/host/git/HEAD', check=False).returncode, 0)
+        self.assertEqual(self.exec('git', '-C', '/run/host/git', 'rev-parse', self.initial_branch).stdout.strip(),
+                         self.initial_commit)
         container = self.compose_run('ps', '-q', 'agent').strip()
         actual = json.loads(docker('inspect', container))[0]['Mounts']
         self.assertEqual(next(m['Type'] for m in actual if m['Destination'] == '/workspace'), 'volume')
         for mount in actual:
             if mount['Type'] == 'bind' and Path(mount['Source']).is_relative_to(self.workspace):
                 self.assertFalse(mount['RW'])
-                self.assertIn(mount['Destination'], ('/run/host/generated', '/run/host/nix-env'))
+                self.assertIn(mount['Destination'], ('/run/host/generated', '/run/host/nix-env', '/run/host/git'))
         self.assertFalse(any(m['Destination'] == '/nix/store' for m in actual))
 
     def test_read_only_dependency_bind(self):

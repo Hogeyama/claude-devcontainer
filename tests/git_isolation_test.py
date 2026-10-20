@@ -271,8 +271,40 @@ class GitIsolationTest(unittest.TestCase):
         (self.root / '.secrets').symlink_to(self.root.parent)
         (self.root / '.devcontainer/claude.local.toml').write_text(
             '[git]\nisolation = "clone"\nshared_hidden_paths = [".secrets"]\n')
-        self.assertEqual(self.generated_mounts(), {'/workspace': {'type': 'volume', 'source': 'workspace',
-                                                               'target': '/workspace'}})
+        self.assertEqual(self.generated_mounts(), {
+            '/workspace': {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
+            '/run/host/git': {'type': 'bind', 'source': str(self.root.resolve() / '.git'), 'target': '/run/host/git',
+                              'read_only': True, 'bind': {'create_host_path': False}}})
+
+    def test_clone_shows_the_common_git_of_a_linked_worktree(self):
+        self.git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-qm', 'fixture')
+        linked = self.root.parent / 'linked'
+        self.git('worktree', 'add', '-b', 'linked', str(linked))
+        (linked / '.devcontainer').mkdir()
+        (linked / '.devcontainer/claude.toml').write_text('[git]\nisolation = "clone"\n')
+        settings.generate(linked, {})
+        data = json.loads((linked / '.devcontainer/.generated/workspace.compose.yaml').read_text())
+        generated = {m['target']: m for m in data['services']['agent']['volumes']}
+        self.assertEqual(generated['/run/host/git']['source'], str(self.root.resolve() / '.git'))
+        self.assertTrue(generated['/run/host/git']['read_only'])
+
+    def test_clone_omits_host_git_with_alternates(self):
+        (self.root / '.devcontainer/claude.local.toml').write_text('[git]\nisolation = "clone"\n')
+        (self.root / '.git/objects/info/alternates').write_text('/outside/objects\n')
+        self.assertNotIn('/run/host/git', self.generated_mounts())
+
+    def test_clone_refuses_writable_host_git(self):
+        host_git = self.root / '.git'
+        def statvfs(path):
+            return SimpleNamespace(f_flag=os.ST_RDONLY if read_only else 0)
+        with patch.object(mounts.os, 'statvfs', side_effect=statvfs), \
+                patch.object(mounts.os, 'access', side_effect=lambda path, mode: not read_only):
+            read_only = True
+            mounts.check_clone(host_git)
+            read_only = False
+            with self.assertRaisesRegex(ValueError, 'must be mounted read-only in clone mode'):
+                mounts.check_clone(host_git)
+        mounts.check_clone(self.root / 'absent')
 
     def test_mask_paths_escape_compose_interpolation(self):
         (self.root / '$TOKEN').write_text('hidden')

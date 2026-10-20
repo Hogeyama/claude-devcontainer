@@ -311,6 +311,20 @@ class WorkspaceCloneTest(unittest.TestCase):
         self.assertEqual(self.git(self.host, 'config', '--get', 'remote.origin.url'),
                          'https://github.com/upstream/project.git')
 
+    def test_host_remote_names_the_read_only_host_git_once(self):
+        clone.clone(self.metadata, self.agent)
+        clone.add_host_remote(self.agent, self.root / 'absent')
+        self.assertEqual(self.git(self.agent, 'remote'), '')
+        clone.add_host_remote(self.agent, self.host / '.git')
+        self.assertEqual(self.git(self.agent, 'remote', 'get-url', 'host'), str(self.host / '.git'))
+        (self.host / 'package.json').write_text('{}\n')
+        self.commit('host change')
+        self.git(self.agent, 'fetch', '-q', 'host')
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'host/main'), self.git(self.host, 'rev-parse', 'HEAD'))
+        self.git(self.agent, 'remote', 'set-url', 'host', 'https://example.com/own.git')
+        clone.add_host_remote(self.agent, self.host / '.git')
+        self.assertEqual(self.git(self.agent, 'remote', 'get-url', 'host'), 'https://example.com/own.git')
+
     def test_unborn_head_does_not_publish_metadata(self):
         empty = self.root / 'empty'
         empty.mkdir()

@@ -28,7 +28,7 @@ isolation = "clone" # "shared" にするとホストの作業ツリーを共有
 
 | 設定 | 作業場所 | Gitと変更の受け渡し |
 | --- | --- | --- |
-| `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストから`git fetch/push agent` |
+| `clone` | 独立した永続volume。初回のみホストHEADをコピー | 独立した`.git`。ホストの`.git`は`/run/host/git`にread-only。ホストから`git fetch/push agent` |
 | `shared` | ホストの作業ツリーを`/workspace`へread-write mount | `/workspace/.git`はagent専用のvolume。ホストの`.git`は`/run/host/git`にread-only。ホストから`git fetch agent`と`git reset --mixed` |
 | `unsafe_shared` | ホストの作業ツリーをread-write mount | ホストのindex・refs・objectsも直接共有。設定・hooksなどは保護 |
 
@@ -174,7 +174,16 @@ git fetch /run/host/git main
 git reset --mixed FETCH_HEAD   # 作業ツリーは既にホストのもの
 ```
 
-cloneでは、ホストからコンテナの受け取り用ブランチへpushする。
+cloneでも、ホストの`.git`がコンテナの`/run/host/git`にread-onlyで見えている。agentに「同期して」と頼めば、コンテナ内で取り込む。
+
+```sh
+git fetch host
+git rebase host/main   # または git merge host/main
+```
+
+remote `host`は起動時に`/run/host/git`を指すように登録する。同名のremoteが既にあれば変更しない。linked worktreeではリポジトリ共通の`.git`を置くので、全ブランチが見える。objectsをalternatesから借りているリポジトリでは`/run/host/git`を置かない。ホストとagentのUIDが違うとGitがdubious ownershipで拒否するので、`agent.uid`/`agent.gid`をホストの所有者に合わせる。
+
+ホストからコンテナの受け取り用ブランチへpushしてもよい。
 
 ```sh
 git push agent HEAD:refs/heads/host/main
