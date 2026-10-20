@@ -98,6 +98,16 @@ def clone(source, workspace):
     marker.unlink()
 
 
+def add_host_remote(workspace, host_git=HOST_GIT):
+    """Name the host's read-only Git `host`, once; a remote of that name already there stays."""
+    if not Path(host_git).is_dir():
+        return
+    remotes = subprocess.run(['git', '-C', str(workspace), 'remote'], check=True, capture_output=True, text=True)
+    if 'host' not in remotes.stdout.split():
+        subprocess.run(['git', '-C', str(workspace), 'remote', 'add', 'host', str(host_git)],
+                       check=True, capture_output=True, text=True)
+
+
 def attach(source, workspace, host_git=HOST_GIT):
     """Build the agent's Git for a shared working tree; index from HEAD, files untouched."""
     workspace = Path(workspace).absolute()
@@ -214,5 +224,6 @@ if __name__ == '__main__':
             attach('/run/host/generated/workspace.json', '/workspace')
         else:
             clone('/run/host/generated/workspace.json', '/workspace')
+            add_host_remote('/workspace')
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         sys.exit(f'error: workspace initialization failed: {error}')

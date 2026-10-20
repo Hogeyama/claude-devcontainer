@@ -71,7 +71,7 @@ HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
 ISOLATION_MODES = ('clone', 'shared', 'unsafe_shared')
 # The modes that mount the host's working tree as /workspace.
 SHARED_MODES = ('shared', 'unsafe_shared')
-# Where shared mode shows the agent the host's Git, read-only.
+# Where shared and clone modes show the agent the host's Git, read-only.
 HOST_GIT = '/run/host/git'
 # compose's names, which settings.env writes. Only these may not come from
 # elsewhere; compose sets others, such as _PROXY_ADDRESS, in the containers.
@@ -472,6 +472,23 @@ def hidden_paths(settings, root):
     return hidden
 
 
+def host_git_dir(root):
+    """The host's common Git directory for clone mode to show, or None.
+
+    The common directory, so that a linked worktree shows every branch. Not
+    when objects come from alternates, which would be missing there.
+    """
+    result = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                            capture_output=True, text=True)
+    if result.returncode:
+        return None
+    git = Path(result.stdout.strip())
+    alternates = git / 'objects/info/alternates'
+    if not git.is_dir() or (alternates.is_file() and alternates.stat().st_size):
+        return None
+    return git
+
+
 def workspace_compose(settings, root):
     mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
     if settings['git']['isolation'] in SHARED_MODES:
@@ -479,6 +496,9 @@ def workspace_compose(settings, root):
         mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),
                    'target': '/workspace', 'bind': {'create_host_path': False}}]
         mounts += shared_mounts(settings, root)
+    elif git := host_git_dir(root):
+        mounts.append({'type': 'bind', 'source': str(git), 'target': HOST_GIT,
+                       'read_only': True, 'bind': {'create_host_path': False}})
     if settings['nix']['enabled']:
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})

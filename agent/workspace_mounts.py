@@ -9,7 +9,7 @@ import sys
 
 # The modes that mount the host's working tree as /workspace.
 SHARED_MODES = ('shared', 'unsafe_shared')
-# Where shared mode shows the agent the host's Git, read-only.
+# Where shared and clone modes show the agent the host's Git, read-only.
 HOST_GIT = Path('/run/host/git')
 MOUNTINFO = Path('/proc/self/mountinfo')
 
@@ -121,10 +121,18 @@ def check_shared(workspace, isolation='shared', mountinfo=MOUNTINFO):
         return
 
 
+def check_clone(host_git=HOST_GIT):
+    """As node: the host's Git, shown when it has no alternates, cannot be written."""
+    if host_git.exists() and (not os.statvfs(host_git).f_flag & os.ST_RDONLY or os.access(host_git, os.W_OK)):
+        raise ValueError(f'{host_git} must be mounted read-only in clone mode; regenerate settings and recreate the container.')
+
+
 if __name__ == '__main__':
     try:
         if sys.argv[1:] == ['--check-shared']:
             check_shared('/workspace', os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'shared'))
+        elif sys.argv[1:] == ['--check-clone']:
+            check_clone()
         else:
             if os.geteuid() != 0:
                 sys.exit('error: mount preparation is an entrypoint-only root operation.')

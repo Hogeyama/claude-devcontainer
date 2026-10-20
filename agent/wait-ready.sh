@@ -43,6 +43,7 @@ fi
 case "${CLAUDE_DEVCONTAINER_GIT_ISOLATION:-clone}" in
 clone)
     echo 'Git isolation: clone' >&2
+    python3 /usr/local/bin/workspace_mounts.py --check-clone
     python3 /usr/local/bin/clone-workspace.py ;;
 shared)
     echo 'Git isolation: shared; edits reach the host; .git is this container'"'"'s own, with the host'"'"'s read-only at /run/host/git. Commit here; the host fetches, reviews, and runs git reset --mixed.' >&2
