@@ -35,6 +35,8 @@ FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates openssl git gh curl jq ripgrep python3 iptables \
     util-linux procps \
+    # less: Git's default pager, without which git log in a terminal fails.
+    less moreutils file unzip xz-utils patch \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
