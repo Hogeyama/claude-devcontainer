@@ -314,7 +314,7 @@ images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
 
 投入後は、agentのシェルから`docker run`や`docker build --network=none`を実行できます。buildには投入済みのbase imageとローカルにある依存ファイルを使ってください。Gradleは`--offline`で実行し、その他のツールも事前に用意したキャッシュや依存ファイルを使ってください。ビルド中のオンラインpackage installには対応していません。
 
-agentにツールを追加する場合は、[`.devcontainer/agent-setup.sh`](../.devcontainer/agent-setup.sh)に導入手順を書いてください。ホストでagentのimageをビルドする際にrootで実行されます。
+agentにツールを追加する場合は、[`.devcontainer/agent-setup.sh`](../.devcontainer/agent-setup.sh)に導入手順を書いてください。ホストでagentのimageをビルドする際にrootで実行されます。すべてのリポジトリで使うツールは、ホストの`~/.config/claude-devcontainer/agent-setup.sh`に書けます。こちらが先に実行されます。
 
 コンテナのTCPポートは、`docker run -p 8080`または`-p 18080:8080`のように、既定の`0.0.0.0`で公開してください。agentからは、`127.0.0.1:公開ポート`に接続できます。loopbackだけで公開したポートは中継されません。Docker API用の2375番ポートも公開先としては使えません。
 

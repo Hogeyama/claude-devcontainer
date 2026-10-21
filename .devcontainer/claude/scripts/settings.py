@@ -17,6 +17,8 @@ they read to .devcontainer/.generated/:
   proxy.json    the merged proxy.hosts, which the proxy image build installs.
   images.txt    docker.images, one per line, for load-images.py and wait-ready.sh.
   agent.env     the dummy tokens that proxy.hosts' env names, for the agent.
+  global-agent-setup.sh  a copy of CONFIG/agent-setup.sh, which the agent image
+                build runs before the workspace's agent-setup.sh.
   workspace.compose.yaml  workspace mounts and the optional Nix store mount.
   hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
@@ -582,6 +584,11 @@ def generate(root=ROOT, environ=os.environ):
     write(out / 'proxy.json', proxy_json(settings))
     write(out / 'images.txt', images_txt(settings))
     write(out / 'agent.env', header + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings)))
+    global_setup = CONFIG / 'agent-setup.sh'
+    if global_setup.is_file():
+        write(out / 'global-agent-setup.sh', global_setup.read_text())
+    else:
+        (out / 'global-agent-setup.sh').unlink(missing_ok=True)
     write(out / 'workspace.compose.yaml', workspace)
     write(out / 'shell-path.sh', path_script)
     return settings

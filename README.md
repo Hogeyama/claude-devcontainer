@@ -136,7 +136,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 
 | 変えたいもの | 書く場所 | 節 |
 |---|---|---|
-| agentに入れるツール | `agent-setup.sh` | [agentの環境を変える](#agentの環境を変える) |
+| agentに入れるツール | `agent-setup.sh`、ホストの`agent-setup.sh` | [agentの環境を変える](#agentの環境を変える) |
 | agentの環境変数・volume | `compose.yaml` | [agentの環境を変える](#agentの環境を変える) |
 | VS Codeの拡張機能など | `devcontainer.json` | [agentの環境を変える](#agentの環境を変える) |
 | 接続先と、proxyが付ける認証 | `claude.toml`の`proxy.hosts`、ホストの`credentials` | [接続先を変える](#接続先を変える) |
@@ -150,7 +150,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | シークレットのマスク | `claude.toml`の`sumi`、ホストの`sumi/secrets.txt` | [シークレットをマスクする](#シークレットをマスクする) |
 | agentのUID・ネットワーク | `claude.local.toml`の`agent`、`subnets` | [UIDとネットワークを変える](#uidとネットワークを変える) |
 
-ホストの`credentials`、`extra/`、`sumi/`は、`~/.config/claude-devcontainer/`の下にあります。
+ホストの`credentials`、`agent-setup.sh`、`extra/`、`sumi/`は、`~/.config/claude-devcontainer/`の下にあります。
 
 ### claude.tomlとclaude.local.toml
 
@@ -188,6 +188,7 @@ devcontainer up --remove-existing-container
 ### agentの環境を変える
 
 - ツールは、導入手順を`agent-setup.sh`に書きます。このスクリプトはagentのimageをビルドするときにホストでrootとして実行されるので、package registryにも接続できます。
+  - すべてのリポジトリで使うツールは、ホストの`~/.config/claude-devcontainer/agent-setup.sh`に書きます。リポジトリの`agent-setup.sh`より先に実行します。起動処理が`.devcontainer/.generated/`へコピーしてビルドに渡すので、agentからも読めます。秘密は書かないでください。
 - 環境変数やvolumeは、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
   - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。たとえばJavaは`HTTPS_PROXY`を読まないので、`JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080 -Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS`のように指定します。imageの`JAVA_TOOL_OPTIONS`はproxyのCAを含むtruststoreを指定しているので、上書きするときは後ろの2つを残してください。
 - VS Codeの拡張機能などは、`devcontainer.json`に書きます。
@@ -356,7 +357,7 @@ claude-devcontainer code-server  # 起動して、隔離エディタを開く(co
 claude-devcontainer compose logs proxy  # この環境の docker compose
 ```
 
-- 設定は`~/.config/claude-devcontainer/claude.toml`だけを読みます。書き方は`claude.toml`と同じです。リポジトリ内の`.devcontainer/`(`claude.toml`や`agent-setup.sh`)は読みません。
+- 設定は`~/.config/claude-devcontainer/claude.toml`だけを読みます。書き方は`claude.toml`と同じです。ツールは`~/.config/claude-devcontainer/agent-setup.sh`で入れます。リポジトリ内の`.devcontainer/`(`claude.toml`や`agent-setup.sh`)は読みません。
 - 生成するファイルは`~/.local/state/claude-devcontainer/workspaces/`に置きます。リポジトリに書くのは、変更を受け渡す`agent`リモートの設定(`.git/config`)だけです。
 - イメージは、設定が同じならリポジトリ間で共有されます。ビルドに時間がかかるのは、最初の1回と、コアかホストの設定を変えたときだけです。
 - コアを更新するには、新しい版をチェックアウトしてインストールし直します。すべてのリポジトリが次の`claude-devcontainer`から新しい版を使います。古い版で動いている環境は、そのリポジトリで`claude-devcontainer down`してから起動し直してください(インストール時に一覧を表示します。止めないまま起動しようとするとエラーになります)。古い版は自動では消えないので、不要になったら`~/.local/share/claude-devcontainer/`から消してください。

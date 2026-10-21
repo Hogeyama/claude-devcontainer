@@ -80,7 +80,7 @@ Package registries are unavailable. In shared mode, ask the human to edit `.devc
 
 | What is needed | Change for the human to make |
 |---|---|
-| A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built |
+| A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built (after the human's own `~/.config/claude-devcontainer/agent-setup.sh`) |
 | An image for DinD | `images` under `[docker]` in `.devcontainer/claude.toml` |
 | Another host or API | `.devcontainer/claude.toml`, a `[proxy.hosts."api.example.com"]` table (the host name quoted) with the narrowest `routes` (`"GET /path"` or a bare path for any method). For a token, `inject` (e.g. `inject = { Authorization = "Bearer ${NOTION_API_KEY}" }`), `env = ["NOTION_API_KEY"]` for the dummy the tool reads, and the human's `NOTION_API_KEY=...` in `~/.config/claude-devcontainer/credentials`. A host served over plain HTTP (port 80) needs `http = true`, which cannot be combined with `inject`. A host only this human uses goes in `.devcontainer/claude.local.toml` instead |
 | The nix dev shell of the repository's flake | `enabled = true` under `[nix]` in `.devcontainer/claude.toml` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
