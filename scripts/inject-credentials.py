@@ -7,6 +7,7 @@ detached process that injects them once the proxy is up, and again whenever the
 proxy is recreated or the Claude login is refreshed, until the environment stops.
 """
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -18,29 +19,34 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
-# Shell assignments such as GITHUB_TOKEN=$(pass github/token): the Claude
-# credential, and the secrets that proxy.hosts of the workspace's claude.toml
-# injects as ${NAME}. The host runs it, so it must stay outside the workspace, which the
-# agent can write.
-CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/credentials'
+# The Claude credential ([claude]) and the secrets that proxy.hosts of the
+# workspace's claude.toml injects as ${NAME} ([secrets]), each a string or
+# { command = "..." } that the host's sh prints; [workspaces."<path glob>"]
+# overrides them for the workspaces whose root matches. The host runs the
+# commands, so it must stay outside the workspace, which the agent can write.
+CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/credentials.toml'
+# The shell assignments that CONFIG replaces; no longer read.
+OLD_CONFIG = CONFIG.with_name('credentials')
 STATE = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer'
 LOG = STATE / 'inject.log'
 # The Claude credential: an API key, or else the host's own Claude Code login,
 # which needs nothing set when it is in the default place.
 CLAUDE_KEYS = ('ANTHROPIC_API_KEY', 'CLAUDE_CREDENTIALS_FILE')
+# [claude] of CONFIG, by the variable each stands for.
+CLAUDE_FIELDS = {'api_key': 'ANTHROPIC_API_KEY', 'credentials_file': 'CLAUDE_CREDENTIALS_FILE'}
 # A setup-token, no longer used: it carries only user:inference, so claude.ai
 # connectors cannot work with it, and it is not refreshed.
 SETUP_TOKEN = 'CLAUDE_CODE_OAUTH_TOKEN'
 SECRET_NAME = re.compile(r'[A-Z_][A-Z0-9_]*')
-# What the shell itself changes while reading the file.
-SHELL_VARIABLES = {'PWD', 'OLDPWD', 'SHLVL', '_'}
 # How long the watcher keeps watching after it starts, even while the
 # environment is gone: `up` builds the images after initializeCommand starts it,
 # which takes minutes the first time, and --remove-existing-container removes
@@ -83,42 +89,109 @@ def docker(*arguments, data=None):
                           text=True, check=True).stdout
 
 
-def config():
-    """Return the Claude credential and the secrets assigned in CONFIG.
+def check_values(table, where, names):
+    """Check a table of {name: "value" or {command = "..."}}."""
+    if not isinstance(table, dict):
+        raise Unavailable(f'{where}: expected a table')
+    for name, value in table.items():
+        if not names(name):
+            raise Unavailable(f'{where}.{name}: unknown')
+        if not (isinstance(value, str) or (isinstance(value, dict) and set(value) == {'command'}
+                                           and isinstance(value['command'], str))):
+            raise Unavailable(f'{where}.{name}: expected a string, or {{ command = "..." }}')
 
-    The secrets are only what CONFIG assigns: the workspace's proxy.hosts names
-    the ones to send, and must not reach the rest of the host's environment.
+
+def check_set(entry, where):
+    """Check one set: [claude] and [secrets]."""
+    if not isinstance(entry, dict) or not set(entry) <= {'claude', 'secrets'}:
+        raise Unavailable(f'{where}: expected [claude] and [secrets]')
+    check_values(entry.get('claude', {}), f'{where}claude', CLAUDE_FIELDS.__contains__)
+    if len(entry.get('claude', {})) > 1:
+        raise Unavailable(f'{where}claude: set either api_key or credentials_file, not both.')
+    check_values(entry.get('secrets', {}), f'{where}secrets', SECRET_NAME.fullmatch)
+
+
+def read_config(root=None):
+    """The [claude] and [secrets] of CONFIG for root, its matching workspaces applied in order."""
+    if OLD_CONFIG.exists():
+        print(f'warning: {OLD_CONFIG} is no longer read; move its values to {CONFIG}.', file=sys.stderr)
+    try:
+        data = tomllib.loads(CONFIG.read_text())
+    except FileNotFoundError:
+        data = {}
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise Unavailable(f'{CONFIG}: {error}') from None
+    workspaces = data.pop('workspaces', {})
+    check_set(data, f'{CONFIG}: ')
+    if not isinstance(workspaces, dict):
+        raise Unavailable(f'{CONFIG}: workspaces: expected a table of workspace paths')
+    root = str(Path(ROOT if root is None else root).resolve())
+    claude, secrets = data.get('claude', {}), dict(data.get('secrets', {}))
+    for pattern, entry in workspaces.items():
+        where = f'{CONFIG}: workspaces."{pattern}".'
+        check_set(entry, where)
+        path = os.path.expanduser(pattern)
+        if not os.path.isabs(path):
+            raise Unavailable(f'{where[:-1]}: expected an absolute path or ~/path, with * and ? as in a shell')
+        if fnmatch.fnmatchcase(root, os.path.normpath(path)):
+            claude = entry.get('claude', claude)
+            secrets.update(entry.get('secrets', {}))
+    return claude, secrets
+
+
+def resolve(value, where):
+    """A value of CONFIG: the string, or what its command prints without the final newline."""
+    if isinstance(value, str):
+        return value
+    # stdin and stderr stay the caller's, for a secret manager's prompt and errors.
+    result = subprocess.run(['sh', '-c', value['command']], stdout=subprocess.PIPE)
+    if result.returncode:
+        raise Unavailable(f'{CONFIG}: {where}: the command failed with exit code {result.returncode}.')
+    return result.stdout.decode().removesuffix('\n')
+
+
+def config(names=None):
+    """Return the Claude credential, and the secrets of CONFIG that names lists (all of them if None).
+
+    Only the named secrets' commands run: a secret manager may ask for each.
+    A secret whose command fails is left out with a warning, and the proxy
+    refuses the requests that need it, naming it.
     """
     values = {key: os.environ.get(key, '') for key in CLAUDE_KEYS}
-    secrets = {}
-    if CONFIG.exists():
-        # Compare inside the same shell: its launcher (for example Nix's sh
-        # wrapper) may add environment variables before our script runs.
-        script = 'env -0; printf "\\0"; set -a; . "$1" && env -0'
-        result = subprocess.run(['sh', '-c', script, 'sh', str(CONFIG)], stdout=subprocess.PIPE)
-        if result.returncode:
-            raise Unavailable(f'{CONFIG} failed with exit code {result.returncode}.')
-        before, after = result.stdout.decode(errors='replace').split('\0\0', 1)
-        original = dict(item.split('=', 1) for item in before.split('\0') if '=' in item)
-        loaded = dict(item.split('=', 1) for item in after.split('\0') if '=' in item)
-        secrets = {name: value for name, value in loaded.items()
-                   if SECRET_NAME.fullmatch(name) and name not in SHELL_VARIABLES and original.get(name) != value}
-        # A Claude credential in the environment replaces the file's, of any kind.
-        if not any(values.values()):
-            values = {key: loaded.get(key, '') if key in secrets else '' for key in CLAUDE_KEYS}
+    claude_values, secret_values = read_config()
+    # A Claude credential in the environment replaces the file's, of any kind.
+    if not any(values.values()):
+        for field, value in claude_values.items():
+            values[CLAUDE_FIELDS[field]] = resolve(value, f'claude.{field}')
+        if values['CLAUDE_CREDENTIALS_FILE']:
+            values['CLAUDE_CREDENTIALS_FILE'] = os.path.expanduser(values['CLAUDE_CREDENTIALS_FILE'])
     if all(values.values()):
         raise Unavailable('Set either ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS_FILE, not both.')
     if not any(values.values()):
         home = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
         values['CLAUDE_CREDENTIALS_FILE'] = str(home / '.credentials.json')
-    if os.environ.get(SETUP_TOKEN) or SETUP_TOKEN in secrets:
+    if os.environ.get(SETUP_TOKEN):
         using = values['CLAUDE_CREDENTIALS_FILE'] or 'ANTHROPIC_API_KEY'
-        print(f'warning: {SETUP_TOKEN} (a setup-token) is no longer used, and Claude uses {using}; '
-              f'remove it from {CONFIG}.', file=sys.stderr)
-    for key in (*CLAUDE_KEYS, SETUP_TOKEN):
-        secrets.pop(key, None)  # Never a secret to inject elsewhere.
+        print(f'warning: {SETUP_TOKEN} (a setup-token) is no longer used, and Claude uses {using}.', file=sys.stderr)
+    secrets = {}
+    for name, value in secret_values.items():
+        if names is not None and name not in names:
+            continue
+        try:
+            secrets[name] = resolve(value, f'secrets.{name}')
+        except Unavailable as error:
+            print(f'warning: {error} {name} is not sent.', file=sys.stderr)
     values['secrets'] = secrets
     return values
+
+
+def generated_secrets(root=ROOT):
+    """The secrets that .generated/proxy.json injects, as the proxy built from it asks for."""
+    try:
+        hosts = json.loads((layout.config_dir(root) / '.generated/proxy.json').read_text())['hosts']
+        return settings.policy.parse(hosts).secrets()
+    except (OSError, ValueError, KeyError):
+        return None  # Resolve them all.
 
 
 class ApiKey:
@@ -307,7 +380,7 @@ def snapshot(values, source, names):
     missing = [name for name in names if name not in values['secrets']]
     if missing:
         # The proxy refuses the requests that need them, naming them too.
-        log(f'proxy.hosts injects {", ".join(missing)}, which {CONFIG} does not assign.')
+        log(f'proxy.hosts injects {", ".join(missing)}, which {CONFIG} does not give.')
     return json.dumps(dict(anthropic_token=source.current(), auth_mode=source.mode,
                            secrets={name: values['secrets'][name] for name in names if name in values['secrets']}))
 
@@ -404,19 +477,21 @@ def main():
     try:
         if mode == '--watch':
             return watch(json.loads(sys.stdin.read()))
-        values = config()
         if mode == '--background':
+            values = config(generated_secrets())
             claude(values)  # Report a missing login now, not in the log.
             return start_background(values)
+        agent, proxy = find_environment()
+        if not proxy:
+            sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
+        names = requested_secrets(proxy)
+        values = config(names)
         source = claude(values)
     except Unavailable as error:
         # Never fail initializeCommand: the environment works once injected later.
         print(f'{"warning" if mode in ("--background", "--watch") else "error"}: {error}\n{RETRY}', file=sys.stderr)
         sys.exit(0 if mode in ('--background', '--watch') else 1)
-    agent, proxy = find_environment()
-    if not proxy:
-        sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
-    inject(proxy, snapshot(values, source, requested_secrets(proxy)))
+    inject(proxy, snapshot(values, source, names))
     install_settings(agent, source.settings())
 
 

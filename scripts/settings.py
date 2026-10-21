@@ -16,7 +16,9 @@ they read to .devcontainer/.generated/:
   settings.env  the variables compose's files interpolate.
   proxy.json    the merged proxy.hosts, which the proxy image build installs.
   images.txt    docker.images, one per line, for load-images.py and wait-ready.sh.
-  agent.env     the dummy tokens that proxy.hosts' env names, for the agent.
+  agent.env     agent.env, and the dummy tokens that proxy.hosts' env names, for the agent.
+  global-agent-setup.sh  a copy of CONFIG/agent-setup.sh, which the agent image
+                build runs before the workspace's agent-setup.sh.
   workspace.compose.yaml  workspace mounts and the optional Nix store mount.
   hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
@@ -58,7 +60,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': []},
-    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': []},
+    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}},
     'acp': {'enabled': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': []},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -163,6 +165,14 @@ def check(data, source):
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
             raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
     shell_path(data.get('agent', {}).get('extra_path', []), str(source))
+    for name, value in data.get('agent', {}).get('env', {}).items():
+        if not ENV_NAME.fullmatch(name):
+            raise ValueError(f'{source}: agent.env: {name!r} is not an environment variable name')
+        if name.upper() in RESERVED_ENV or name.upper().startswith(RESERVED_ENV_PREFIXES):
+            raise ValueError(f'{source}: agent.env: {name} is set by compose')
+        # agent.env writes it in single quotes, which compose takes literally.
+        if not isinstance(value, str) or '\n' in value or "'" in value:
+            raise ValueError(f"{source}: agent.env.{name}: expected a string without newlines or '")
     if 'version' in data.get('acp', {}) and not ACP_VERSION.fullmatch(data['acp']['version']):
         raise ValueError(f'{source}: acp.version: expected an exact version, such as "0.90.0"')
     agent, docker, proxy, subnets = (data.get(table, {}) for table in ('agent', 'docker', 'proxy', 'subnets'))
@@ -233,6 +243,10 @@ def load(root=ROOT):
     if settings['docker']['enabled'] and settings['agent']['uid'] in SUBORDINATE_IDS:
         raise ValueError(f'agent.uid: {settings["agent"]["uid"]} is used by DinD; with docker.enabled it must be '
                          f'outside {SUBORDINATE_IDS.start}-{SUBORDINATE_IDS.stop - 1}')
+    both = sorted(set(settings['agent']['env']) & set(dummies(settings)))
+    if both:
+        raise ValueError(f'agent.env: {", ".join(both)} is also the env of a host in proxy.hosts, '
+                         'which the proxy replaces')
     if settings['codeServer']['extensions'] and not settings['codeServer']['enabled']:
         raise ValueError('codeServer.extensions: needs codeServer.enabled')
     # The ACP bridge maps the agent's /workspace paths to the host's files and
@@ -305,6 +319,13 @@ def images_txt(settings):
 
 def dummies(settings):
     return sorted({name for entry in settings['proxy']['hosts'].values() for name in entry.get('env', [])})
+
+
+def agent_env(settings, header=''):
+    """agent.env for compose's env_file: agent.env, then proxy.hosts' dummies."""
+    # Single-quoted values are literal to compose: no interpolation or escapes.
+    lines = [f"{name}='{value}'\n" for name, value in settings['agent']['env'].items()]
+    return header + ''.join(lines) + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings))
 
 
 def write(path, text):
@@ -581,7 +602,12 @@ def generate(root=ROOT, environ=os.environ):
     write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in values.items()))
     write(out / 'proxy.json', proxy_json(settings))
     write(out / 'images.txt', images_txt(settings))
-    write(out / 'agent.env', header + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings)))
+    write(out / 'agent.env', agent_env(settings, header))
+    global_setup = CONFIG / 'agent-setup.sh'
+    if global_setup.is_file():
+        write(out / 'global-agent-setup.sh', global_setup.read_text())
+    else:
+        (out / 'global-agent-setup.sh').unlink(missing_ok=True)
     write(out / 'workspace.compose.yaml', workspace)
     write(out / 'shell-path.sh', path_script)
     return settings

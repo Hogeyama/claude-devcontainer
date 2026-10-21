@@ -37,6 +37,10 @@
 # Owner of the agent's volumes; match the host UID/GID for dependency overlays.
 # uid = 1000
 # gid = 1000
+# Environment variables of the agent, merged by name with the global and local
+# files. Values are literal ($ is not expanded) and readable by the agent, so
+# no secrets; the proxy injects those (proxy.hosts).
+# env = { GRADLE_OPTS = "-Dorg.gradle.daemon=false" }
 
 [acp]
 # Install claude-agent-acp for host ACP clients (agent-shell, Avante, etc.),
