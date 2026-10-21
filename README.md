@@ -69,20 +69,29 @@ API keyを使う場合は、[Claude ConsoleのAPI keys](https://platform.claude.
 ### 3. 認証情報の取り出し方を設定する
 
 `claude.toml`の`proxy.hosts`の`inject`が参照する秘密（テンプレートでは`GITHUB_TOKEN`のみ）それぞれについて、
-ホストの`~/.config/claude-devcontainer/credentials`に、認証情報を取り出すシェルの代入文を書いてください。
-Claudeの認証にAPI keyを使う場合は追加で`ANTHROPIC_API_KEY`を設定します。
+ホストの`~/.config/claude-devcontainer/credentials.toml`の`[secrets]`に、値か、値を出力するコマンドを書いてください。
+Claudeの認証にAPI keyを使う場合は、`[claude]`に`api_key`を書きます。
 
-```sh
-GITHUB_TOKEN=$(pass github/token/for-agent)                       # passを使う場合
-# GITHUB_TOKEN=$(secret-tool lookup service github)               # libsecretを使う場合
-# GITHUB_TOKEN=$(op read op://Private/github/token/for-agent)     # 1Passwordを使う場合 
-# GITHUB_TOKEN=github_pat_...                                     # 値を直接書く場合。ファイルは0600にしてください
+```toml
+[secrets]
+GITHUB_TOKEN = { command = "pass github/token/for-agent" }                  # passを使う場合
+# GITHUB_TOKEN = { command = "secret-tool lookup service github" }          # libsecretを使う場合
+# GITHUB_TOKEN = { command = "op read op://Private/github/token/for-agent" } # 1Passwordを使う場合
+# GITHUB_TOKEN = "github_pat_..."              # 値を直接書く場合。ファイルは0600にしてください
 
-# ANTHROPIC_API_KEY=$(op read op://Private/anthropic/credential)  # API keyを使う場合のみ
+# [claude]                                     # API keyを使う場合のみ
+# api_key = { command = "op read op://Private/anthropic/credential" }
+
+# ワークスペースごとに違う値を使う場合。パスはワークスペースのルートで、*と?が使えます。
+# 一致したものが上から順に、[secrets]を名前ごとに、[claude]を丸ごと上書きします。
+# [workspaces."~/src/acme-*".secrets]
+# GITHUB_TOKEN = { command = "pass acme/github" }
 ```
 
+`command`はホストの`sh`で実行し、標準出力から最後の改行を除いたものを値にします。注入スクリプトは、`proxy.hosts`が参照する秘密のコマンドだけを実行します。コマンドが失敗した秘密は送らず、proxyがその秘密の名前を示して要求を拒否します。
+
 > [!NOTE]
-> 認証情報の注入スクリプトは、このファイルをホストのシェルで実行します。agentが書き換えられる作業ツリーの中には置かないでください。
+> 認証情報の注入スクリプトは、このファイルのコマンドをホストで実行します。agentが書き換えられる作業ツリーの中には置かないでください。以前のシェル形式の`credentials`ファイルは読まなくなりました。残っていると警告を出すので、`credentials.toml`へ移してください。
 
 ### 4. 起動する
 
@@ -140,7 +149,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | agentの環境変数 | `claude.toml`の`agent.env` | [agentの環境を変える](#agentの環境を変える) |
 | agentのvolume | `compose.yaml` | [agentの環境を変える](#agentの環境を変える) |
 | VS Codeの拡張機能など | `devcontainer.json` | [agentの環境を変える](#agentの環境を変える) |
-| 接続先と、proxyが付ける認証 | `claude.toml`の`proxy.hosts`、ホストの`credentials` | [接続先を変える](#接続先を変える) |
+| 接続先と、proxyが付ける認証 | `claude.toml`の`proxy.hosts`、ホストの`credentials.toml` | [接続先を変える](#接続先を変える) |
 | 自分だけが使う接続先 | `claude.local.toml`の`proxy.hosts` | [接続先を変える](#接続先を変える) |
 | 社内CAを使う接続先 | `claude.toml`の`proxy.ca` | [接続先を変える](#接続先を変える) |
 | claude.aiのコネクタ | `claude.local.toml`の`proxy.connectors` | [接続先を変える](#接続先を変える) |
@@ -151,7 +160,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | シークレットのマスク | `claude.toml`の`sumi`、ホストの`sumi/secrets.txt` | [シークレットをマスクする](#シークレットをマスクする) |
 | agentのUID・ネットワーク | `claude.local.toml`の`agent`、`subnets` | [UIDとネットワークを変える](#uidとネットワークを変える) |
 
-ホストの`credentials`、`agent-setup.sh`、`extra/`、`sumi/`は、`~/.config/claude-devcontainer/`の下にあります。
+ホストの`credentials.toml`、`agent-setup.sh`、`extra/`、`sumi/`は、`~/.config/claude-devcontainer/`の下にあります。
 
 ### claude.tomlとclaude.local.toml
 
@@ -209,7 +218,7 @@ devcontainer up --remove-existing-container
 
 ### 接続先を変える
 
-proxyが通す接続先は、`claude.toml`の`proxy.hosts`にホストごとに書きます。通す要求と、proxyが付ける認証をここで決めます。認証に使う秘密の値は、ホストの`~/.config/claude-devcontainer/credentials`に書きます。書き方は[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照してください。
+proxyが通す接続先は、`claude.toml`の`proxy.hosts`にホストごとに書きます。通す要求と、proxyが付ける認証をここで決めます。認証に使う秘密の値は、ホストの`~/.config/claude-devcontainer/credentials.toml`に書きます。書き方は[接続先を追加する](docs/network-policy.md#接続先を追加する)を参照してください。
 
 ```toml
 [proxy.hosts."api.notion.com"]

@@ -1,6 +1,6 @@
 # 追加の利用手順
 
-基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、取り込んだリポジトリのルートで実行してください。認証情報は、ホストのClaude Codeのログインと`~/.config/claude-devcontainer/credentials`から読みます。
+基本の起動・終了手順は[README](../README.md)を参照してください。この文書のホスト向けコマンドは、取り込んだリポジトリのルートで実行してください。認証情報は、ホストのClaude Codeのログインと`~/.config/claude-devcontainer/credentials.toml`から読みます。
 
 `.devcontainer`を取り込まずに[`claude-devcontainer`](../README.md#devcontainerなしで使う)で起動した環境では、次のように読み替えてください。
 
@@ -262,7 +262,7 @@ Dockerは読み取り専用のバインドの中にマウント先を作れな�
 
 ## 認証情報を更新する
 
-Claudeの認証には、ホストのClaude Codeのログインを使います。ホストで`claude`にログインしていれば、設定は要りません。ログインし直した場合や、`~/.config/claude-devcontainer/credentials`で`proxy.hosts`が参照する秘密（`GITHUB_TOKEN`など）を変えた場合は、注入スクリプトを再実行してください。proxyやagentの再起動・再ビルドは不要です。
+Claudeの認証には、ホストのClaude Codeのログインを使います。ホストで`claude`にログインしていれば、設定は要りません。ログインし直した場合や、`~/.config/claude-devcontainer/credentials.toml`で`proxy.hosts`が参照する秘密（`GITHUB_TOKEN`など）を変えた場合は、注入スクリプトを再実行してください。proxyやagentの再起動・再ビルドは不要です。
 
 ```sh
 python3 .devcontainer/claude/scripts/inject-credentials.py
@@ -274,7 +274,7 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 ### ホストのClaude Codeのログイン
 
-注入スクリプトは、ホストのClaude Codeのログイン情報（`$CLAUDE_CONFIG_DIR`、なければ`~/.claude`の`.credentials.json`）からaccess tokenを読み、proxyへ渡します。別の場所のファイルを使う場合は、`~/.config/claude-devcontainer/credentials`に`CLAUDE_CREDENTIALS_FILE=<パス>`と書いてください。
+注入スクリプトは、ホストのClaude Codeのログイン情報（`$CLAUDE_CONFIG_DIR`、なければ`~/.claude`の`.credentials.json`）からaccess tokenを読み、proxyへ渡します。別の場所のファイルを使う場合は、`~/.config/claude-devcontainer/credentials.toml`の`[claude]`に`credentials_file = "<パス>"`と書いてください。
 
 - agentには本物のトークンを見せません。
 - 期限の5分前になると、ホストからAnthropicへ直接、トークンの更新を要求し、新しいトークンをファイルへ書き戻してからproxyへ渡し直します。ホストのClaude Codeと同じロックを取ってからファイルを読み直すので、ホストのClaude Codeと同時に更新して壊すことはありません。ホストのClaude Codeが先に更新した場合は、その値を使います。
@@ -287,9 +287,9 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 ### API keyを使う
 
-ログインの代わりに、Claude ConsoleのAPI keyも使えます。`~/.config/claude-devcontainer/credentials`に`ANTHROPIC_API_KEY=…`と書いてください。API keyでは、Claude CodeがArtifactsとclaude.aiのコネクタを使えません。API keyは自動では更新しないので、Consoleで更新したら注入スクリプトを再実行してください。
+ログインの代わりに、Claude ConsoleのAPI keyも使えます。`~/.config/claude-devcontainer/credentials.toml`の`[claude]`に`api_key = …`（値か`{ command = "…" }`）と書いてください。API keyでは、Claude CodeがArtifactsとclaude.aiのコネクタを使えません。API keyは自動では更新しないので、Consoleで更新したら注入スクリプトを再実行してください。
 
-注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。`proxy.hosts`が参照する秘密は、`~/.config/claude-devcontainer/credentials`で代入したものだけを渡し、環境変数からは取りません。Claudeの認証（`ANTHROPIC_API_KEY`か`CLAUDE_CREDENTIALS_FILE`）は環境変数でも指定でき、その場合はファイルの指定より優先します。
+注入コマンドは起動済みの環境だけを対象にします。環境がない場合や対象が複数ある場合は失敗するので、先に`devcontainer up`を実行してください。`proxy.hosts`が参照する秘密は、`~/.config/claude-devcontainer/credentials.toml`に書いたものだけを渡し、環境変数からは取りません。Claudeの認証は環境変数`ANTHROPIC_API_KEY`か`CLAUDE_CREDENTIALS_FILE`でも指定でき、その場合はファイルの`[claude]`より優先します。`[claude]`も`[workspaces."パス".claude]`でワークスペースごとに変えられます。
 
 認証値はすべてのagentプロセスの通信に共通です。すでに開いているVS Codeのターミナルや通常の`devcontainer exec`からも同じ認証で通信でき、利用者ごとの分離はありません。agentのClaude Codeは起動時にダミーのOAuthトークンを使い、proxyが本物のトークンまたはAPI keyへ置き換えます。
 
