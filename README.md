@@ -137,7 +137,8 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | 変えたいもの | 書く場所 | 節 |
 |---|---|---|
 | agentに入れるツール | `agent-setup.sh`、ホストの`agent-setup.sh` | [agentの環境を変える](#agentの環境を変える) |
-| agentの環境変数・volume | `compose.yaml` | [agentの環境を変える](#agentの環境を変える) |
+| agentの環境変数 | `claude.toml`の`agent.env` | [agentの環境を変える](#agentの環境を変える) |
+| agentのvolume | `compose.yaml` | [agentの環境を変える](#agentの環境を変える) |
 | VS Codeの拡張機能など | `devcontainer.json` | [agentの環境を変える](#agentの環境を変える) |
 | 接続先と、proxyが付ける認証 | `claude.toml`の`proxy.hosts`、ホストの`credentials` | [接続先を変える](#接続先を変える) |
 | 自分だけが使う接続先 | `claude.local.toml`の`proxy.hosts` | [接続先を変える](#接続先を変える) |
@@ -189,8 +190,18 @@ devcontainer up --remove-existing-container
 
 - ツールは、導入手順を`agent-setup.sh`に書きます。このスクリプトはagentのimageをビルドするときにホストでrootとして実行されるので、package registryにも接続できます。
   - すべてのリポジトリで使うツールは、ホストの`~/.config/claude-devcontainer/agent-setup.sh`に書きます。リポジトリの`agent-setup.sh`より先に実行します。起動処理が`.devcontainer/.generated/`へコピーしてビルドに渡すので、agentからも読めます。秘密は書かないでください。
-- 環境変数やvolumeは、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
-  - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。たとえばJavaは`HTTPS_PROXY`を読まないので、`JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080 -Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS`のように指定します。imageの`JAVA_TOOL_OPTIONS`はproxyのCAを含むtruststoreを指定しているので、上書きするときは後ろの2つを残してください。
+- 環境変数は、`claude.toml`の`agent.env`に書きます。globalの`claude.toml`、リポジトリ、`claude.local.toml`の値は、変数の名前ごとに混ざります。値はそのまま渡り、`$`も展開しません。`HTTP_PROXY`など、Composeがagentに設定する名前と、`proxy.hosts`の`env`の名前は書けません。agentから読めるので、秘密は書かないでください。
+
+  ```toml
+  [agent.env]
+  GRADLE_OPTS = "-Dorg.gradle.daemon=false"
+  # Javaは HTTPS_PROXY を読まないので、proxyを指定する
+  JAVA_TOOL_OPTIONS = "-Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080 -Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS"
+  ```
+
+  - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。
+  - imageの`JAVA_TOOL_OPTIONS`はproxyのCAを含むtruststoreを指定しているので、上書きするときは上の例の後ろの2つを残してください。
+- volumeなどは、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
 - VS Codeの拡張機能などは、`devcontainer.json`に書きます。
 
 > [!WARNING]

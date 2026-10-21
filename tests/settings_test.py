@@ -103,7 +103,7 @@ class SettingsTest(unittest.TestCase):
     def test_defaults(self):
         loaded = self.load()
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
-        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': []})
+        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}})
         self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
@@ -122,11 +122,11 @@ class SettingsTest(unittest.TestCase):
             '[proxy]\nca = "cert.pem"\n')
         self.write('claude.toml', '[agent]\ngid = 2345\n')
         loaded = self.load()
-        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin']})
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin'], 'env': {}})
         self.assertEqual(loaded['proxy']['ca'], settings.CONFIG / 'cert.pem')
         self.write('claude.local.toml', '[agent]\ngid = 3456\nextra_path = []\n[proxy]\nca = "local.pem"\n')
         loaded = self.load()
-        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': []})
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': [], 'env': {}})
         self.assertEqual(loaded['proxy']['ca'], self.root / '.devcontainer/local.pem')
 
     def test_local_merges_tables_and_replaces_values(self):
@@ -134,7 +134,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
         loaded = self.load()
         self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1']})
-        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': []})
+        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}})
 
     def test_local_replaces_each_host_as_a_whole(self):
         self.write('claude.toml', GITHUB + '[proxy.hosts."other.example.com"]\nroutes = ["/"]\n')
@@ -226,6 +226,35 @@ class SettingsTest(unittest.TestCase):
                 self.write('claude.toml', f'[proxy.hosts."a.example.com"]\nroutes = ["/"]\nenv = {env}\n')
                 with self.assertRaisesRegex(ValueError, 'env: must list environment variable names'):
                     self.load()
+
+    def test_agent_env_merges_by_name_and_is_literal(self):
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'claude.toml').write_text('[agent.env]\nEDITOR = "vim"\nLANGUAGE = "ja"\n')
+        self.write('claude.toml', GITHUB + '[agent]\nenv = { JAVA_OPTS = "-Xmx2g -Dx=$HOME", LANGUAGE = "en" }\n')
+        self.write('claude.local.toml', '[agent.env]\nEMPTY = ""\n')
+        out = self.generate()
+        self.assertEqual([line for line in (out / 'agent.env').read_text().splitlines() if not line.startswith('#')],
+                         ["EDITOR='vim'", "LANGUAGE='en'", "JAVA_OPTS='-Xmx2g -Dx=$HOME'", "EMPTY=''",
+                          'GH_TOKEN=managed-by-proxy'])
+        if shutil.which('docker') and subprocess.run(['docker', 'compose', 'version'], capture_output=True).returncode == 0:
+            (out / 'compose.yaml').write_text('services:\n  a:\n    image: x\n    env_file: [agent.env]\n')
+            config = subprocess.run(['docker', 'compose', '-f', str(out / 'compose.yaml'), 'config', '--format', 'json'],
+                                    capture_output=True, text=True, check=True, env={'PATH': os.environ['PATH']})
+            # Not interpolated; config escapes the literal $ again in what it prints.
+            self.assertEqual(json.loads(config.stdout)['services']['a']['environment']['JAVA_OPTS'], '-Xmx2g -Dx=$$HOME')
+
+    def test_agent_env_errors(self):
+        for text, message in [('[agent]\nenv = { HTTPS_PROXY = "x" }\n', 'HTTPS_PROXY is set by compose'),
+                              ('[agent]\nenv = { CLAUDE_DEVCONTAINER_DIND = "1" }\n', 'is set by compose'),
+                              ('[agent]\nenv = { "A B" = "x" }\n', 'is not an environment variable name'),
+                              ('[agent]\nenv = { A = 1 }\n', r'agent.env.A: expected a string'),
+                              ("[agent]\nenv = { A = \"it's\" }\n", r'agent.env.A: expected a string'),
+                              ('[agent]\nenv = { A = "a\\nb" }\n', r'agent.env.A: expected a string'),
+                              ('[agent]\nenv = ["A=x"]\n', r'agent.env: expected a table'),
+                              (GITHUB + '[agent]\nenv = { GH_TOKEN = "x" }\n', 'GH_TOKEN is also the env of a host')]:
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, message):
+                self.write('claude.toml', text)
+                self.load()
 
     def test_global_agent_setup_is_copied_for_the_build(self):
         out = self.generate()
