@@ -149,7 +149,7 @@ COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # ~/.claude/skills does not replace them.
 COPY agent/skills/ /etc/claude-code/.claude/skills/
 COPY agent/bash-env.sh /etc/bash-env.sh
-COPY --chmod=755 agent/entrypoint.sh agent/start-code-server.sh agent/init-firewall.sh agent/wait-ready.sh agent/clone-workspace.py agent/workspace_mounts.py agent/nix-env.py /usr/local/bin/
+COPY --chmod=755 agent/entrypoint.sh agent/start-code-server.sh agent/init-firewall.sh agent/wait-ready.sh agent/clone-workspace.py agent/workspace_mounts.py agent/nix-env.py agent/java-truststore.py /usr/local/bin/
 # Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
 # reach anything (a Next.js server calling an API, for one).
 ENV NODE_USE_ENV_PROXY=1
@@ -165,6 +165,10 @@ ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     BASH_ENV=/etc/bash-env.sh \
     SHELL=/bin/bash \
     CLAUDE_CODE_SHELL=/bin/bash
+# Java reads none of the above, only its own truststore: the same bundle as
+# JKS, which the entrypoint writes (java-truststore.py). Set after
+# agent-setup.sh, whose Java runs on the host's network without the file.
+ENV JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS"
 # Dev Containers forwards the host's X11 display, and with it the host's screen
 # and keyboard, into the container unless the container's environment has
 # DISPLAY. So set it to a name that is no display, and blank it again in the

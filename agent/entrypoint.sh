@@ -6,6 +6,8 @@ umask 022
 if [ "${1:-}" != --as-node ]; then
     cp /public-ca/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/managed-proxy.crt
     update-ca-certificates >/dev/null
+    # Java reads only its own truststore (JAVA_TOOL_OPTIONS in the Dockerfile).
+    python3 /usr/local/bin/java-truststore.py
     /usr/local/bin/init-firewall.sh
     # Managed hooks, so that the agent cannot turn the masking off.
     sumi=/etc/claude-code/managed-settings.d/90-sumi.json
