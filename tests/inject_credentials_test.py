@@ -4,8 +4,6 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
-import sys
 import tempfile
 import threading
 import time
@@ -194,16 +192,20 @@ class ConfigTest(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.config = Path(directory.name) / 'credentials'
-        patcher = mock.patch.object(inject_credentials, 'CONFIG', self.config)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.config = Path(directory.name) / 'credentials.toml'
+        self.root = Path(directory.name) / 'src/acme-api'
+        self.root.mkdir(parents=True)
+        for name, value in [('CONFIG', self.config), ('OLD_CONFIG', self.config.with_name('credentials')),
+                            ('ROOT', self.root)]:
+            patcher = mock.patch.object(inject_credentials, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
-    def load(self, text=None, **environment):
+    def load(self, text=None, names=None, **environment):
         if text is not None:
             self.config.write_text(text)
         with mock.patch.dict(os.environ, {'PATH': os.environ['PATH'], **environment}, clear=True):
-            return inject_credentials.config()
+            return inject_credentials.config(names)
 
     def test_one_claude_credential_defaulting_to_the_login(self):
         self.assertEqual(self.load(HOME='/home/u')['CLAUDE_CREDENTIALS_FILE'], '/home/u/.claude/.credentials.json')
@@ -214,33 +216,92 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(inject_credentials.Unavailable):
             self.load(ANTHROPIC_API_KEY='k', CLAUDE_CREDENTIALS_FILE='login')
 
+    def test_claude_credential_from_the_file(self):
+        values = self.load('[claude]\napi_key = { command = "echo file-key" }\n')
+        self.assertEqual((values['ANTHROPIC_API_KEY'], values['CLAUDE_CREDENTIALS_FILE']), ('file-key', ''))
+        values = self.load('[claude]\ncredentials_file = "~/other/.credentials.json"\n', HOME='/home/u')
+        self.assertEqual(values['CLAUDE_CREDENTIALS_FILE'], '/home/u/other/.credentials.json')
+        with self.assertRaisesRegex(inject_credentials.Unavailable, 'not both'):
+            self.load('[claude]\napi_key = "k"\ncredentials_file = "f"\n')
+
     def test_environment_claude_credential_replaces_the_files(self):
-        values = self.load('ANTHROPIC_API_KEY=file-key\nGITHUB_TOKEN=gh-file\n', CLAUDE_CREDENTIALS_FILE='login')
+        values = self.load('[claude]\napi_key = "file-key"\n[secrets]\nGITHUB_TOKEN = "gh-file"\n',
+                           CLAUDE_CREDENTIALS_FILE='login')
         self.assertEqual((values['ANTHROPIC_API_KEY'], values['CLAUDE_CREDENTIALS_FILE']), ('', 'login'))
         self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh-file'})
 
-    def test_a_setup_token_is_ignored_with_a_warning(self):
-        with mock.patch('sys.stderr') as stderr:
-            values = self.load('CLAUDE_CODE_OAUTH_TOKEN=setup-token\nGITHUB_TOKEN=gh\n', HOME='/home/u')
-        self.assertEqual(values['CLAUDE_CREDENTIALS_FILE'], '/home/u/.claude/.credentials.json')
-        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh'})
-        written = ''.join(call.args[0] for call in stderr.write.call_args_list)
-        self.assertIn('CLAUDE_CODE_OAUTH_TOKEN', written)
-        self.assertNotIn('setup-token\n', written)
+    def test_secrets_are_strings_or_what_commands_print(self):
+        values = self.load('[secrets]\n'
+                           'GITHUB_TOKEN = { command = "echo pat-from-command" }\n'
+                           'NOTION_API_KEY = "secret with spaces"\n'
+                           'MULTILINE = { command = "printf \'a\\\\nb\\\\n\\\\n\'" }\n'
+                           'HOST_SECRET_COPY = { command = "printf %s \\"$HOST_SECRET\\"" }\n',
+                           HOST_SECRET='from-the-environment')
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'pat-from-command', 'NOTION_API_KEY': 'secret with spaces',
+                                             'MULTILINE': 'a\nb\n', 'HOST_SECRET_COPY': 'from-the-environment'})
 
-    def test_secrets_are_only_what_the_file_assigns(self):
-        values = self.load('ANTHROPIC_API_KEY=k\n'
-                           'GITHUB_TOKEN=$(echo pat-from-file)\n'
-                           'NOTION_API_KEY="secret with spaces"\n'
-                           'lowercase=ignored\n'
-                           'HOST_SECRET_COPY=$HOST_SECRET\n',
-                           HOST_SECRET='from-the-environment', AWS_SECRET_ACCESS_KEY='not-assigned')
-        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'pat-from-file', 'NOTION_API_KEY': 'secret with spaces',
-                                             'HOST_SECRET_COPY': 'from-the-environment'})
-        self.assertNotIn('ANTHROPIC_API_KEY', values['secrets'], 'the Claude credential is never a secret')
+    def test_only_the_named_secrets_run(self):
+        marker = self.config.with_name('ran')
+        values = self.load(f'[secrets]\nGITHUB_TOKEN = "gh"\nOTHER = {{ command = "touch {marker}" }}\n',
+                           names=['GITHUB_TOKEN', 'REDMINE_API_KEY'])
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh'})
+        self.assertFalse(marker.exists())
+
+    def test_workspaces_override_by_path(self):
+        text = ('[claude]\napi_key = "personal"\n'
+                '[secrets]\nGITHUB_TOKEN = "personal-gh"\nNOTION_API_KEY = "notion"\n'
+                f'[workspaces."{self.root.parent}/acme-*".secrets]\nGITHUB_TOKEN = "acme-gh"\nJIRA_TOKEN = "jira"\n'
+                f'[workspaces."{self.root}".claude]\ncredentials_file = "/acme/login.json"\n'
+                f'[workspaces."{self.root.parent}/other".secrets]\nGITHUB_TOKEN = "other-gh"\n')
+        values = self.load(text)
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'acme-gh', 'NOTION_API_KEY': 'notion', 'JIRA_TOKEN': 'jira'})
+        self.assertEqual((values['ANTHROPIC_API_KEY'], values['CLAUDE_CREDENTIALS_FILE']), ('', '/acme/login.json'))
+        with mock.patch.object(inject_credentials, 'ROOT', self.root.parent / 'other'):
+            values = self.load()
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'other-gh', 'NOTION_API_KEY': 'notion'})
+        self.assertEqual(values['ANTHROPIC_API_KEY'], 'personal')
+
+    def test_workspace_paths_expand_the_home(self):
+        values = self.load('[workspaces."~/src/acme-*".secrets]\nGITHUB_TOKEN = "acme-gh"\n',
+                           HOME=str(self.root.parents[1]))
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'acme-gh'})
+
+    def test_a_failed_command_leaves_only_its_secret_out(self):
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            values = self.load('[secrets]\nGITHUB_TOKEN = "gh"\nBROKEN = { command = "exit 3" }\n')
+        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh'})
+        self.assertIn('secrets.BROKEN: the command failed with exit code 3', stderr.getvalue())
+        with self.assertRaisesRegex(inject_credentials.Unavailable, 'claude.api_key: the command failed'):
+            self.load('[claude]\napi_key = { command = "false" }\n')
+
+    def test_invalid_files_name_the_setting(self):
+        for text, message in [('[secrets]\nlowercase = "x"\n', r'secrets.lowercase: unknown'),
+                              ('[secrets]\nA = 1\n', r'secrets.A: expected a string'),
+                              ('[secrets]\nA = { cmd = "x" }\n', r'secrets.A: expected a string'),
+                              ('[claude]\ntoken = "x"\n', r'claude.token: unknown'),
+                              ('[other]\n', r'expected \[claude\] and \[secrets\]'),
+                              ('[workspaces."src/*".secrets]\nA = "x"\n', r'workspaces."src/\*": expected an absolute'),
+                              ('[workspaces."/src".other]\n', r'workspaces."/src".: expected'),
+                              ('[secrets\n', r'credentials.toml: ')]:
+            with self.subTest(text=text), self.assertRaisesRegex(inject_credentials.Unavailable, message):
+                self.load(text)
+
+    def test_the_old_shell_file_is_not_read(self):
+        self.config.with_name('credentials').write_text('GITHUB_TOKEN=old\n')
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            values = self.load(HOME='/home/u')
+        self.assertEqual(values['secrets'], {})
+        self.assertIn('no longer read', stderr.getvalue())
+
+    def test_a_setup_token_is_ignored_with_a_warning(self):
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            values = self.load(HOME='/home/u', CLAUDE_CODE_OAUTH_TOKEN='setup-token')
+        self.assertEqual(values['CLAUDE_CREDENTIALS_FILE'], '/home/u/.claude/.credentials.json')
+        self.assertIn('CLAUDE_CODE_OAUTH_TOKEN', stderr.getvalue())
+        self.assertNotIn('setup-token\n', stderr.getvalue())
 
     def test_snapshot_sends_only_the_requested_secrets(self):
-        values = self.load('ANTHROPIC_API_KEY=t\nGITHUB_TOKEN=pat\nNOTION_API_KEY=n\n')
+        values = self.load('[claude]\napi_key = "t"\n[secrets]\nGITHUB_TOKEN = "pat"\nNOTION_API_KEY = "n"\n')
         source = inject_credentials.ApiKey('t')
         with mock.patch.object(inject_credentials, 'log') as log:
             snapshot = json.loads(inject_credentials.snapshot(values, source, ['GITHUB_TOKEN', 'REDMINE_API_KEY']))
@@ -248,25 +309,16 @@ class ConfigTest(unittest.TestCase):
         self.assertIn('REDMINE_API_KEY', str(log.call_args))
         self.assertNotIn('pat', str(log.call_args))
 
-    def test_shell_launcher_environment_is_not_a_secret(self):
-        shell = shutil.which('sh')
-        bin_dir = self.config.parent / 'bin'
-        bin_dir.mkdir()
-        wrapper = bin_dir / 'sh'
-        wrapper.write_text(
-            f'#!{sys.executable}\n'
-            'import os, sys\n'
-            'os.environ["STARTUP_ONLY"] = "from-wrapper"\n'
-            'os.environ["OVERRIDDEN"] = "from-wrapper"\n'
-            f'os.execv({shell!r}, [{shell!r}, *sys.argv[1:]])\n')
-        wrapper.chmod(0o755)
-        values = self.load('GITHUB_TOKEN=gh\nOVERRIDDEN=from-file\n',
-                           PATH=f'{bin_dir}:{os.environ["PATH"]}')
-        self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'gh', 'OVERRIDDEN': 'from-file'})
-
-    def test_failed_credentials_file_is_not_used(self):
-        with self.assertRaisesRegex(inject_credentials.Unavailable, 'exit code 1'):
-            self.load('GITHUB_TOKEN=partial\nfalse\n')
+    def test_generated_secrets_are_the_ones_proxy_json_injects(self):
+        generated = self.root / '.devcontainer/.generated'
+        self.assertIsNone(inject_credentials.generated_secrets(self.root))
+        generated.mkdir(parents=True)
+        (generated / 'proxy.json').write_text(json.dumps({'hosts': {
+            'api.github.com': {'routes': ['/'], 'inject': {'Authorization': 'Bearer ${GITHUB_TOKEN}'}},
+            'fonts.googleapis.com': {'routes': ['/']}}}))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('CLAUDE_DEVCONTAINER_CONFIG_DIR', None)
+            self.assertEqual(inject_credentials.generated_secrets(self.root), ['GITHUB_TOKEN'])
 
 
 class WatchTest(unittest.TestCase):

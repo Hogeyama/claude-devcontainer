@@ -65,7 +65,8 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         extra = cls.directory / 'config/claude-devcontainer/extra'
         extra.mkdir(parents=True)
         (extra / '.gitconfig').write_text('[user]\n\tname = fixture-user\n')
-        (extra.parent / 'credentials').write_text('GITHUB_TOKEN=synthetic-managed-token\nANTHROPIC_API_KEY=synthetic-managed-token\n')
+        (extra.parent / 'credentials.toml').write_text('[claude]\napi_key = "synthetic-managed-token"\n'
+                                                       '[secrets]\nGITHUB_TOKEN = "synthetic-managed-token"\n')
         cls.addClassCleanup(docker, 'run', '--rm', '--network', 'none', '--entrypoint', 'rm',
                             '-v', str(cls.directory / 'state') + ':/state', AGENT_IMAGE,
                             '-rf', '/state/claude-devcontainer/node-modules')
@@ -192,7 +193,7 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         # proxy.hosts' secrets come only from the credentials config.
         config = cls.directory / 'config/claude-devcontainer'
         config.mkdir(parents=True, exist_ok=True)
-        (config / 'credentials').write_text('GITHUB_TOKEN=synthetic-managed-token\n')
+        (config / 'credentials.toml').write_text('[secrets]\nGITHUB_TOKEN = "synthetic-managed-token"\n')
         environment = dict(cls.env)
         if mode == 'oauth':
             # A synthetic host login, far from expiring, so that it is not refreshed.
@@ -427,8 +428,8 @@ echo nested-network-blocked
     def test_background_injection_reads_the_credentials_config(self):
         config = self.directory / 'config/claude-devcontainer'
         config.mkdir(parents=True, exist_ok=True)
-        (config / 'credentials').write_text('GITHUB_TOKEN=$(echo synthetic-config-token)\n'
-                                            'ANTHROPIC_API_KEY=synthetic-config-token\n')
+        (config / 'credentials.toml').write_text('[claude]\napi_key = "synthetic-config-token"\n'
+                                                 '[secrets]\nGITHUB_TOKEN = { command = "echo synthetic-config-token" }\n')
         self.compose_run('exec', '-T', 'proxy', 'rm', '-f', '/run/proxy-credentials/credentials.json')
         result = subprocess.run([sys.executable, str(self.workspace / '.devcontainer/claude/scripts/inject-credentials.py'), '--background'],
                                 env=self.env, capture_output=True, text=True, timeout=30)

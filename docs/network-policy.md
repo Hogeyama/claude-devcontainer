@@ -121,14 +121,21 @@ http = true
 - `env`には、agentにダミー値`managed-by-proxy`で渡す環境変数の名前を書きます（下記）。
 - `api.anthropic.com`と`mcp-proxy.anthropic.com`は書けません。proxyがAnthropicの認証値を付ける接続先で、ルールは`addon.py`に固定しています。
 
-秘密の値は、ホストの`~/.config/claude-devcontainer/credentials`に、他の認証情報と同じくシェルの代入で書きます。
+秘密の値は、ホストの`~/.config/claude-devcontainer/credentials.toml`の`[secrets]`に、値か、値を出力するコマンドで書きます。
 
-```sh
-NOTION_API_KEY=$(secret-tool lookup service notion)
-REDMINE_API_KEY=$(pass work/redmine)
+```toml
+[secrets]
+NOTION_API_KEY = { command = "secret-tool lookup service notion" }
+REDMINE_API_KEY = { command = "pass work/redmine" }
+
+# ワークスペースのルートが一致するときだけ、名前ごとに上書きする
+[workspaces."~/src/acme-*".secrets]
+REDMINE_API_KEY = { command = "pass acme/redmine" }
 ```
 
-注入スクリプトは、起動したproxyに`proxy.hosts`が参照する秘密の名前を問い合わせ、このファイルで代入された変数のうち、その名前のものだけを渡します。ホストの環境にもともとある変数は渡しません。`proxy.hosts`が参照する秘密がこのファイルにない場合、proxyはその接続先への要求を、足りない秘密の名前を示して拒否します。
+注入スクリプトは、`proxy.hosts`が参照する秘密の名前を起動したproxyに問い合わせ（起動時の自動注入では`.generated/proxy.json`から求め）、その名前の値だけを求めて渡します。コマンドを実行するのもその名前のものだけです。ホストの環境変数は渡しません。`proxy.hosts`が参照する秘密がこのファイルにない場合や、コマンドが失敗した場合、proxyはその接続先への要求を、足りない秘密の名前を示して拒否します。
+
+`[workspaces."パス"]`は、ワークスペースのルートのパスに一致したときに使う値です。パスは絶対パスか`~/`で始め、`*`と`?`はシェルのglobと同じく使えます（`*`は`/`にも一致します）。一致したものが書いた順に、`[secrets]`を名前ごとに、`[claude]`を丸ごと上書きします。リポジトリごとに別のPATを使い分けられます。
 
 アプリケーションは、トークンが環境変数にないと要求を送らないことがあります。その場合は、ホストの`env`にアプリケーションが読む環境変数の名前を書いてください。agentにはダミー値`managed-by-proxy`が渡り、proxyが本物に置き換えます。テンプレートのGitHubの設定では、`gh`が読む`GH_TOKEN`を渡しています。秘密の名前（`GITHUB_TOKEN`）とアプリケーションが読む名前は違ってもかまいません。`HTTP_PROXY`や`DOCKER_HOST`など、Composeがagentに設定する名前は書けません。
 
@@ -152,7 +159,7 @@ routes = ['GET /issues\.json']
 inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 ```
 
-`claude.local.toml`のホストは`claude.toml`のホストに追加されます。同じホストが両方にある場合は、`claude.local.toml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`、`http`、`env`は混ぜません。秘密は`claude.toml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
+`claude.local.toml`のホストは`claude.toml`のホストに追加されます。同じホストが両方にある場合は、`claude.local.toml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`、`http`、`env`は混ぜません。秘密は`claude.toml`と同じく、ホストの`~/.config/claude-devcontainer/credentials.toml`に書きます。
 
 `claude.toml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合は起動処理が失敗し、`claude.local.toml:`で始まる理由を表示します。ホストの未追跡ファイルなのでcloneには入りません。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
 
