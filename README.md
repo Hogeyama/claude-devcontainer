@@ -189,7 +189,7 @@ devcontainer up --remove-existing-container
 
 - ツールは、導入手順を`agent-setup.sh`に書きます。このスクリプトはagentのimageをビルドするときにホストでrootとして実行されるので、package registryにも接続できます。
 - 環境変数やvolumeは、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
-  - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。たとえばJavaは`HTTPS_PROXY`を読まないので、`JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080`のように指定します。
+  - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。たとえばJavaは`HTTPS_PROXY`を読まないので、`JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080 -Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS`のように指定します。imageの`JAVA_TOOL_OPTIONS`はproxyのCAを含むtruststoreを指定しているので、上書きするときは後ろの2つを残してください。
 - VS Codeの拡張機能などは、`devcontainer.json`に書きます。
 
 > [!WARNING]

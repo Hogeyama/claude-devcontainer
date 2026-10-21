@@ -19,7 +19,7 @@ Package registries (npm, PyPI, Maven Central, crates.io, ...), GitHub release as
 
 - **HTTP 403**: the proxy refused the request. Check that the destination is one of the above. A body of `blocked: no credentials` means the proxy has no credentials yet; the human must run `python3 .devcontainer/claude/scripts/inject-credentials.py` on the host. `blocked: no secret NAME` means the host's credentials file lacks the secret that `proxy.hosts` injects; tell the human the NAME.
 - **Timeout or `Could not resolve host`**: the program did not use the proxy. Tools that ignore `HTTPS_PROXY` cannot reach anything.
-- **Certificate errors**: the proxy inspects HTTPS and signs with its own CA. The system trust store and the Node.js, Git, and curl variables already include it. For a tool with its own trust store (a Java keystore, Python's `certifi`), add `/public-ca/mitmproxy-ca-cert.pem` to it. Do not disable TLS verification.
+- **Certificate errors**: the proxy inspects HTTPS and signs with its own CA. The system trust store and the Node.js, Git, and curl variables already include it, and so does Java through `JAVA_TOOL_OPTIONS` (the truststore `/etc/ssl/java/cacerts`; keep its two options if you set `JAVA_TOOL_OPTIONS` yourself). For a tool with its own trust store (Python's `certifi`, say), add `/public-ca/mitmproxy-ca-cert.pem` to it. Do not disable TLS verification.
 
 When a dependency cannot be downloaded, do not keep retrying or try mirrors. Report it and suggest how the human can provide it (see "Adding tools and dependencies").
 
