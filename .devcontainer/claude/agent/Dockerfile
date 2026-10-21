@@ -23,9 +23,10 @@ FROM code-server-${TARGETARCH} AS code-server-1
 FROM scratch AS code-server-0
 FROM code-server-${INSTALL_CODE_SERVER} AS editor-code-server
 FROM docker:dind-rootless@sha256:8a213afdd096a44dff403aaf8eb58b7a96a63113f18a4b094b98b7d0ed7d948b AS docker-cli
-# Only agent-setup.sh from the workspace's .devcontainer/, if there is one. A
-# mount of the whole directory would rerun the setup whenever any file in it
-# changed, including this image's own files under claude/.
+# Separate inputs keep a workspace setup change from invalidating the global
+# setup. Copy only the scripts: other configuration must not rerun either.
+FROM scratch AS global-setup
+COPY --from=workspace-config .generate[d]/global-agent-setup.s[h] /
 FROM scratch AS workspace-setup
 COPY --from=workspace-config agent-setup.s[h] /
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
@@ -135,8 +136,12 @@ RUN if [ -n "$CODE_SERVER_EXTENSIONS" ]; then \
       done \
       && rm -rf /tmp/code-server-install; \
     fi
-# The workspace adds its tools with .devcontainer/agent-setup.sh, run as root on
-# the host's network before the proxy applies. Core files are copied after it.
+# The user adds tools for every workspace with ~/.config/claude-devcontainer/
+# agent-setup.sh, then the workspace its own with .devcontainer/agent-setup.sh,
+# each run as root on the host's network before the proxy applies. Core files
+# are copied after them.
+RUN --mount=type=bind,from=global-setup,target=/tmp/workspace-config \
+    if [ -f /tmp/workspace-config/global-agent-setup.sh ]; then sh -eu /tmp/workspace-config/global-agent-setup.sh; fi
 RUN --mount=type=bind,from=workspace-setup,target=/tmp/workspace-config \
     if [ -f /tmp/workspace-config/agent-setup.sh ]; then sh -eu /tmp/workspace-config/agent-setup.sh; fi
 # With an OAuth token, an unfinished onboarding makes the CLI check

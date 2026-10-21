@@ -227,6 +227,17 @@ class SettingsTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'env: must list environment variable names'):
                     self.load()
 
+    def test_global_agent_setup_is_copied_for_the_build(self):
+        out = self.generate()
+        self.assertFalse((out / 'global-agent-setup.sh').exists())
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'agent-setup.sh').write_text('apt-get install -y ripgrep\n')
+        self.generate()
+        self.assertEqual((out / 'global-agent-setup.sh').read_text(), 'apt-get install -y ripgrep\n')
+        (settings.CONFIG / 'agent-setup.sh').unlink()
+        self.generate()
+        self.assertFalse((out / 'global-agent-setup.sh').exists())
+
     def test_paths_are_relative_to_devcontainer_and_expand_home(self):
         self.write('claude.toml', '[sumi]\nsecrets = "../.secrets/sumi/secrets.txt"\n[proxy]\nca = "ca.pem"\n')
         loaded = self.load()
