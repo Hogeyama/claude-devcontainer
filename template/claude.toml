@@ -93,6 +93,9 @@
 #     assigned in ~/.config/claude-devcontainer/credentials on the host; only
 #     the ones named here are sent. { basic = "user:password" } makes Basic
 #     authentication.
+#   http: true lets routes through over plain HTTP on port 80 too, besides
+#     HTTPS on 443. Such a host cannot have inject: secrets would cross the
+#     network in the clear.
 #   env: environment variables that the agent gets as the dummy
 #     "managed-by-proxy", so that tools send requests at all; the proxy
 #     replaces the credential.
@@ -113,6 +116,11 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # A public host, such as the fonts a page loads:
 # [proxy.hosts."fonts.googleapis.com"]
 # routes = ["GET /css2?"]
+
+# A host served over plain HTTP, such as an in-house mirror:
+# [proxy.hosts."mirror.my-company.com"]
+# routes = ["GET /debian/.+"]
+# http = true
 
 # An API with a token. An inline table must fit on one line; with more than
 # one header, write inject as its own table:

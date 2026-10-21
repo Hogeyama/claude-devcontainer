@@ -63,7 +63,10 @@ which replace the agent's credentials. `python /opt/proxy/workspace_config.py
 secrets` lists the secret names, which the host injector asks for. The
 template's GitHub setting injects the PAT as Basic authentication; GraphQL
 bodies are opaque, so the PAT's scope must enforce repository permissions.
+A host with `http = true` is also reached over plaintext HTTP on port 80
+(absolute-form requests, not CONNECT); `policy.py` refuses `inject` for it, so
+no secret is sent in the clear.
 Request bodies are buffered without an application size limit; responses stream without a cap. Deploy a memory limit for the proxy to
-contain request-buffer exhaustion. WebSockets, plaintext upstream HTTP, and
-non-443 upstream ports are rejected. Denials are logged with method, host,
+contain request-buffer exhaustion. WebSockets, plaintext upstream HTTP to other
+hosts, and other upstream ports are rejected. Denials are logged with method, host,
 path and the check that failed, but never the query or body content.

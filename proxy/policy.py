@@ -4,7 +4,10 @@ Each host lists the requests to let through (routes), the request headers the
 agent may send with them (headers), and the headers the proxy adds (inject),
 whose values name secrets as ${NAME}. The secrets themselves stay on the host:
 inject-credentials.py sends the named ones, from the host's credentials file
-only, so the workspace decides where a secret goes but never sees it.
+only, so the workspace decides where a secret goes but never sees it. http =
+true lets the routes through over plain HTTP on port 80 too, besides HTTPS on
+443; such a host takes no inject, so that no secret crosses the network in the
+clear.
 
 Only the standard library: the host's scripts/settings.py checks the same hosts
 with this file before the image build does.
@@ -26,7 +29,7 @@ UNPASSABLE_HEADERS = {'authorization', 'proxy-authorization', 'cookie', 'x-api-k
 # Headers that the proxy may not inject: they frame the request.
 UNINJECTABLE_HEADERS = UNPASSABLE_HEADERS - {'authorization', 'proxy-authorization', 'cookie', 'x-api-key'}
 SECRET = re.compile(r'\$\{([A-Z_][A-Z0-9_]*)\}')
-FIELDS = {'routes', 'headers', 'inject'}
+FIELDS = {'routes', 'headers', 'inject', 'http'}
 
 
 @dataclass
@@ -37,6 +40,8 @@ class Config:
     headers: dict = field(default_factory=dict)
     # {host: [(header name, template)]}; see parse_template.
     inject: dict = field(default_factory=dict)
+    # {hosts also reached over plain HTTP on port 80}
+    http: set = field(default_factory=set)
 
     def secrets(self):
         """The names of the secrets that inject refers to."""
@@ -85,7 +90,7 @@ def parse_route(route, where):
 
 
 def parse(hosts, source='proxy.hosts'):
-    """Return the Config of {host: {routes, headers, inject}}; raise ValueError if invalid."""
+    """Return the Config of {host: {routes, headers, inject, http}}; raise ValueError if invalid."""
     if not isinstance({} if hosts is None else hosts, dict):
         raise ValueError(f'{source}: expected a table of host names')
     config = Config()
@@ -96,7 +101,7 @@ def parse(hosts, source='proxy.hosts'):
         if host in AUTHENTICATED_HOSTS:
             raise ValueError(f'{where}: authenticated by the proxy itself; its routes are fixed in addon.py')
         if not isinstance(settings, dict) or not set(settings) <= FIELDS:
-            raise ValueError(f'{where}: expected "routes", "headers" and "inject"')
+            raise ValueError(f'{where}: expected "routes", "headers", "inject" and "http"')
         routes, names, injected = settings.get('routes'), settings.get('headers', []), settings.get('inject', {})
         if not isinstance(routes, list) or not routes:
             raise ValueError(f'{where}.routes: must list the requests to let through')
@@ -114,4 +119,11 @@ def parse(hosts, source='proxy.hosts'):
             if not isinstance(name, str) or not HEADER_NAME.fullmatch(name) or name.lower() in UNINJECTABLE_HEADERS:
                 raise ValueError(f'{where}.inject: {name!r} cannot be injected')
             config.inject.setdefault(host, []).append((name, parse_template(value, f'{where}.inject.{name}')))
+        plain = settings.get('http', False)
+        if not isinstance(plain, bool):
+            raise ValueError(f'{where}.http: expected true or false')
+        if plain and injected:
+            raise ValueError(f'{where}.http: plain HTTP would send inject\'s secrets in the clear')
+        if plain:
+            config.http.add(host)
     return config

@@ -339,6 +339,32 @@ class PolicyTest(unittest.TestCase):
             self.addon.http_connect(f)
             self.assertIsNone(f.response)
 
+    def test_plain_http_only_to_http_hosts(self):
+        mirror = policy.parse({'mirror.example.com': {'routes': ['GET /debian/.+'], 'http': True}})
+        with patch.dict(addon.ROUTES, mirror.routes), patch('addon.HOSTS', {*addon.HOSTS, *mirror.routes}), \
+                patch('addon.HTTP_HOSTS', mirror.http):
+            for url in ['http://mirror.example.com/debian/a.deb', 'https://mirror.example.com/debian/a.deb']:
+                with self.subTest(url=url):
+                    self.allowed(flow(url, 'GET', b''))
+            for url, method in [('http://mirror.example.com/other', 'GET'), ('http://mirror.example.com/debian/a', 'PUT'),
+                                ('http://mirror.example.com:8080/debian/a.deb', 'GET'),
+                                ('http://mirror.example.com:443/debian/a.deb', 'GET'),
+                                ('https://mirror.example.com:80/debian/a.deb', 'GET'),
+                                ('http://api.github.com/user', 'GET'),
+                                ('http://api.anthropic.com/api/hello', 'GET'),
+                                ('http://abc.frame.claudeusercontent.com/_warmup', 'GET')]:
+                with self.subTest(url=url):
+                    self.denied(flow(url, method, b''))
+            f = flow()
+            f.request = http.Request.make('CONNECT', 'https://mirror.example.com:80')
+            self.addon.http_connect(f)
+            self.assertIsNotNone(f.response, 'plain HTTP is proxied without CONNECT')
+            for address, allowed in [(('mirror.example.com', 80), True), (('mirror.example.com', 443), True),
+                                     (('mirror.example.com', 8080), False), (('api.github.com', 80), False)]:
+                data = SimpleNamespace(server=connection.Server(address=address))
+                self.addon.server_connect(data)
+                self.assertEqual(data.server.error is None, allowed, address)
+
     def test_workspace_inject_and_headers_are_per_host(self):
         notion = policy.parse({
             'api.notion.com': {'routes': ['/v1/.+'], 'headers': ['Notion-Version'],
