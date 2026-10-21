@@ -143,6 +143,10 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(hosts['api.github.com'], {'routes': ['POST /graphql']})
         self.assertEqual(hosts['other.example.com'], {'routes': ['/']})
 
+    def test_http_host(self):
+        self.write('claude.toml', '[proxy.hosts."mirror.example.com"]\nroutes = ["GET /.+"]\nhttp = true\n')
+        self.assertEqual(self.load()['proxy']['hosts'], {'mirror.example.com': {'routes': ['GET /.+'], 'http': True}})
+
     def test_errors_name_the_file_and_the_setting(self):
         cases = [
             ('[git]\nisolation = "worktree"\n', r'git.isolation: expected "clone" or "shared"'),
@@ -179,6 +183,8 @@ class SettingsTest(unittest.TestCase):
             ('[proxy.hosts."api.anthropic.com"]\nroutes = ["/"]\n', r'proxy.hosts."api.anthropic.com": authenticated'),
             ('[proxy.hosts."a.example.com"]\nroutes = ["get /"]\n', r'proxy.hosts."a.example.com".routes\[0\]'),
             ('[proxy.hosts."a.example.com"]\nroutes = ["/"]\nport = 80\n', r'unknown port'),
+            ('[proxy.hosts."a.example.com"]\nroutes = ["/"]\nhttp = true\ninject = { X-A = "${A}" }\n',
+             r'proxy.hosts."a.example.com".http: plain HTTP'),
             ('agent = 1\n', r'agent: expected a table'),
             ('[agent\n', r'claude.local.toml: '),
         ]

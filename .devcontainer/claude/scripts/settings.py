@@ -67,7 +67,7 @@ DEFAULTS = {
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
-HOST_FIELDS = {'routes', 'headers', 'inject', 'env'}
+HOST_FIELDS = {'routes', 'headers', 'inject', 'http', 'env'}
 ISOLATION_MODES = ('clone', 'shared', 'unsafe_shared')
 # The modes that mount the host's working tree as /workspace.
 SHARED_MODES = ('shared', 'unsafe_shared')

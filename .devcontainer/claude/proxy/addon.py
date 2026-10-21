@@ -12,8 +12,9 @@ import workspace_config
 # --- Policy -------------------------------------------------------------------
 
 # The only requests let through, by host: (method, path regex). None allows
-# any method. Every host is reached on port 443 over HTTPS only. Anthropic's
-# are fixed here; proxy.hosts in the workspace's claude.toml adds the others (GitHub, ...).
+# any method. Every host is reached on port 443 over HTTPS, and the ones in
+# HTTP_HOSTS also on port 80 over plain HTTP. Anthropic's are fixed here;
+# proxy.hosts in the workspace's claude.toml adds the others (GitHub, ...).
 ROUTES = {
     'api.anthropic.com': [
         ('GET', r'/api/hello'),  # HELLO below
@@ -78,6 +79,8 @@ WORKSPACE = workspace_config.installed()
 ROUTES.update(WORKSPACE.routes)
 WORKSPACE_HEADERS = WORKSPACE.headers
 WORKSPACE_INJECT = WORKSPACE.inject
+# proxy.hosts' http = true. policy.py refuses inject for them.
+HTTP_HOSTS = WORKSPACE.http
 HOSTS = set(ROUTES)
 # Claude Code's startup connectivity check. It needs no credentials, so Claude
 # Code starts before they are injected.
@@ -179,6 +182,13 @@ def host_routes(host):
     return None
 
 
+def upstream_allowed(host, scheme, port):
+    """Whether the proxy reaches host on port: HTTPS on 443, plain HTTP on 80 for HTTP_HOSTS."""
+    if host_routes(host) is None:
+        return False
+    return (scheme == 'https' and port == 443) or (scheme == 'http' and port == 80 and host in HTTP_HOSTS)
+
+
 def url_path(req):
     """The request target without the query, as the upstream reads it.
 
@@ -191,7 +201,7 @@ def url_path(req):
 def check_request(req):
     """Check what is known from the headers and return the URL path."""
     routes = host_routes(req.host)
-    require(req.scheme == 'https' and routes is not None and req.port == 443, 'host')
+    require(upstream_allowed(req.host, req.scheme, req.port), 'host')
     require('upgrade' not in req.headers, 'upgrade')
     path = url_path(req)
     decoded = unquote(path)
@@ -313,7 +323,8 @@ class PolicyAddon:
     def server_connect(self, data):
         # mitmproxy logs and ignores hook exceptions, so this must not raise.
         address = data.server.address
-        if address is None or host_routes(address[0]) is None or address[1] != 443:
+        if address is None or not (upstream_allowed(address[0], 'https', address[1])
+                                   or upstream_allowed(address[0], 'http', address[1])):
             data.server.error = 'upstream-denied'
 
     def responseheaders(self, flow):

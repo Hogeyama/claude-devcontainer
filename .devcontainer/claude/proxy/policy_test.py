@@ -47,6 +47,19 @@ class ParseTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             policy.render(config.inject['github.com'][0][1], {})
 
+    def test_http(self):
+        config = policy.parse({
+            'mirror.example.com': {'routes': ['GET /debian/.+'], 'headers': ['X-A'], 'http': True},
+            'fonts.googleapis.com': {'routes': ['GET /css2?'], 'http': False},
+        })
+        self.assertEqual(config.http, {'mirror.example.com'})
+        self.assertEqual(policy.parse({'fonts.googleapis.com': {'routes': ['/']}}).http, set())
+        for value in ['true', 1, None]:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, r'\.http: expected true or false'):
+                policy.parse(host('a.example.com', routes=['/'], http=value))
+        with self.assertRaisesRegex(ValueError, r'\.http: plain HTTP would send'):
+            policy.parse(host('a.example.com', routes=['/'], inject={'X-A': '${TOKEN}'}, http=True))
+
     def test_secret_values_are_not_reinterpreted_as_templates_or_escapes(self):
         for value in ['${OTHER}', r'\1', r'\g<1>', '$\\']:
             with self.subTest(value=value):

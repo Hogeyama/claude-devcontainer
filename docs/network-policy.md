@@ -16,7 +16,7 @@ Anthropicへの通信は[`proxy/addon.py`](../.devcontainer/claude/proxy/addon.p
 
 テンプレートの`proxy.hosts`では、proxyはGitHubへの要求の認証を、ホストの`GITHUB_TOKEN`（fine-grained PAT）によるBasic認証で上書きします。proxyはGraphQLの本文を解析せず、リポジトリへの書込みが許されるかはGitHubの認可に任せます。このため、PATは共有を許可した非公開リポジトリだけを対象にする必要があります。公開リポジトリの読取りは残ります。
 
-GitHubのarchive、LFS、release assetや、package registryには対応していません。proxyはWebSocket、SOCKS、raw TCP、平文HTTPによる外部接続も拒否します。
+GitHubのarchive、LFS、release assetや、package registryには対応していません。proxyはWebSocket、SOCKS、raw TCPによる外部接続も拒否します。平文HTTPは、`proxy.hosts`で`http = true`を書いた接続先にだけ通します（[接続先を追加する](#接続先を追加する)）。
 
 proxyはAnthropic向けの要求では、Anthropicのサーバーから別の接続先へ通信させる指定を既定で拒否します。対象はMCP connector、web search／fetchなどサーバー側で実行するtool、code executionのcontainer、URLやファイルIDで指定するcontentです。WebSearchは[`proxy.web_search`](#websearchを使う)を有効にした場合、claude.aiのコネクタは明示的に指定したものだけ例外として通します。サーバー側のtoolのうち、Anthropicのサーバー内でモデルを呼ぶだけのadvisor（`advisor_20260301`）は、他の接続先に接続しないので通します。新しい版のadvisorは、確認するまで拒否します。その間は、Claude Codeで`/advisor off`にすると推論を続けられます。それ以外の項目やbeta headerは通すため、Claude Codeの新しい機能でproxyの更新は要りません。この4種類以外の形でサーバーから外部へ接続する機能が今後追加された場合は、それも通ります。
 
@@ -107,12 +107,17 @@ env = ["NOTION_API_KEY"]
 [proxy.hosts."redmine.my-company.com"]
 routes = ['GET /issues\.json']                 # 単一引用符の文字列は\をそのまま書ける
 inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
+
+[proxy.hosts."mirror.my-company.com"]          # 平文HTTPのホスト
+routes = ["GET /debian/.+"]
+http = true
 ```
 
 - `routes`には、通す要求を`GET /path`か、pathだけ（すべてのmethod）で書きます。pathはqueryを除いたURLのpath全体に一致させる正規表現です。`/.*`のように広く書くと、そのホストのどのAPIにも届きます。
-- ホスト名は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。
+- ホスト名は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。ただし`http = true`を書いたホストは、port 80の平文HTTPでも同じ`routes`を通します（下記）。
 - `headers`には、agentが送ってよいheaderを書きます。`Accept`や`Content-Type`などの一般的なものは書かなくても通ります。`Authorization`や`Cookie`などの認証は書けません。agentが付けた認証は常に除きます。
 - `inject`には、proxyが付けるheaderを書きます。agentが付けた同名のheaderは置き換えます。`${NAME}`は秘密の参照です。値を`{ basic = "user:password" }`にするとBasic認証になります（テンプレートのGitHubの設定を参照）。`{ … }`のインラインテーブルは1行に書く必要があります。headerが多い場合は、`[proxy.hosts."api.notion.com".inject]`のテーブルに分けて書けます。
+- `http = true`は、HTTPSに加えてport 80の平文HTTP（`http://ホスト名/...`）も通します。agentはHTTPSのときと同じく`HTTP_PROXY`でproxyを通ります。平文の要求と応答は経路上で読まれ、書き換えられえます。秘密が平文で流れないよう、`http = true`のホストには`inject`を書けません。
 - `env`には、agentにダミー値`managed-by-proxy`で渡す環境変数の名前を書きます（下記）。
 - `api.anthropic.com`と`mcp-proxy.anthropic.com`は書けません。proxyがAnthropicの認証値を付ける接続先で、ルールは`addon.py`に固定しています。
 
@@ -147,7 +152,7 @@ routes = ['GET /issues\.json']
 inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 ```
 
-`claude.local.toml`のホストは`claude.toml`のホストに追加されます。同じホストが両方にある場合は、`claude.local.toml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`、`env`は混ぜません。秘密は`claude.toml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
+`claude.local.toml`のホストは`claude.toml`のホストに追加されます。同じホストが両方にある場合は、`claude.local.toml`の設定でホストごと置き換えます。`routes`、`headers`、`inject`、`http`、`env`は混ぜません。秘密は`claude.toml`と同じく、ホストの`~/.config/claude-devcontainer/credentials`に書きます。
 
 `claude.toml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合は起動処理が失敗し、`claude.local.toml:`で始まる理由を表示します。ホストの未追跡ファイルなのでcloneには入りません。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
 
