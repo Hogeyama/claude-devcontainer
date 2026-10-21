@@ -170,7 +170,7 @@ def check(data, source):
             raise ValueError(f'{source}: agent.env: {name!r} is not an environment variable name')
         if name.upper() in RESERVED_ENV or name.upper().startswith(RESERVED_ENV_PREFIXES):
             raise ValueError(f'{source}: agent.env: {name} is set by compose')
-        # agent.env writes it in single quotes, which compose takes literally.
+        # Keep each assignment on one line in agent.env.
         if not isinstance(value, str) or '\n' in value or "'" in value:
             raise ValueError(f"{source}: agent.env.{name}: expected a string without newlines or '")
     if 'version' in data.get('acp', {}) and not ACP_VERSION.fullmatch(data['acp']['version']):
@@ -323,8 +323,12 @@ def dummies(settings):
 
 def agent_env(settings, header=''):
     """agent.env for compose's env_file: agent.env, then proxy.hosts' dummies."""
-    # Single-quoted values are literal to compose: no interpolation or escapes.
-    lines = [f"{name}='{value}'\n" for name, value in settings['agent']['env'].items()]
+    # Double quotes let us escape a trailing backslash without swallowing the
+    # closing quote. Escape dollars too, so Compose cannot interpolate values.
+    lines = []
+    for name, value in settings['agent']['env'].items():
+        value = value.replace('\\', '\\\\').replace('"', '\\"').replace('$', '$$').replace('\r', '\\r')
+        lines.append(f'{name}="{value}"\n')
     return header + ''.join(lines) + ''.join(f'{name}={DUMMY}\n' for name in dummies(settings))
 
 

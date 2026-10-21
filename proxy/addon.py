@@ -118,7 +118,7 @@ ANTHROPIC_VERSION = '2023-06-01'
 OAUTH_BETA = 'oauth-2025-04-20'
 
 NO_CREDENTIALS = 'no credentials; run .devcontainer/claude/scripts/inject-credentials.py on the host'
-NO_SECRET = ('no secret {}; assign it in ~/.config/claude-devcontainer/credentials on the host, '
+NO_SECRET = ('no secret {}; set it under [secrets] in ~/.config/claude-devcontainer/credentials.toml on the host, '
              'then run .devcontainer/claude/scripts/inject-credentials.py')
 
 # ------------------------------------------------------------------------------
