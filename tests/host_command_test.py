@@ -152,6 +152,13 @@ class HostCommandTest(unittest.TestCase):
         self.assertTrue(compose)
         self.assertEqual(compose[-1][-2:], ['down', '--remove-orphans'])
 
+    def test_exec_runs_in_agent_and_preserves_command_arguments(self):
+        self.env['FAKE_PROJECTS'] = self.project() + '\n'
+        self.run_command('exec', 'sh', '-c', 'printf "%s" "hello world"')
+        compose = [call['argv'] for call in self.calls() if call['argv'][:2] == ['docker', 'compose']]
+        self.assertEqual(compose[-1][-5:], ['exec', 'agent', 'sh', '-c', 'printf "%s" "hello world"'])
+        self.assertFalse(any(call['argv'][0] == 'devcontainer' for call in self.calls()))
+
 
 class InstallTest(unittest.TestCase):
     def test_installs_the_committed_core_and_links_the_command(self):

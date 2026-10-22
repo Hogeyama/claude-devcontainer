@@ -11,6 +11,7 @@ Usage: claude-devcontainer          start, then open claude in the agent
        claude-devcontainer code-server   start, then open the isolated editor (code-server.sh)
        claude-devcontainer code-server prepare   download the editor's Electron only
        claude-devcontainer compose ARGS...   docker compose for this environment
+       claude-devcontainer exec ARGS...   alias for compose exec agent ARGS...
 """
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
 
-USAGE = 'usage: claude-devcontainer [up | down | code-server [prepare] | compose ARGS...]'
+USAGE = 'usage: claude-devcontainer [up | down | code-server [prepare] | compose ARGS... | exec ARGS...]'
 
 
 def repository():
@@ -81,7 +82,7 @@ def start(root, env):
 def main():
     args = sys.argv[1:]
     command = args[0] if args else ''
-    if command not in ('', 'up', 'down', 'code-server', 'compose') or (command in ('up', 'down') and len(args) > 1) \
+    if command not in ('', 'up', 'down', 'code-server', 'compose', 'exec') or (command in ('up', 'down') and len(args) > 1) \
             or args == ['compose'] or (command == 'code-server' and args[1:] not in ([], ['prepare'])):
         sys.exit(USAGE)
     root = repository()
@@ -91,10 +92,12 @@ def main():
         if args[1:] != ['prepare']:
             start(root, env)
         os.execve('/bin/sh', ['sh', str(layout.CORE / 'scripts/code-server.sh'), *args[1:]], env)
-    if command in ('down', 'compose'):
+    if command in ('down', 'compose', 'exec'):
         # An environment of an earlier core may have services that this one's
         # compose file no longer has; down removes them too.
         rest = args[1:] if command == 'compose' else ['down', '--remove-orphans']
+        if command == 'exec':
+            rest = ['exec', 'agent', *args[1:]]
         compose = layout.CORE / 'scripts/compose.sh'
         os.execve('/bin/sh', ['sh', str(compose), *rest], env)
     target = start(root, env)
