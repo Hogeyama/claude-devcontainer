@@ -3,11 +3,11 @@ ARG INSTALL_CODE_SERVER=0
 # sumi masks secrets in what Claude's tools return (sumi.enabled in
 # claude.toml). Its broker and the agent must run the same version.
 FROM scratch AS sumi-amd64
-ADD --chmod=755 --checksum=sha256:43d89c297e8381adac12d2fcc6280bccd99f8386fddce35d13bb4e6aa687f5ed \
-    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-x86_64-linux /sumi
+ADD --chmod=755 --checksum=sha256:88ee4bfc6ed7a34c2c6590acba6867d4225fdf1b0904d9a465dbabba270c4f18 \
+    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.6.0/sumi-x86_64-linux /sumi
 FROM scratch AS sumi-arm64
-ADD --chmod=755 --checksum=sha256:65f462ffa1831bb3e8b5f13198d5ef82d50d82bc0e6177dd824404d5bc3180f8 \
-    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.5.0/sumi-aarch64-linux /sumi
+ADD --chmod=755 --checksum=sha256:8c54bb4a0f74d73639da9646499cc7d35018ea75e29649fdfa3a33ce074ecadb \
+    https://github.com/Hogeyama/nix-agent-sandbox/releases/download/sumi-v0.6.0/sumi-aarch64-linux /sumi
 FROM sumi-${TARGETARCH} AS sumi
 # The sumi service: the broker, which alone reads the secrets file.
 FROM scratch AS sumi-serve
