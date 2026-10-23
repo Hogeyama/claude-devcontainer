@@ -153,14 +153,14 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | 自分だけが使う接続先 | `claude.local.toml`の`proxy.hosts` | [接続先を変える](#接続先を変える) |
 | 社内CAを使う接続先 | `claude.toml`の`proxy.ca` | [接続先を変える](#接続先を変える) |
 | claude.aiのコネクタ | `claude.local.toml`の`proxy.connectors` | [接続先を変える](#接続先を変える) |
-| Claude Codeの設定・hook・skillなど | ホストの`~/.claude`、`extra/` | [ホストの設定を引き継ぐ](#ホストの設定を引き継ぐ) |
+| Claude Codeの設定・hook・skillなど | ホストの`~/.claude`、`dotfiles/` | [ホストの設定を引き継ぐ](#ホストの設定を引き継ぐ) |
 | Docker（DinD） | `claude.toml`の`docker` | [Dockerを使う（DinD）](#dockerを使うdind) |
 | ACP（agent-shell・Avanteなど） | `claude.toml`の`acp`（sharedのみ） | [ACPクライアントから使う](docs/usage.md#acpクライアントから使う) |
 | nixのdev shell | `claude.toml`の`nix` | [nixのdev shellを使う](#nixのdev-shellを使う) |
 | シークレットのマスク | `claude.toml`の`sumi`、ホストの`sumi/secrets.txt` | [シークレットをマスクする](#シークレットをマスクする) |
 | agentのUID・ネットワーク | `claude.local.toml`の`agent`、`subnets` | [UIDとネットワークを変える](#uidとネットワークを変える) |
 
-ホストの`credentials.toml`、`agent-setup.sh`、`extra/`、`sumi/`は、`~/.config/claude-devcontainer/`の下にあります。
+ホストの`credentials.toml`、`agent-setup.sh`、`dotfiles/`、`sumi/`は、`~/.config/claude-devcontainer/`の下にあります。
 
 ### claude.tomlとclaude.local.toml
 
@@ -240,22 +240,22 @@ env = ["NOTION_API_KEY"]
 
 `settings.json`はmanaged settings（`/etc/claude-code/managed-settings.d/50-host.json`）として置き、ほかのファイルはroot所有でコピーします。そのため、agentはホストで設定したhookを外したり、hookが実行するスクリプトを差し替えたりできません。
 
-これ以外のファイルを渡したいときは、`~/.config/claude-devcontainer/extra/`に、ホームディレクトリと同じ構成で置いてください。agentのホームディレクトリへコピーします。symlinkでも構いません。`extra/.claude/settings.json`を置くと、ホストの`settings.json`の代わりにそれを使います。
+これ以外のファイルを渡したいときは、`~/.config/claude-devcontainer/dotfiles/`に、ホームディレクトリと同じ構成で置いてください。agentのホームディレクトリへコピーします。symlinkでも構いません。`dotfiles/.claude/settings.json`を置くと、ホストの`settings.json`の代わりにそれを使います。
 
 ```sh
-cd ~/.config/claude-devcontainer/extra
+cd ~/.config/claude-devcontainer/dotfiles
 mkdir -p .claude .config/git
 ln -s ~/.claude/statusline.sh .claude/statusline.sh
 ln -s ~/.config/git/config .config/git/config
 ```
 
-Gitの設定は自動ではコピーしません。credential helper、署名、deltaのようなpagerなど、コンテナでは動かない設定が混ざりやすいためです。ホストの設定をそのまま渡すか、コンテナ用に書いたファイルを`extra/`に置いてください。symlinkで`~/.claude`ごと渡しても、`.credentials.json`はコピーしません。
+Gitの設定は自動ではコピーしません。credential helper、署名、deltaのようなpagerなど、コンテナでは動かない設定が混ざりやすいためです。ホストの設定をそのまま渡すか、コンテナ用に書いたファイルを`dotfiles/`に置いてください。symlinkで`~/.claude`ごと渡しても、`.credentials.json`はコピーしません。
 
 > [!NOTE]
-> - コピーはホストからコンテナへの一方向です。managed settingsは、コンテナ内で`/config`などから変えた設定やプロジェクトの設定より優先されます。コンテナ用の値にしたいときは`extra/.claude/settings.json`を使ってください。
+> - コピーはホストからコンテナへの一方向です。managed settingsは、コンテナ内で`/config`などから変えた設定やプロジェクトの設定より優先されます。コンテナ用の値にしたいときは`dotfiles/.claude/settings.json`を使ってください。
 > - agentの`~/.claude`はコンテナを再起動すると消えます（セッション履歴の`projects/`は残ります）。
 > - コピーしたファイルはroot所有なので、自分と同じディレクトリにファイルを書くhookスクリプトは失敗します。
-> - `settings.json`の`env`もagentから見えます。秘密を書いているなら、`extra/.claude/settings.json`にコンテナ用の設定を用意してください。
+> - `settings.json`の`env`もagentから見えます。秘密を書いているなら、`dotfiles/.claude/settings.json`にコンテナ用の設定を用意してください。
 > - コマンドのパスは、`/home/<user>/…`のような絶対パスではなく`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れてください。
 > - `up`の後にホストで設定を変えたら、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映されます。
 

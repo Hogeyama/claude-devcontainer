@@ -56,7 +56,7 @@ agentへmountするDocker APIのUnix socketはread-onlyですが、Docker APIの
 
 Nodeの依存はCoWを使います。ホストのlowerへの書き戻しはなく、agentの変更はupperへ残ります。Gradleの既存CoWも維持します。利用中にホストのlowerを変更しないでください。[依存の共有と更新](usage.md#依存の共有と更新)を参照してください。
 
-ホストの設定（`~/.claude`の一部と`~/.config/claude-devcontainer/extra/`）は、従来どおりホストからagentへ一方向にコピーします。ホームや認証情報を丸ごとmountしません。
+ホストの設定（`~/.claude`の一部と`~/.config/claude-devcontainer/dotfiles/`）は、従来どおりホストからagentへ一方向にコピーします。ホームや認証情報を丸ごとmountしません。
 
 ### コミットをレビューして取り込む
 

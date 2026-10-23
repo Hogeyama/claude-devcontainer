@@ -62,10 +62,10 @@ class DevcontainerIntegrationTest(unittest.TestCase):
         (claude / 'settings.json').write_text(json.dumps({'statusLine': {'type': 'command', 'command': 'sh ~/.claude/statusline.sh'}}))
         (claude / '.credentials.json').write_text('synthetic-credentials')
         cls.env.update(CLAUDE_CONFIG_DIR=str(claude))
-        extra = cls.directory / 'config/claude-devcontainer/extra'
-        extra.mkdir(parents=True)
-        (extra / '.gitconfig').write_text('[user]\n\tname = fixture-user\n')
-        (extra.parent / 'credentials.toml').write_text('[claude]\napi_key = "synthetic-managed-token"\n'
+        dotfiles = cls.directory / 'config/claude-devcontainer/dotfiles'
+        dotfiles.mkdir(parents=True)
+        (dotfiles / '.gitconfig').write_text('[user]\n\tname = fixture-user\n')
+        (dotfiles.parent / 'credentials.toml').write_text('[claude]\napi_key = "synthetic-managed-token"\n'
                                                        '[secrets]\nGITHUB_TOKEN = "synthetic-managed-token"\n')
         cls.addClassCleanup(docker, 'run', '--rm', '--network', 'none', '--entrypoint', 'rm',
                             '-v', str(cls.directory / 'state') + ':/state', AGENT_IMAGE,

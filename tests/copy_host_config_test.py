@@ -24,13 +24,13 @@ class ArchiveTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.source = self.root / 'claude'
-        self.extra = self.root / 'extra'
+        self.dotfiles = self.root / 'dotfiles'
         self.elsewhere = self.root / 'store'
         for path in (self.source / 'skills/mine', self.source / 'projects/-workspace', self.elsewhere):
             path.mkdir(parents=True)
 
     def members(self):
-        with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.extra))) as tar:
+        with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.dotfiles))) as tar:
             return {member.name: tar.extractfile(member).read().decode() if member.isfile() else None
                     for member in tar.getmembers()}
 
@@ -89,8 +89,8 @@ class ArchiveTest(unittest.TestCase):
         (self.source / 'sumi').mkdir()
         (self.source / 'sumi/secrets.txt').write_text('Tr0ub4dor')
         self.settings({'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': 'cat ~/.claude/sumi/secrets.txt'}]}]}})
-        self.extra.mkdir()
-        (self.extra / '.claude').symlink_to(self.source)
+        self.dotfiles.mkdir()
+        (self.dotfiles / '.claude').symlink_to(self.source)
         self.assertFalse([name for name in self.members() if 'sumi' in name])
 
     def test_never_copies_the_secrets_files_sumi_uses_wherever_they_are(self):
@@ -101,8 +101,8 @@ class ArchiveTest(unittest.TestCase):
             'hooks': {'PostToolUse': [{'hooks': [{'type': 'command', 'command': '/opt/sumi',
                                                   'args': ['hook', '--secrets-file', str(self.source / 'keys/host.txt')]}]}]},
             'env': {'CLAUDE_CODE_SHELL_PREFIX': f"bash -c 'exec \"$@\"' p /opt/sumi run --secrets-file {self.source}/keys/prefix.txt"}})
-        self.extra.mkdir()
-        (self.extra / '.claude').symlink_to(self.source)
+        self.dotfiles.mkdir()
+        (self.dotfiles / '.claude').symlink_to(self.source)
         self.workspace(f'[sumi]\nsecrets = "{self.source}/keys/container.txt"\n')
         with mock.patch.object(copy_host_config, 'ROOT', self.root):
             members = self.members()
@@ -118,8 +118,8 @@ class ArchiveTest(unittest.TestCase):
         (self.source / 'keys').mkdir()
         (self.source / 'keys/secrets.txt').write_text('test-only-secret')
         (self.source / 'keys/other.txt').write_text('ordinary config')
-        self.extra.mkdir()
-        (self.extra / '.claude').symlink_to(self.source)
+        self.dotfiles.mkdir()
+        (self.dotfiles / '.claude').symlink_to(self.source)
         # Relative to .devcontainer/; claude.local.toml overrides claude.toml.
         self.workspace('[sumi]\nsecrets = "../claude/keys/other.txt"\n', '[sumi]\nsecrets = "../claude/keys/secrets.txt"\n')
         with mock.patch.object(copy_host_config, 'ROOT', self.root):
@@ -128,11 +128,11 @@ class ArchiveTest(unittest.TestCase):
         self.assertIn('.claude/keys/other.txt', members)
 
     def test_invalid_settings_copy_nothing(self):
-        # Which file sumi.secrets names is unknown, and extra/ may link to it.
+        # Which file sumi.secrets names is unknown, and dotfiles/ may link to it.
         (self.source / 'keys').mkdir()
         (self.source / 'keys/secrets.txt').write_text('test-only-secret')
-        self.extra.mkdir()
-        (self.extra / '.claude').symlink_to(self.source)
+        self.dotfiles.mkdir()
+        (self.dotfiles / '.claude').symlink_to(self.source)
         self.workspace('[sumi]\nsecrets = "../claude/keys/secrets.txt"\n[docker]\nenabeld = true\n')
         with mock.patch.object(copy_host_config, 'ROOT', self.root), self.assertRaisesRegex(ValueError, 'enabeld'):
             self.members()
@@ -150,13 +150,13 @@ class ArchiveTest(unittest.TestCase):
         self.assertIn('Nothing was copied', result.stderr)
         self.assertFalse((self.root / 'state').exists())
 
-    def test_extra_overlays_the_home_directory(self):
+    def test_dotfiles_overlay_the_home_directory(self):
         self.settings({'model': 'opus'})
-        (self.extra / '.claude/skills/added').mkdir(parents=True)
-        (self.extra / '.claude/skills/added/SKILL.md').write_text('added')
-        (self.extra / '.claude/settings.json').write_text('{"model": "sonnet"}')
-        (self.extra / '.gitconfig').write_text('[user]\n\tname = t\n')
-        with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.extra))) as tar:
+        (self.dotfiles / '.claude/skills/added').mkdir(parents=True)
+        (self.dotfiles / '.claude/skills/added/SKILL.md').write_text('added')
+        (self.dotfiles / '.claude/settings.json').write_text('{"model": "sonnet"}')
+        (self.dotfiles / '.gitconfig').write_text('[user]\n\tname = t\n')
+        with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.dotfiles))) as tar:
             names = tar.getnames()
             settings = [tar.extractfile(member).read() for member in tar.getmembers() if member.name == '.claude/settings.json']
         self.assertIn('.claude/skills/added/SKILL.md', names)
@@ -164,18 +164,25 @@ class ArchiveTest(unittest.TestCase):
         # Extraction keeps the last one.
         self.assertEqual(json.loads(settings[-1]), {'model': 'sonnet'})
 
-    def test_extra_linking_all_of_claude_still_leaves_credentials(self):
+    def test_dotfiles_linking_all_of_claude_still_leaves_credentials(self):
         (self.source / '.credentials.json').write_text('secret')
-        self.extra.mkdir()
-        (self.extra / '.claude').symlink_to(self.source)
+        self.dotfiles.mkdir()
+        (self.dotfiles / '.claude').symlink_to(self.source)
         self.assertNotIn('.claude/.credentials.json', self.members())
+
+    def test_the_former_name_of_dotfiles_is_refused(self):
+        legacy = self.root / 'extra'
+        copy_host_config.check_legacy_dotfiles(legacy, self.dotfiles)
+        legacy.symlink_to(self.root / 'gone')
+        with self.assertRaisesRegex(SystemExit, 'mv .*/extra .*/dotfiles'):
+            copy_host_config.check_legacy_dotfiles(legacy, self.dotfiles)
 
     def test_read_only_files_stay_replaceable(self):
         (self.source / 'skills/mine/SKILL.md').write_text('skill')
         (self.source / 'skills/mine/SKILL.md').chmod(0o444)
         (self.source / 'skills/mine').chmod(0o555)
         self.addCleanup((self.source / 'skills/mine').chmod, 0o755)
-        with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.extra))) as tar:
+        with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.dotfiles))) as tar:
             modes = {member.name: member.mode for member in tar.getmembers()}
         self.assertEqual(modes['.claude/skills/mine'] & 0o700, 0o700)
         self.assertEqual(modes['.claude/skills/mine/SKILL.md'] & 0o600, 0o600)

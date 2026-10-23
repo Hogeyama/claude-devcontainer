@@ -30,7 +30,7 @@ Check the Git mode first: `echo "$CLAUDE_DEVCONTAINER_GIT_ISOLATION"` prints `cl
 In both modes:
 
 - Commit, then tell the human the branch name and the exact commit ID. The human fetches it through the host's `agent` remote, reviews it, and integrates that ID. GitHub is not involved in this exchange.
-- If Git has no `user.name`/`user.email`, ask the human which identity to use. They can provide one with `~/.config/claude-devcontainer/extra/.gitconfig` on the host, which becomes your `~/.gitconfig`. Do not invent one or write global config without asking.
+- If Git has no `user.name`/`user.email`, ask the human which identity to use. They can provide one with `~/.config/claude-devcontainer/dotfiles/.gitconfig` on the host, which becomes your `~/.gitconfig`. Do not invent one or write global config without asking.
 - `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Mount changes require container recreation. Run Git as node, never root.
 - If `$CLAUDE_DEVCONTAINER_NIX` is `1`, Bash reads what the nix dev shell exported when the container started, after its shellHook ran in `/workspace`. When a dev shell tool or variable is missing, the shellHook's output is in `/run/claude-devcontainer/nix-env.log`.
 - If `$CLAUDE_DEVCONTAINER_SUMI` is `1`, secrets that the human listed are replaced by `*` in what your tools return, one `*` per byte (a 24-byte secret reads as 24 `*`). This is deliberate, and a run of `*` is the masking working, not a change to report. Do not try to recover the values (decoding, splitting, or guessing them); if a task needs one, ask the human. A tool that fails with a sumi error means its output could not be masked; tell the human.

@@ -4,10 +4,10 @@
 The copy goes one way only: nothing in the agent's home reaches the host, where
 an agent-written hook or memory would run or be read outside the container.
 Copied are settings.json, the entries of ~/.claude in ENTRIES, and the files
-under ~/.claude that statusLine and hooks commands name. Everything in EXTRA
-is then mirrored onto the home directory (e.g. EXTRA/.gitconfig becomes
-~/.gitconfig). Symbolic links are followed on the host, so they may point
-anywhere the host can read (e.g. /nix/store).
+under ~/.claude that statusLine and hooks commands name. Everything in
+DOTFILES is then mirrored onto the home directory (e.g. DOTFILES/.gitconfig
+becomes ~/.gitconfig). Symbolic links are followed on the host, so they may
+point anywhere the host can read (e.g. /nix/store).
 
 The agent must not be able to drop the host's hooks or change what they run, so
 settings.json becomes a managed settings file, and the rest of ~/.claude is
@@ -37,15 +37,18 @@ import layout  # noqa: E402
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
 SOURCE = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
-EXTRA = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer/extra'
+CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
+DOTFILES = CONFIG / 'dotfiles'
+# DOTFILES' former name, refused so that its files are not silently left out.
+LEGACY_DOTFILES = CONFIG / 'extra'
 LOG = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'claude-devcontainer/copy-config.log'
 # Configuration, not state. An allowlist, because ~/.claude also holds
 # credentials and history, and new kinds of state appear with new versions.
 # settings.json is handled separately as a managed settings file.
 ENTRIES = ('CLAUDE.md', 'skills', 'agents', 'commands', 'output-styles')
-# Never copied, nor anything under them, even when a command names it or EXTRA
-# links to all of ~/.claude. sumi/ is where sumi's README keeps secrets.txt; the
-# secrets files actually in use are found by secrets_files().
+# Never copied, nor anything under them, even when a command names it or
+# DOTFILES links to all of ~/.claude. sumi/ is where sumi's README keeps
+# secrets.txt; the secrets files actually in use are found by secrets_files().
 SECRETS = ('.claude/.credentials.json', '.claude/sumi')
 TARGET = '/home/node'
 MANAGED = '/etc/claude-code/managed-settings.d/50-host.json'
@@ -155,7 +158,7 @@ def without_sumi(settings):
     return settings
 
 
-def archive(source=SOURCE, extra=EXTRA):
+def archive(source=SOURCE, dotfiles=DOTFILES):
     """Return a tar of the configuration to extract into the agent's home."""
     names = [Path(name) for name in ENTRIES]
     container = sumi_secrets()
@@ -179,8 +182,8 @@ def archive(source=SOURCE, extra=EXTRA):
         for name in names:
             add(tar, source / name, '.claude/' + str(name), excluded=excluded)
         # Later members overwrite earlier ones on extraction.
-        if extra.is_dir():
-            for path in sorted(extra.iterdir()):
+        if dotfiles.is_dir():
+            for path in sorted(dotfiles.iterdir()):
                 add(tar, path, path.name, excluded=excluded)
     return buffer.getvalue()
 
@@ -217,6 +220,12 @@ def add(tar, path, name, parents=(), excluded=frozenset()):
             pass
 
 
+def check_legacy_dotfiles(legacy=LEGACY_DOTFILES, dotfiles=DOTFILES):
+    if legacy.exists() or legacy.is_symlink():
+        sys.exit(f'error: {legacy} is now {dotfiles}. Nothing was copied; run\n'
+                 f'  mv {shlex.quote(str(legacy))} {shlex.quote(str(dotfiles))}')
+
+
 def docker(*arguments, data=None):
     return subprocess.run(['docker', *arguments], input=data, stdout=subprocess.PIPE, check=True).stdout
 
@@ -250,7 +259,7 @@ if [ -d "$staging/.claude" ]; then
     done
     rmdir "$staging/.claude"
 fi
-# The rest of EXTRA lies outside ~/.claude and stays the agent's. Copy it as
+# The rest of DOTFILES lies outside ~/.claude and stays the agent's. Copy it as
 # node: root here lacks CAP_FOWNER, so it cannot update the agent's files.
 chown -R node:node "$staging"
 for path in "$staging"/* "$staging"/.[!.]*; do
@@ -293,6 +302,7 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else None
     if mode == '--wait':
         return wait_and_copy(sys.stdin.buffer.read())
+    check_legacy_dotfiles()
     data = archive()
     if mode == '--background':
         LOG.parent.mkdir(parents=True, exist_ok=True)
