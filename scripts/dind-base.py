@@ -79,7 +79,7 @@ def main():
     command = (f"exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd "
                f"--host=unix:///run/user/{uid}/docker.sock {DOCKERD_ARGS}' rootless")
     # No network: it only loads what the host sends.
-    container = docker('run', '-d', '--rm', '--privileged', '--network', 'none', '--user', '0:0',
+    container = docker('run', '-d', '--rm', '--init', '--privileged', '--network', 'none', '--user', '0:0',
                        '-e', 'DOCKER_TLS_CERTDIR=', '-e', 'TINI_SUBREAPER=1',
                        '--tmpfs', f'/run/user/{uid}:uid={uid},gid={gid},mode=0700',
                        '--mount', f'type=bind,source={data},target={settings.DIND_DATA}',
