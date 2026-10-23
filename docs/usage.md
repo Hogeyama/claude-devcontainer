@@ -326,6 +326,22 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
+### DinDのデータを複数のリポジトリで共有する
+
+DinDのデータ（イメージ、ビルドキャッシュ、コンテナ）は、既定ではリポジトリごとのvolumeに置かれます。`docker.volume`にvolume名を書くと、同じ名前を書いたリポジトリの間でそのvolumeを共有します。イメージの読み込みとビルドキャッシュは、どれか1つのリポジトリで済めば他でも使えます。リポジトリをまたいで使うので、全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`か`claude.local.toml`に書くのが便利です。`docker.enabled`が`false`のリポジトリでは無視されます。
+
+```toml
+[docker]
+enabled = true
+volume = "claude-devcontainer-dind"
+```
+
+- `up`がvolumeを作ります。外部volumeとして扱うので、`down --volumes`でも消えません。不要になったらホストで`docker volume rm`してください。
+- 2つのdockerdが同じデータを同時に使うと壊れるため、別の環境のDinDが使用中なら`up`はエラーになります。先にその環境を停止してください。
+- dockerdはagentのUIDでファイルを所有するので、共有するリポジトリの`agent.uid`は揃えてください。作成時と異なるUIDでは`up`がエラーになります。
+- 共有したリポジトリのagentからは、他のリポジトリが残したイメージやコンテナも見えます。信頼の異なるリポジトリとは共有しないでください。
+- 設定を変えた後の`up`でDinDは作り直されます。元のvolumeのデータは移りません。
+
 ## ACPクライアントから使う
 
 ホストのEmacs、Neovimなどから、コンテナ内の[claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)へ接続できます。[`git.isolation = "shared"`](#gitの共有と分離)または`unsafe_shared`が前提です。agentの`/workspace`がホストの作業ツリーそのものになるので、エディタとagentが同じファイルを指せます。`.devcontainer/claude.toml`か`claude.local.toml`で両方を有効にしてください。
