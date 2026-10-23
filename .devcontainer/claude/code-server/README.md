@@ -76,7 +76,7 @@ Waylandではtext-input-v3でホストのIMEを使います。X11では`DISPLAY`
 `open` はElectronをホストで直接起動し、専用proxyの公開ポートに接続します。
 Electronの起動後にコマンドは戻り、出力はworkspaceごとの状態ディレクトリ（`~/.local/state/claude-devcontainer/vscode/<workspaceのハッシュ>/`）の `client.log` に入ります。
 同じworkspaceのウィンドウは一つまでで、2つ目の`open`はロックで止まります。別のworkspaceは同時に開けます。
-プロファイルは従来と同じ状態ディレクトリの`home/shell`に保存し、ユーザー設定を引き継ぎます。
+プロファイルは従来と同じ状態ディレクトリの`home/shell`に保存し、ウィンドウの状態（レイアウトや開いていたエディタなど）を引き継ぎます。
 
 Chromiumのレンダラーsandboxは有効です。Electron全体を囲むnamespaceやファイルシステムの隔離はありません。
 接続先と外部アプリケーションの起動は、シェルの判定とproxyの許可リストで制限します。
@@ -97,7 +97,7 @@ Windows側のファイルは `%LOCALAPPDATA%\ClaudeDevcontainer` に置きます
 | --- | --- |
 | `electron\<バージョン>-win32-x64` | Electron |
 | `workspaces\<workspaceのハッシュ>\shell` | シェルのコピー。`open`のたびに書き直す |
-| `workspaces\<workspaceのハッシュ>\profile` | シェルのプロファイル（エディタのユーザー設定と状態） |
+| `workspaces\<workspaceのハッシュ>\profile` | シェルのプロファイル（ウィンドウの状態） |
 | `workspaces\<workspaceのハッシュ>\client.log` | シェルの出力 |
 
 Windowsでも、Electron全体を囲むOSの隔離はありません。
@@ -118,7 +118,7 @@ agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番�
 - Workspace Trustは`--disable-workspace-trust`で無効にします。agentのworkspaceはもともと攻撃者が書き換えられるもので、agentのClaude Codeも最初から信頼しています。制限モードはagent内の拡張機能を止めるだけで、ホストを守りません。
 - 更新するときはDockerfileのcode-serverのバージョンとハッシュを変え、ワークベンチ、webview、Simple Browser、ポートビューを実際に確認してください。
 - agentのfirewallは、code-server-proxyからの接続をすべてagentの127.0.0.1の同じポートへ転送します（`agent/init-firewall.sh`）。これにはcomposeが設定する`net.ipv4.conf.all.route_localnet=1`が必要です。ほかの送信元からの接続は、INPUTの既定のDROPで拒否されます。
-- 拡張の状態は`vscode-server-data` volumeに残ります。Machine設定は、起動のたびにimageの内容（ターミナルを`/bin/bash`で起動する設定と、localhostのリンクをSimple Browserで開く設定）に戻ります。ユーザー設定は、ブラウザ版VS Codeの仕様でシェルのプロファイルに保存されます。
+- ユーザー設定（`settings.json`、`keybindings.json`など）と拡張の状態は、serverの`~/.vscode-server/data/User/`に保存され、`vscode-server-data` volumeに残ります。volumeはworkspaceごとに別なので、リポジトリを切り替えると別の設定になります。Machine設定は、起動のたびにimageの内容（ターミナルを`/bin/bash`で起動する設定と、localhostのリンクをSimple Browserで開く設定）に戻ります。シェルのプロファイルに残るのは、ウィンドウの状態（レイアウトや開いていたエディタなど）だけです。
 
 ## agent内のWebアプリを開く
 

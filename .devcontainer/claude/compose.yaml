@@ -86,8 +86,9 @@ services:
       - sumi-run:/run/sumi:ro
       # Session history, kept across container rebuilds for `claude --resume`.
       - claude-projects:/home/node/.claude/projects
-      # The isolated editor's server data: Machine settings and the state of
-      # its extensions. The user settings are the editor window's own.
+      # The isolated editor's server data: the user settings, Machine
+      # settings and the state of its extensions. The editor window keeps
+      # only its own layout and open editors.
       - vscode-server-data:/home/node/.vscode-server
     # Markers of the host's startup work, which wait-ready.sh waits for. A
     # restart clears them, so a stale one cannot end the wait early.

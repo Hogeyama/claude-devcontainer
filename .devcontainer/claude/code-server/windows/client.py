@@ -12,7 +12,7 @@ The Windows side, under %LOCALAPPDATA%\ClaudeDevcontainer, which the agent
 cannot reach:
   electron\<version>-win32-x64   Electron, from ../electron.py
   workspaces\<hash>\shell        the shell, copied at each open
-  workspaces\<hash>\profile      its profile: the editor's user settings and state
+  workspaces\<hash>\profile      its profile: the window's state, such as its layout
   workspaces\<hash>\client.log   its output
 One profile per workspace, so that several can be open at once; the shell
 keeps one window per profile.
