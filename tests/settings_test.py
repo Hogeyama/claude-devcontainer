@@ -105,7 +105,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}})
         self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
-        self.assertEqual(loaded['docker'], {'enabled': False, 'images': []})
+        self.assertEqual(loaded['docker'], {'enabled': False, 'images': [], 'volume': ''})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
         self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': []})
@@ -133,7 +133,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.toml', '[docker]\nenabled = true\nimages = ["a:1", "b:1"]\n[agent]\nuid = 1001\n')
         self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
         loaded = self.load()
-        self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1']})
+        self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1'], 'volume': ''})
         self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}})
 
     def test_local_replaces_each_host_as_a_whole(self):
@@ -169,6 +169,8 @@ class SettingsTest(unittest.TestCase):
             ('[docker]\nimages = "busybox"\n', r'docker.images: expected a list'),
             ('[docker]\nimages = [1]\n', r'docker.images: expected a list'),
             ('[docker]\nimages = ["a b"]\n', r'docker.images:'),
+            ('[docker]\nenabled = true\nvolume = "a/b"\n', r'docker.volume: .a/b. is not a Docker volume name'),
+            ('[docker]\nenabled = true\nvolume = 1\n', r'docker.volume: expected a string'),
             ('[proxy]\nconnectors = ["drive"]\n', r'proxy.connectors:'),
             ('[proxy]\nweb_search = "true"\n', r'proxy.web_search: expected true or false'),
             ('[proxy]\nweb_search = 1\n', r'proxy.web_search: expected true or false'),
@@ -213,6 +215,50 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.toml', '[agent]\nuid = 100000\n[docker]\nenabled = true\n')
         with self.assertRaisesRegex(ValueError, 'agent.uid: 100000 is used by DinD'):
             self.load()
+
+    def test_dind_volume_is_external_when_shared(self):
+        # Ignored without DinD, so that the global claude.toml can name it.
+        self.write('claude.toml', '[docker]\nvolume = "shared-dind"\n')
+        out = self.generate()
+        self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()))
+        self.assertEqual(self.check_dind_volume(None, ''), [])
+        self.write('claude.toml', '[docker]\nenabled = true\n')
+        self.generate()
+        self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()))
+        self.write('claude.toml', '[docker]\nenabled = true\nvolume = "shared-dind"\n')
+        self.generate()
+        self.assertEqual(json.loads((out / 'workspace.compose.yaml').read_text())['volumes'],
+                         {'dind-data': {'name': 'shared-dind', 'external': True}})
+
+    def check_dind_volume(self, labels, users, own='own'):
+        """check_dind_volume with Docker answering labels (None: no volume) and users."""
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            if command[:3] == ['docker', 'volume', 'inspect']:
+                return subprocess.CompletedProcess(command, 1 if labels is None else 0, json.dumps(labels), '')
+            if command[:3] == ['docker', 'ps', '-a']:
+                return subprocess.CompletedProcess(command, 0, own + '\n', '')
+            if command[:2] == ['docker', 'ps']:
+                return subprocess.CompletedProcess(command, 0, users, '')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        with mock.patch.object(settings.subprocess, 'run', run):
+            settings.check_dind_volume(self.root)
+        return calls
+
+    def test_check_dind_volume(self):
+        self.assertEqual(self.check_dind_volume(None, ''), [])
+        self.write('claude.toml', '[docker]\nenabled = true\nvolume = "shared-dind"\n[agent]\nuid = 1001\n')
+        calls = self.check_dind_volume(None, '')
+        self.assertIn(['docker', 'volume', 'create', '--label', 'dev.claude-devcontainer.uid=1001', 'shared-dind'], calls)
+        # This workspace's own DinD may hold it; a user-made volume has no label.
+        self.check_dind_volume({'dev.claude-devcontainer.uid': '1001'}, 'own-dind-1\town\n')
+        self.check_dind_volume(None, '')
+        with self.assertRaisesRegex(ValueError, 'in use by other-dind-1; stop that environment'):
+            self.check_dind_volume({}, 'other-dind-1\tother\n')
+        with self.assertRaisesRegex(ValueError, 'agent.uid = 1000, not 1001'):
+            self.check_dind_volume({'dev.claude-devcontainer.uid': '1000'}, '')
 
     def test_dummy_env_names(self):
         for name in ['HTTP_PROXY', 'https_proxy', 'NO_PROXY', 'DOCKER_HOST', 'CLAUDE_CODE_OAUTH_TOKEN',

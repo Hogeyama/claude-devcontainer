@@ -269,7 +269,7 @@ enabled = true
 images = ["postgres:16", "testcontainers/ryuk:0.14.0"]
 ```
 
-DinDは外部のregistryに接続できません。使うイメージは`images`に書いてください。`devcontainer up`のたびに、ホストがイメージを用意してDinDへ読み込みます。読み込みの詳細やポートへの接続方法は、[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。
+DinDは外部のregistryに接続できません。使うイメージは`images`に書いてください。`devcontainer up`のたびに、ホストがイメージを用意してDinDへ読み込みます。読み込みの詳細やポートへの接続方法は、[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。`volume = "名前"`を書くと、DinDのデータを同じ名前を書いたリポジトリと共有します（[DinDのデータを複数のリポジトリで共有する](docs/usage.md#dindのデータを複数のリポジトリで共有する)）。
 
 ### nixのdev shellを使う
 

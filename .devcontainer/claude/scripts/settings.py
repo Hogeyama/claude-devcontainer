@@ -19,7 +19,8 @@ they read to .devcontainer/.generated/:
   agent.env     agent.env, and the dummy tokens that proxy.hosts' env names, for the agent.
   global-agent-setup.sh  a copy of CONFIG/agent-setup.sh, which the agent image
                 build runs before the workspace's agent-setup.sh.
-  workspace.compose.yaml  workspace mounts and the optional Nix store mount.
+  workspace.compose.yaml  workspace mounts, the optional Nix store mount and
+                the shared DinD data volume (docker.volume).
   hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
 The settings come from these files only. A variable of settings.env in the
@@ -30,6 +31,7 @@ Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
   settings.py prepare-dependencies  create persistent Node overlay directories
   settings.py check-shared-mounts   validate the host working tree's mounts before startup
+  settings.py check-dind-volume     create docker.volume, and refuse it while another environment uses it
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
 """
@@ -62,7 +64,7 @@ DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': []},
     'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}},
     'acp': {'enabled': False, 'version': '0.90.0'},
-    'docker': {'enabled': False, 'images': []},
+    'docker': {'enabled': False, 'images': [], 'volume': ''},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
     'codeServer': {'enabled': False, 'extensions': []},
@@ -94,6 +96,10 @@ EXTENSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(@[0-
 ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
                          r'(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
                          r'(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?')
+# Docker's own rule for volume names.
+VOLUME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]+')
+# On a shared DinD volume: the UID of the rootless dockerd, which owns its files.
+VOLUME_UID_LABEL = 'dev.claude-devcontainer.uid'
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
 # rootlesskit in DinD maps these subordinate IDs besides the agent's UID.
 SUBORDINATE_IDS = range(100000, 165536)
@@ -182,6 +188,8 @@ def check(data, source):
     for image in docker.get('images', []):
         if not image or re.search(r'[\s#]', image):
             raise ValueError(f'{source}: docker.images: {image!r} is not an image name')
+    if docker.get('volume') and not VOLUME.fullmatch(docker['volume']):
+        raise ValueError(f'{source}: docker.volume: {docker["volume"]!r} is not a Docker volume name')
     for item in data.get('codeServer', {}).get('extensions', []):
         if not EXTENSION.fullmatch(item):
             raise ValueError(f'{source}: codeServer.extensions: {item!r} is not an extension ID (publisher.name)')
@@ -527,8 +535,13 @@ def workspace_compose(settings, root):
     if settings['nix']['enabled']:
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})
+    compose = {'services': {'agent': {'volumes': mounts}}}
+    if settings['docker']['enabled'] and settings['docker']['volume']:
+        # External, so that `down --volumes` of one workspace keeps the data
+        # of the others; check-dind-volume creates it.
+        compose['volumes'] = {'dind-data': {'name': settings['docker']['volume'], 'external': True}}
     # JSON is YAML; escape Compose interpolation separately from serialization.
-    return json.dumps({'services': {'agent': {'volumes': mounts}}}, indent=2).replace('$', '$$') + '\n'
+    return json.dumps(compose, indent=2).replace('$', '$$') + '\n'
 
 
 def check_shared_mounts(root=ROOT):
@@ -574,6 +587,43 @@ def check_shared_mounts(root=ROOT):
                 # The generated secret masks inside .devcontainer are allowed.
                 if mount['target'] not in protected_targets:
                     raise ValueError(f'Mount overrides shared protection: {mount["target"]}')
+
+
+def check_dind_volume(root=ROOT):
+    """Create docker.volume, and refuse it to a second dockerd or another UID.
+
+    Two dockerds on one data directory corrupt it, so only one environment at
+    a time may run with the volume; this workspace's own may already run.
+    """
+    settings = load(root)
+    name, uid = settings['docker']['volume'], str(settings['agent']['uid'])
+    # Ignored without DinD, so that the global claude.toml can name it.
+    if not name or not settings['docker']['enabled']:
+        return
+    inspect = subprocess.run(['docker', 'volume', 'inspect', '--format', '{{json .Labels}}', name],
+                             capture_output=True, text=True)
+    if inspect.returncode:
+        subprocess.run(['docker', 'volume', 'create', '--label', f'{VOLUME_UID_LABEL}={uid}', name],
+                       check=True, capture_output=True, text=True)
+    else:
+        owner = (json.loads(inspect.stdout) or {}).get(VOLUME_UID_LABEL)
+        if owner and owner != uid:
+            raise ValueError(f'docker.volume: {name} holds the data of a DinD with agent.uid = {owner}, '
+                             f'not {uid}; use another volume.')
+    root = Path(root).resolve()
+    agents = subprocess.run(['docker', 'ps', '-a', '--filter', f'label=devcontainer.local_folder={root}',
+                             '--filter', 'label=com.docker.compose.service=agent',
+                             '--format', '{{.Label "com.docker.compose.project"}}'],
+                            check=True, capture_output=True, text=True)
+    own = set(agents.stdout.split())
+    users = subprocess.run(['docker', 'ps', '--filter', f'volume={name}',
+                            '--format', '{{.Names}}\t{{.Label "com.docker.compose.project"}}'],
+                           check=True, capture_output=True, text=True)
+    others = sorted(line.partition('\t')[0] for line in users.stdout.splitlines()
+                    if line.strip() and line.partition('\t')[2] not in own)
+    if others:
+        raise ValueError(f'docker.volume: {name} is in use by {", ".join(others)}; '
+                         'stop that environment first, since two DinDs cannot share it at once.')
 
 
 def generate(root=ROOT, environ=os.environ):
@@ -644,13 +694,16 @@ def main():
             prepare_node_modules()
         elif sys.argv[1:] == ['check-shared-mounts']:
             check_shared_mounts()
+        elif sys.argv[1:] == ['check-dind-volume']:
+            check_dind_volume()
         elif len(sys.argv) == 3 and sys.argv[1] == 'proxy-json':
             path = Path(sys.argv[2])
             data = read(path)
             check(data, path.name)
             print(proxy_json(merge(copy.deepcopy(DEFAULTS), data)), end='')
         else:
-            sys.exit('usage: settings.py generate | prepare-dependencies | check-shared-mounts | proxy-json FILE')
+            sys.exit('usage: settings.py generate | prepare-dependencies | check-shared-mounts | check-dind-volume'
+                     ' | proxy-json FILE')
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         sys.exit(f'error: {error}')
 
