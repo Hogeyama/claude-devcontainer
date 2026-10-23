@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -59,6 +60,12 @@ def write(root=ROOT):
     temporary = directory / 'workspace.json.tmp'
     temporary.write_text(json.dumps(data) + '\n')
     temporary.replace(directory / 'workspace.json')
+    # Each is a full copy of the history, so keep only the current one. An
+    # agent whose initialization was interrupted before its fetch starts over
+    # from it (agent/clone-workspace.py); a finished one needs none.
+    for old in directory.glob('workspace-*.git'):
+        if old != seed:
+            shutil.rmtree(old)
     return data
 
 
