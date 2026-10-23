@@ -38,8 +38,7 @@ compose() {
 if python3 "$scripts/settings.py" generate; then
     case "$1" in
     up|create|start|restart)
-        python3 "$scripts/settings.py" check-shared-mounts
-        python3 "$scripts/settings.py" check-dind-volume ;;
+        python3 "$scripts/settings.py" check-shared-mounts ;;
     esac
     compose "$@"
 fi

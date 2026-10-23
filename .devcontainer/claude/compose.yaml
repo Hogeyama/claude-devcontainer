@@ -178,6 +178,9 @@ services:
       retries: 30
   dind:
     scale: ${CLAUDE_DEVCONTAINER_DIND:-0}
+    # docker.shared_base, by which dind-base.py finds the DinDs over a base.
+    labels:
+      dev.claude-devcontainer.dind-base: ${CLAUDE_DEVCONTAINER_DIND_SHARED:-}
     build:
       context: dind
       args:
@@ -200,7 +203,10 @@ services:
         iptables -A OUTPUT -o lo -j ACCEPT
         iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
         # The image's setpriv is BusyBox's, which cannot change user; su also sets HOME.
-        exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock' rootless
+        # Over a shared base, the data is on an overlay, where the kernel's
+        # overlay cannot keep upper directories: use fuse-overlayfs, as
+        # scripts/dind-base.py does for the base.
+        exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock ${CLAUDE_DEVCONTAINER_DIND_SHARED:+--storage-driver=fuse-overlayfs --feature=containerd-snapshotter=false}' rootless
     environment:
       DOCKER_TLS_CERTDIR: ""
       # rootlesskit, not tini, is PID 1, so tini must register as a subreaper.
