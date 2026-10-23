@@ -103,6 +103,13 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(headers.get_all('Authorization'), [GITHUB_BASIC])
         self.assertEqual(headers['Git-Protocol'], 'version=2')
 
+    def test_compressed_body_keeps_its_encoding(self):
+        f = flow('https://github.com/owner/repo.git/git-upload-pack', headers=[('Content-Encoding', 'gzip')])
+        f.request.raw_content = b'\x1f\x8bcompressed'
+        headers = self.allowed(f)
+        self.assertEqual(headers['Content-Encoding'], 'gzip')
+        self.assertEqual(f.request.raw_content, b'\x1f\x8bcompressed')
+
     def test_missing_secret_is_named(self):
         self.secrets = {}
         for f in [flow(), flow('https://github.com/o/r.git/git-upload-pack')]:
