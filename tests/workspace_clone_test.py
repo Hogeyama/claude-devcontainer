@@ -196,6 +196,34 @@ class WorkspaceCloneTest(unittest.TestCase):
         clone.clone(self.metadata, self.agent)
         self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), self.start)
 
+    def test_only_the_current_snapshot_is_kept(self):
+        old = json.loads(self.metadata.read_text())['seed']
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'second commit')
+        data = source.write(self.host)
+        self.assertEqual(sorted(p.name for p in self.metadata.parent.glob('workspace-*.git')), [data['seed']])
+        self.assertNotEqual(old, data['seed'])
+
+    def test_retry_whose_snapshot_was_replaced_starts_from_the_current_one(self):
+        # Interrupted before the fetch; the host has moved on since.
+        marker = self.agent / '.git/claude-bootstrap.json'
+        marker.parent.mkdir(parents=True)
+        marker.write_text(self.metadata.read_text())
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'second commit')
+        data = source.write(self.host)
+        clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), data['commit'])
+        self.assertFalse(marker.exists())
+
+    def test_retry_after_the_fetch_needs_no_snapshot(self):
+        clone.clone(self.metadata, self.agent)
+        marker = self.agent / '.git/claude-bootstrap.json'
+        marker.write_text(self.metadata.read_text())
+        self.git(self.host, 'commit', '--allow-empty', '-m', 'second commit')
+        source.write(self.host)
+        clone.clone(self.metadata, self.agent)
+        self.assertEqual(self.git(self.agent, 'rev-parse', 'HEAD'), self.start)
+        self.assertFalse(marker.exists())
+
     def test_local_snapshot_is_independent_and_excludes_host_git_settings(self):
         self.git(self.host, 'config', 'credential.helper', 'secret-helper')
         self.git(self.host, 'config', 'core.hooksPath', '/host/private-hooks')

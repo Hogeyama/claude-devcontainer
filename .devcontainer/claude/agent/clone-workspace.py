@@ -42,6 +42,31 @@ def empty_except_mounts(workspace, mounts):
     return check(workspace)
 
 
+def fetch_snapshot(git, source, data, marker):
+    """Fetch the starting commit from the host's snapshot; return the inputs used.
+
+    The host keeps only its latest snapshot (workspace-source.py). A retry
+    whose snapshot is gone before its fetch, when nothing has been checked
+    out yet, starts over from the current one.
+    """
+    if git('cat-file', '-e', data['commit'] + '^{commit}', check=False).returncode == 0:
+        return data
+    directory = Path(source).absolute().parent
+    if not (directory / data['seed']).exists():
+        data = inputs(source)
+        marker.write_text(json.dumps(data) + '\n')
+    seed = directory / data['seed']
+    try:
+        git('-c', f'safe.directory={seed}', 'fetch', '--no-tags', '--no-recurse-submodules', '--update-shallow',
+            str(seed), 'refs/heads/bootstrap', timeout=300)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        raise ValueError('Could not import the local Git snapshot. Run workspace-source.py on the host, '
+                         'then run wait-ready.sh as node again.') from None
+    if git('cat-file', '-e', data['commit'] + '^{commit}', check=False).returncode:
+        raise ValueError('The local Git snapshot lacks the starting commit; inspect the host snapshot.')
+    return data
+
+
 def clone(source, workspace):
     workspace = Path(workspace).absolute()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -69,15 +94,7 @@ def clone(source, workspace):
         marker.write_text(json.dumps(data) + '\n')
 
     git('init', '--object-format=' + ('sha256' if len(data['commit']) == 64 else 'sha1'))
-    seed = Path(source).absolute().parent / data['seed']
-    try:
-        git('-c', f'safe.directory={seed}', 'fetch', '--no-tags', '--no-recurse-submodules', '--update-shallow',
-            str(seed), 'refs/heads/bootstrap', timeout=300)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        raise ValueError('Could not import the local Git snapshot. Run workspace-source.py on the host, '
-                         'then run wait-ready.sh as node again.') from None
-    if git('cat-file', '-e', data['commit'] + '^{commit}', check=False).returncode:
-        raise ValueError('The local Git snapshot lacks the starting commit; inspect the host snapshot.')
+    data = fetch_snapshot(git, source, data, marker)
     tracked = git('ls-tree', '-rz', '--name-only', data['commit']).stdout.split('\0')
     for name in filter(None, tracked):
         path = workspace / name
@@ -134,15 +151,7 @@ def attach(source, workspace, host_git=HOST_GIT):
         marker.write_text(json.dumps(data) + '\n')
 
     git('init', '--object-format=' + ('sha256' if len(data['commit']) == 64 else 'sha1'))
-    seed = Path(source).absolute().parent / data['seed']
-    try:
-        git('-c', f'safe.directory={seed}', 'fetch', '--no-tags', '--no-recurse-submodules', '--update-shallow',
-            str(seed), 'refs/heads/bootstrap', timeout=300)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        raise ValueError('Could not import the local Git snapshot. Run workspace-source.py on the host, '
-                         'then run wait-ready.sh as node again.') from None
-    if git('cat-file', '-e', data['commit'] + '^{commit}', check=False).returncode:
-        raise ValueError('The local Git snapshot lacks the starting commit; inspect the host snapshot.')
+    data = fetch_snapshot(git, source, data, marker)
     branch = data.get('branch', '')
     if branch:
         existing = git('show-ref', '--verify', '--hash', 'refs/heads/' + branch, check=False)
