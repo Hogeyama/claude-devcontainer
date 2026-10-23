@@ -122,6 +122,8 @@ services:
   code-server-proxy:
     pull_policy: build
     scale: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
+    # Like the agent's: mitmdump as PID 1 would reap no orphans.
+    init: true
     build:
       context: code-server
     read_only: true
@@ -148,6 +150,8 @@ services:
       additional_contexts:
         workspace-config: ${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}
     mem_limit: 512m
+    # Like the agent's: mitmdump as PID 1 would reap no orphans.
+    init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges=true]
     sysctls:
@@ -187,6 +191,8 @@ services:
         ROOTLESS_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
         ROOTLESS_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
     privileged: true
+    # rootlesskit would be PID 1, which reaps no orphans.
+    init: true
     # Nothing in DinD needs to reach out. As root, allow only loopback and
     # replies, which also keeps nested containers off the host through the
     # network gateway; then run rootless dockerd as the agent's UID.
@@ -209,7 +215,7 @@ services:
         exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock ${CLAUDE_DEVCONTAINER_DIND_SHARED:+--storage-driver=fuse-overlayfs --feature=containerd-snapshotter=false}' rootless
     environment:
       DOCKER_TLS_CERTDIR: ""
-      # rootlesskit, not tini, is PID 1, so tini must register as a subreaper.
+      # The image's tini is not PID 1, so it must register as a subreaper.
       TINI_SUBREAPER: "1"
     volumes:
       - dind-run:/run/user/${CLAUDE_DEVCONTAINER_UID:-1000}
@@ -233,6 +239,8 @@ services:
     user: ${CLAUDE_DEVCONTAINER_UID:-1000}:${CLAUDE_DEVCONTAINER_GID:-1000}
     command: [--secrets-file, "/secrets/${CLAUDE_DEVCONTAINER_SUMI_FILE:-secrets.txt}", --listen, /run/sumi/mask.sock]
     network_mode: none
+    # sumi as PID 1 would reap no orphans.
+    init: true
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges=true]
