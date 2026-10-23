@@ -57,11 +57,11 @@
 # `devcontainer up` and copies them in; DinD cannot reach a registry.
 # Testcontainers also needs the Ryuk image of the version your library uses.
 # images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
-# A Docker volume for DinD's data, shared by the workspaces that name it: their
-# images and build cache are loaded once. Only one of them may run at a time,
-# with the same agent.uid. Empty: a volume of this workspace's own. Ignored
-# while enabled is false, so the global claude.toml can set it.
-# volume = ""
+# A base of DinD's data shared by the workspaces that name it, which run at
+# once, each copy-on-write over it. scripts/dind-base.py loads images into it,
+# with every DinD over it stopped; they need the same agent.uid. Empty: none.
+# Ignored while enabled is false, so the global claude.toml can set it.
+# shared_base = ""
 
 [nix]
 # Mount the host's /nix/store and load the flake's dev shell, evaluated at a
