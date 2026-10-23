@@ -171,9 +171,13 @@ ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     SHELL=/bin/bash \
     CLAUDE_CODE_SHELL=/bin/bash
 # Java reads none of the above, only its own truststore: the same bundle as
-# JKS, which the entrypoint writes (java-truststore.py). Set after
-# agent-setup.sh, whose Java runs on the host's network without the file.
-ENV JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS"
+# JKS, which the entrypoint writes (java-truststore.py). Nor does it read
+# HTTP(S)_PROXY, so name the proxy too; nonProxyHosts replaces Java's default,
+# which it repeats, and adds DinD as NO_PROXY does. Set after agent-setup.sh,
+# whose Java runs on the host's network without the file or the proxy.
+ENV JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS \
+-Dhttp.proxyHost=claude-proxy -Dhttp.proxyPort=8080 -Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080 \
+-Dhttp.nonProxyHosts=localhost|127.*|[::1]|claude-dind"
 # Dev Containers forwards the host's X11 display, and with it the host's screen
 # and keyboard, into the container unless the container's environment has
 # DISPLAY. So set it to a name that is no display, and blank it again in the
