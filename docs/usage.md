@@ -326,21 +326,30 @@ TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
 ```
 
-### DinDのデータを複数のリポジトリで共有する
+### DinDのイメージを複数のリポジトリで共有する
 
-DinDのデータ（イメージ、ビルドキャッシュ、コンテナ）は、既定ではリポジトリごとのvolumeに置かれます。`docker.volume`にvolume名を書くと、同じ名前を書いたリポジトリの間でそのvolumeを共有します。イメージの読み込みとビルドキャッシュは、どれか1つのリポジトリで済めば他でも使えます。リポジトリをまたいで使うので、全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`か`claude.local.toml`に書くのが便利です。`docker.enabled`が`false`のリポジトリでは無視されます。
+DinDのデータは、既定ではリポジトリごとのvolumeに置かれ、同じイメージもリポジトリの数だけ保存されます。`docker.shared_base`に名前を書くと、同じ名前を書いたリポジトリでイメージの置き場（ベース）を共有します。各リポジトリのDinDは、ベースの上にリポジトリごとの書き込み層を重ねて（copy-on-write）動くので、同時に起動でき、互いのコンテナやイメージの変更は見えません。
 
 ```toml
 [docker]
 enabled = true
-volume = "claude-devcontainer-dind"
+shared_base = "common"
 ```
 
-- `up`がvolumeを作ります。外部volumeとして扱うので、`down --volumes`でも消えません。不要になったらホストで`docker volume rm`してください。
-- 2つのdockerdが同じデータを同時に使うと壊れるため、別の環境のDinDが使用中なら`up`はエラーになります。先にその環境を停止してください。
-- dockerdはagentのUIDでファイルを所有するので、共有するリポジトリの`agent.uid`は揃えてください。作成時と異なるUIDでは`up`がエラーになります。
-- 共有したリポジトリのagentからは、他のリポジトリが残したイメージやコンテナも見えます。信頼の異なるリポジトリとは共有しないでください。
-- 設定を変えた後の`up`でDinDは作り直されます。元のvolumeのデータは移りません。
+全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`か`claude.local.toml`に書くのが便利です。`docker.enabled`が`false`のリポジトリでは無視されます。
+
+ベースへのイメージの読み込みは、ホストで次のように実行します。そのリポジトリで一度`devcontainer up`してDinDのimageを作ってから、ベースを使うすべての環境を停止して実行してください。
+
+```sh
+.devcontainer/claude/scripts/dind-base.py                    # docker.imagesを読み込む
+.devcontainer/claude/scripts/dind-base.py postgres:16 nginx  # 指定したイメージを読み込む
+```
+
+- ベースは`~/.local/state/claude-devcontainer/dind-base/<名前>/data`、リポジトリごとの書き込み層は`~/.local/state/claude-devcontainer/dind/`の下に置きます。`up`のたびに`docker.images`のうちベースにないイメージは、書き込み層へ読み込みます。
+- ベースを使うDinDは、データをfuse-overlayfsで保存します（カーネルのoverlayはoverlayの上に書き込み層を置けないため）。共有しない場合より遅くなります。共有に切り替えると、DinDのデータは新しい置き場から始まります。
+- ベースを使うリポジトリの`agent.uid`は揃えてください。ベースを作ったときと異なるUIDでは`up`がエラーになります。
+- ベースは書き込み層の下にあるため、使っている環境の動作中は変更しないでください。`dind-base.py`は、ベースを使うDinDが動いていれば止まります。
+- ベースへ後から追加したイメージは、DinDがまだイメージ一覧を書き込んでいないリポジトリにしか見えません。見えないリポジトリは、停止して`~/.local/state/claude-devcontainer/dind/`の下のそのリポジトリの書き込み層を消すと、ベースから始め直せます（そのリポジトリのDinDのデータは消えます）。ベースからイメージを消すことはできません。
 
 ## ACPクライアントから使う
 
