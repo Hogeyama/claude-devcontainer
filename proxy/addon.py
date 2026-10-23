@@ -104,8 +104,10 @@ WEB_SEARCH_TOOL_TYPES = {'web_search_20250305'}
 INLINE_SOURCES = {'base64', 'text'}
 
 # Request headers passed upstream. Everything else, including any
-# client-supplied credential, is dropped.
-SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-length',
+# client-supplied credential, is dropped. Content-Encoding goes with the body,
+# which is passed as sent: Git compresses its larger requests, and without it
+# the upstream cannot read them. check_request refuses it to Anthropic.
+SAFE_HEADERS = {'accept', 'accept-encoding', 'accept-language', 'content-type', 'content-encoding', 'content-length',
                 'transfer-encoding', 'user-agent', 'if-match', 'if-none-match',
                 'if-modified-since', 'if-unmodified-since', 'range', 'anthropic-beta',
                 'mcp-session-id', 'mcp-protocol-version', 'last-event-id',
