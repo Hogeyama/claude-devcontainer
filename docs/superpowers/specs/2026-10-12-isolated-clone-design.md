@@ -122,7 +122,7 @@ Compose の `workspace` volume はプロジェクトごとに作る。依存の�
 
 ### ホストの生成物
 
-`initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、ホストのHEADの完全なコミットID（`commit`）、ブランチ名（`branch`、detached HEADなら空文字）、初期化用bare repositoryの名前（`seed`）である。ホスト側でローカルGit転送を使い、指定コミットと履歴を`.generated/workspace-<commit>.git`へ独立してコピーする。ホストの`.git/config`、hooks、index、alternatesやハードリンクは引き継がない。linked worktreeとdetached HEADにも対応する。コピーの完了後にmetadataをatomicに公開する。同一コミットのコピーは再利用し、過去のコピーは中断した初期化の再試行のため保持する。
+`initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、ホストのHEADの完全なコミットID（`commit`）、ブランチ名（`branch`、detached HEADなら空文字）、初期化用bare repositoryの名前（`seed`）である。ホスト側でローカルGit転送を使い、指定コミットと履歴を`.generated/workspace-<commit>.git`へ独立してコピーする。ホストの`.git/config`、hooks、index、alternatesやハードリンクは引き継がない。linked worktreeとdetached HEADにも対応する。コピーの完了後にmetadataをatomicに公開する。同一コミットのコピーは再利用し、過去のコピーは履歴の完全なコピーで容量が大きいため削除する。fetch前に中断した初期化の再試行で元のコピーがなければ、現在のコピーから初期化をやり直す。fetch後の再試行はコピーを使わない。
 
 metadataにはリモートURLを含めない。コミットのないリポジトリは停止する。
 
