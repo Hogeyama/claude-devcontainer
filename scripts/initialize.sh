@@ -26,6 +26,7 @@ fi
 python3 "$(dirname "$0")/pick-networks.py" \
     "$(setting CLAUDE_DEVCONTAINER_PROXY_NET)" "$(setting CLAUDE_DEVCONTAINER_DIND_NET)"
 python3 "$(dirname "$0")/settings.py" check-shared-mounts
+python3 "$(dirname "$0")/settings.py" check-dind-volume
 
 # Export the trusted host commit's dev shell to a read-only management mount.
 # The agent's independent refs and worktree cannot change this input. It is the
