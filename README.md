@@ -204,12 +204,10 @@ devcontainer up --remove-existing-container
   ```toml
   [agent.env]
   GRADLE_OPTS = "-Dorg.gradle.daemon=false"
-  # Javaは HTTPS_PROXY を読まないので、proxyを指定する
-  JAVA_TOOL_OPTIONS = "-Dhttps.proxyHost=claude-proxy -Dhttps.proxyPort=8080 -Djavax.net.ssl.trustStore=/etc/ssl/java/cacerts -Djavax.net.ssl.trustStoreType=JKS"
   ```
 
   - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。
-  - imageの`JAVA_TOOL_OPTIONS`はproxyのCAを含むtruststoreを指定しているので、上書きするときは上の例の後ろの2つを残してください。
+  - imageの`JAVA_TOOL_OPTIONS`は、proxyのCAを含むtruststoreとproxy（Javaは`HTTPS_PROXY`を読まないため）を指定しています。上書きするときは、agentで`echo "$JAVA_TOOL_OPTIONS"`した値を残して後ろに追加してください。
 - volumeなどは、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
 - VS Codeの拡張機能などは、`devcontainer.json`に書きます。
 
