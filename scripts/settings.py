@@ -19,8 +19,9 @@ they read to .devcontainer/.generated/:
   agent.env     agent.env, and the dummy tokens that proxy.hosts' env names, for the agent.
   global-agent-setup.sh  a copy of CONFIG/agent-setup.sh, which the agent image
                 build runs before the workspace's agent-setup.sh.
-  workspace.compose.yaml  workspace mounts, the optional Nix store mount and
-                DinD's data over the shared base (docker.shared_base).
+  workspace.compose.yaml  workspace mounts, the optional Nix store mount, the
+                host's session history (agent.share_projects) and DinD's
+                data over the shared base (docker.shared_base).
   hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
 The settings come from these files only. A variable of settings.env in the
@@ -61,7 +62,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': []},
-    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}},
+    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False},
     'acp': {'enabled': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': [], 'shared_base': ''},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -99,6 +100,8 @@ ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]
 BASE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*')
 # DinD's data directory.
 DIND_DATA = '/home/rootless/.local/share/docker'
+# Claude Code's session history of /workspace, the agent's working directory.
+AGENT_PROJECT = '/home/node/.claude/projects/-workspace'
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
 # rootlesskit in DinD maps these subordinate IDs besides the agent's UID.
 SUBORDINATE_IDS = range(100000, 165536)
@@ -563,6 +566,17 @@ def host_git_dir(root):
     return git
 
 
+def host_project(root, environ=os.environ):
+    """The host's Claude Code session history of root, named as Claude Code names it."""
+    root = Path(root).resolve()
+    name = re.sub(r'[^A-Za-z0-9]', '-', str(root))
+    # Claude Code shortens longer names with a hash of its own.
+    if len(name) > 200:
+        raise ValueError(f'agent.share_projects: {root} is too long a path to find its Claude Code history.')
+    config = Path(environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+    return config / 'projects' / name
+
+
 def workspace_compose(settings, root, environ=os.environ):
     mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
     if settings['git']['isolation'] in SHARED_MODES:
@@ -576,6 +590,13 @@ def workspace_compose(settings, root, environ=os.environ):
     if settings['nix']['enabled']:
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})
+    if settings['agent']['share_projects']:
+        # The host's history of this repository as the agent's of /workspace,
+        # so that either can resume the other's sessions.
+        project = host_project(root, environ)
+        project.mkdir(parents=True, exist_ok=True)
+        mounts.append({'type': 'bind', 'source': str(project), 'target': AGENT_PROJECT,
+                       'bind': {'create_host_path': False}})
     compose = {'services': {'agent': {'volumes': mounts}}}
     if name := shared_base(settings):
         # Copy-on-write over the shared base, like the Node overlay; DinD
