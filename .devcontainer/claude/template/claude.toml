@@ -41,6 +41,11 @@
 # files. Values are literal ($ is not expanded) and readable by the agent, so
 # no secrets; the proxy injects those (proxy.hosts).
 # env = { GRADLE_OPTS = "-Dorg.gradle.daemon=false" }
+# Share Claude Code's session history of this repository with the host's
+# (~/.claude/projects/<path>), read-write, so that either resumes the other's
+# sessions. Unsafe: the agent can then write a session that the host's Claude,
+# without the container's limits, resumes.
+# share_projects = false
 
 [acp]
 # Install claude-agent-acp for host ACP clients (agent-shell, Avante, etc.),

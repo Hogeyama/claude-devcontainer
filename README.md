@@ -154,6 +154,7 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 | 社内CAを使う接続先 | `claude.toml`の`proxy.ca` | [接続先を変える](#接続先を変える) |
 | claude.aiのコネクタ | `claude.local.toml`の`proxy.connectors` | [接続先を変える](#接続先を変える) |
 | Claude Codeの設定・hook・skillなど | ホストの`~/.claude`、`dotfiles/` | [ホストの設定を引き継ぐ](#ホストの設定を引き継ぐ) |
+| セッション履歴のホストとの共有 | `claude.toml`の`agent.share_projects` | [セッション履歴をホストと共有する](#セッション履歴をホストと共有する) |
 | Docker（DinD） | `claude.toml`の`docker` | [Dockerを使う（DinD）](#dockerを使うdind) |
 | ACP（agent-shell・Avanteなど） | `claude.toml`の`acp`（sharedのみ） | [ACPクライアントから使う](docs/usage.md#acpクライアントから使う) |
 | nixのdev shell | `claude.toml`の`nix` | [nixのdev shellを使う](#nixのdev-shellを使う) |
@@ -256,6 +257,25 @@ Gitの設定は自動ではコピーしません。credential helper、署名、
 > - `settings.json`の`env`もagentから見えます。秘密を書いているなら、`dotfiles/.claude/settings.json`にコンテナ用の設定を用意してください。
 > - コマンドのパスは、`/home/<user>/…`のような絶対パスではなく`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れてください。
 > - `up`の後にホストで設定を変えたら、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映されます。
+
+### セッション履歴をホストと共有する
+
+既定では、agentのセッション履歴はリポジトリごとのvolumeに置かれ、ホストのClaude Codeとは別です。`claude.toml`か`claude.local.toml`に次を書くと、ホストの`~/.claude/projects/`にあるこのリポジトリの履歴を、agentの`/workspace`の履歴としてマウントします（`CLAUDE_CONFIG_DIR`を設定していればその下）。ホストとagentのどちらで始めたセッションも、もう一方で`claude --resume`できます。
+
+```toml
+[agent]
+share_projects = true
+```
+
+> [!WARNING]
+> この設定は隔離を弱めます。
+> - agentは、ホストでこのリポジトリを扱ったセッションの内容を読めます。ホストのセッションでファイルやコマンド出力に現れた秘密も含みます。
+> - agentは履歴を書き換えられます。ホストのClaude Codeはコンテナの制限なしに動くので、agentが仕込んだセッションをホストでresumeすると、その内容に従ってホストで操作する恐れがあります。ホストでresumeするのは、自分で始めたセッションか、内容を確認したものにしてください。
+> - 共有するのはこのリポジトリの履歴だけで、ほかのプロジェクトの履歴はagentから見えません。
+
+- 履歴のファイルはagentのUIDで書かれます。`agent.uid`をホストのユーザーに合わせてください。
+- agentで始めたセッションの作業ディレクトリは`/workspace`として記録されます。
+- パスが長く（記号を`-`にして200文字超）Claude Codeが名前を短縮するリポジトリでは使えません。
 
 ### Dockerを使う（DinD）
 

@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -103,7 +104,7 @@ class SettingsTest(unittest.TestCase):
     def test_defaults(self):
         loaded = self.load()
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
-        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}})
+        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False})
         self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': [], 'shared_base': ''})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
@@ -122,11 +123,11 @@ class SettingsTest(unittest.TestCase):
             '[proxy]\nca = "cert.pem"\n')
         self.write('claude.toml', '[agent]\ngid = 2345\n')
         loaded = self.load()
-        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin'], 'env': {}})
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin'], 'env': {}, 'share_projects': False})
         self.assertEqual(loaded['proxy']['ca'], settings.CONFIG / 'cert.pem')
         self.write('claude.local.toml', '[agent]\ngid = 3456\nextra_path = []\n[proxy]\nca = "local.pem"\n')
         loaded = self.load()
-        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': [], 'env': {}})
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': [], 'env': {}, 'share_projects': False})
         self.assertEqual(loaded['proxy']['ca'], self.root / '.devcontainer/local.pem')
 
     def test_local_merges_tables_and_replaces_values(self):
@@ -134,7 +135,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
         loaded = self.load()
         self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1'], 'shared_base': ''})
-        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}})
+        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}, 'share_projects': False})
 
     def test_local_replaces_each_host_as_a_whole(self):
         self.write('claude.toml', GITHUB + '[proxy.hosts."other.example.com"]\nroutes = ["/"]\n')
@@ -242,6 +243,23 @@ class SettingsTest(unittest.TestCase):
         self.assertTrue(paths['upper'].is_relative_to(state.resolve() / 'claude-devcontainer/dind'))
         self.assertEqual(compose['volumes']['dind-shared-common']['driver_opts']['o'],
                          f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}')
+
+    def test_share_projects_mounts_the_host_history_of_this_repository(self):
+        config = self.state()
+        environ = {'CLAUDE_CONFIG_DIR': str(config)}
+        out = self.generate(environ)
+        targets = [m['target'] for m in json.loads((out / 'workspace.compose.yaml').read_text())['services']['agent']['volumes']]
+        self.assertNotIn(settings.AGENT_PROJECT, targets)
+        self.write('claude.toml', '[agent]\nshare_projects = true\n')
+        self.generate(environ)
+        mounts = json.loads((out / 'workspace.compose.yaml').read_text())['services']['agent']['volumes']
+        project = config / 'projects' / re.sub(r'[^A-Za-z0-9]', '-', str(self.root.resolve()))
+        self.assertIn({'type': 'bind', 'source': str(project), 'target': '/home/node/.claude/projects/-workspace',
+                       'bind': {'create_host_path': False}}, mounts)
+        self.assertTrue(project.is_dir())
+        self.assertEqual(settings.host_project('/home/u/my repo.git', environ), config / 'projects/-home-u-my-repo-git')
+        with self.assertRaisesRegex(ValueError, 'too long'):
+            settings.host_project('/' + 'a' * 200, environ)
 
     def test_prepare_dind_checks_the_base_uid(self):
         state = self.state()
