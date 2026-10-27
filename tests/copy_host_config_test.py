@@ -1,4 +1,4 @@
-"""Which host files copy-host-config.py sends to the agent; no Docker needed."""
+"""Host config archive tests; opt-in Docker tests cover privileged copying."""
 import importlib.util
 import io
 import json
@@ -244,6 +244,77 @@ class WaitAndCopyTest(unittest.TestCase):
         with mock.patch.object(copy_host_config.time, 'sleep', sleep):
             copy_host_config.wait_and_copy(b'archive')
         self.assertEqual(self.copies, [])
+
+
+@unittest.skipUnless(os.environ.get('RUN_COPY_CONFIG_DOCKER_TESTS') == '1',
+                     'Config copy Docker tests disabled')
+class CopySecurityTest(unittest.TestCase):
+    """Run the real copy with production capabilities in a disposable container."""
+
+    def docker(self, *args, data=None, check=True):
+        return subprocess.run(['docker', *args], input=data, capture_output=True, check=check)
+
+    def setUp(self):
+        image = os.environ.get('AGENT_TEST_IMAGE', 'claude-no-editor:test')
+        self.container = self.docker(
+            'run', '-d', '--rm', '--network=none', '--cap-drop=ALL',
+            '--cap-add=NET_ADMIN', '--cap-add=SETUID', '--cap-add=SETGID',
+            '--cap-add=SETPCAP', '--cap-add=CHOWN', '--cap-add=DAC_OVERRIDE',
+            '--security-opt=no-new-privileges=true',
+            '--tmpfs', '/home/node/.claude:mode=1777,exec',
+            '--entrypoint', 'sleep', image, 'infinity').stdout.decode().strip()
+        self.addCleanup(self.docker, 'rm', '-f', self.container)
+        self.run_as('0', '''mkdir -p /run/claude-devcontainer
+chmod 700 /run/claude-devcontainer
+chown node:node /run/claude-devcontainer
+printf 'protected\\n' > /etc/copy-test-protected
+chmod 644 /etc/copy-test-protected
+touch -d @1000000000 /etc/copy-test-protected''')
+
+    def run_as(self, user, script, check=True):
+        return self.docker('exec', '--user', user, self.container, 'sh', '-ec', script, check=check)
+
+    def copy(self):
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode='w') as tar:
+            for name, content in [('.claude/settings.json', b'{"model":"opus"}'),
+                                  ('.claude/CLAUDE.md', b'host instructions'),
+                                  ('.copy-test-dotfile', b'host dotfile')]:
+                info = tarfile.TarInfo(name)
+                info.size, info.mode = len(content), 0o644
+                tar.addfile(info, io.BytesIO(content))
+        return self.docker('exec', '-i', '--user', '0', self.container,
+                           'sh', '-c', copy_host_config.COPY_SCRIPT, 'sh',
+                           *copy_host_config.ENTRIES, data=buffer.getvalue(), check=False)
+
+    def test_marker_symlink_cannot_change_protected_file(self):
+        before = self.run_as('0', 'stat -c "%u:%g:%Y" /etc/copy-test-protected').stdout
+        self.run_as('node', f'ln -s /etc/copy-test-protected {copy_host_config.MARKER}')
+        result = self.copy()
+        after = self.run_as('0', 'stat -c "%u:%g:%Y" /etc/copy-test-protected').stdout
+        self.assertEqual(after, before, result.stderr.decode())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(self.run_as('node', 'echo changed > /etc/copy-test-protected',
+                                       check=False).returncode, 0)
+
+    def test_dangling_marker_symlink_cannot_create_root_file(self):
+        self.run_as('node', f'ln -s /etc/copy-test-missing {copy_host_config.MARKER}')
+        result = self.copy()
+        self.assertEqual(self.run_as('0', 'test ! -e /etc/copy-test-missing',
+                                     check=False).returncode, 0, result.stderr.decode())
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_copy_and_repeat_keep_configuration_and_marker_ownership(self):
+        for _ in range(2):
+            result = self.copy()
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.run_as('node', f'''test -f {copy_host_config.MARKER}
+test -O {copy_host_config.MARKER}
+test "$(cat /home/node/.copy-test-dotfile)" = 'host dotfile'
+test -O /home/node/.copy-test-dotfile
+test "$(cat /home/node/.claude/CLAUDE.md)" = 'host instructions'
+test ! -w /home/node/.claude/CLAUDE.md
+test ! -w {copy_host_config.MANAGED}''')
 
 
 if __name__ == '__main__':
