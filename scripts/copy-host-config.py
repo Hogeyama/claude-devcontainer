@@ -266,8 +266,11 @@ for path in "$staging"/* "$staging"/.[!.]*; do
     [ -e "$path" ] && setpriv --reuid=node --regid=node --init-groups cp -a -- "$path" {TARGET}/
 done
 rm -rf "$staging"
-touch {MARKER}
-chown node:node {MARKER}
+# The marker directory belongs to node: even a pre-existing symlink must never
+# make root touch or chown its target. Drop privileges before accessing it.
+setpriv --reuid=node --regid=node --init-groups \\
+    --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \\
+    touch -- {MARKER}
 '''
 
 
