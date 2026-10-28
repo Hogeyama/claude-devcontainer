@@ -80,7 +80,7 @@ class ClientTest(unittest.TestCase):
             self.assertEqual(client.workspace_root(), self.tmp / 'repo')
 
     def test_shell_command_uses_host_proxy_and_existing_profile(self):
-        cmd = client.shell_command(self.tmp / 'electron', self.tmp / 'shell',
+        cmd = client.shell_command(self.tmp / 'electron/electron', self.tmp / 'shell',
                                    self.tmp / 'home/shell', 18123, '/workspace', 'wayland')
         self.assertEqual(cmd[:2], [str(self.tmp / 'electron/electron'), str(self.tmp / 'shell')])
         self.assertIn('--proxy-port=18123', cmd)
@@ -89,6 +89,26 @@ class ClientTest(unittest.TestCase):
         self.assertIn('--ozone-platform=wayland', cmd)
         self.assertIn('--wayland-text-input-version=3', cmd)
         self.assertNotIn('--no-sandbox', cmd)
+
+    def test_electron_override_by_path_or_command(self):
+        electron = self.tmp / 'bin/electron'
+        electron.parent.mkdir()
+        electron.write_text('#!/bin/sh\n')
+        electron.chmod(0o755)
+        self.assertIsNone(client.electron_override({}))
+        self.assertEqual(client.electron_override({client.ELECTRON: str(electron)}), electron)
+        self.assertEqual(client.electron_override({client.ELECTRON: 'electron', 'PATH': str(electron.parent)}),
+                         electron)
+        with self.assertRaisesRegex(SystemExit, client.ELECTRON):
+            client.electron_override({client.ELECTRON: str(self.tmp / 'missing')})
+
+    def test_override_skips_the_download(self):
+        electron = self.tmp / 'electron'
+        electron.write_text('#!/bin/sh\n')
+        electron.chmod(0o755)
+        with (mock.patch.dict(os.environ, {client.ELECTRON: str(electron)}),
+              mock.patch.object(client, 'electron_module', side_effect=AssertionError('downloaded'))):
+            self.assertEqual(client.ensure_electron(), electron)
 
     def test_userns_restriction_is_read_from_the_sysctl(self):
         sysctl = self.tmp / 'apparmor_restrict_unprivileged_userns'
@@ -154,7 +174,7 @@ class ClientTest(unittest.TestCase):
             'import importlib.util\nfrom pathlib import Path\n'
             f'spec = importlib.util.spec_from_file_location("client", {str(LINUX / "client.py")!r})\n'
             'client = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(client)\n'
-            f'client.ensure_electron = lambda: Path({str(self.tmp)!r})\n'
+            f'client.ensure_electron = lambda: Path({str(electron)!r})\n'
             'client.display_backend = lambda: ("x11", ":0")\nclient.main()\n')
         env = os.environ | {'XDG_STATE_HOME': str(self.tmp / 'state'), client.TOKEN: 'test-token'}
         result = subprocess.run([sys.executable, str(wrapper), '--detach', '--proxy-port', '18123'],
