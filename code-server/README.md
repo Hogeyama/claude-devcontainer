@@ -72,6 +72,7 @@ IDEのページはコンテナが配信するので、その中のスクリプ�
 Waylandではtext-input-v3でホストのIMEを使います。X11では`DISPLAY`、`XAUTHORITY`、入力メソッドの環境変数を引き継ぎます。X11での日本語入力は実機未確認です。
 両方が設定された環境でX11を選ぶ場合は、`env -u WAYLAND_DISPLAY .devcontainer/claude/scripts/code-server.sh`で起動できます（WSLではWindows版を起動します）。
 `prepare` はElectronを `~/.cache/claude-devcontainer/electron/` に取得します。
+NixOSなど、取得したElectronが共有ライブラリを見つけられない環境では、`CLAUDE_DEVCONTAINER_ELECTRON` にホストのElectronをパスかコマンド名で指定します（例: `CLAUDE_DEVCONTAINER_ELECTRON=$(nix build --print-out-paths nixpkgs#electron)/bin/electron`）。指定すると取得もSHA-256の照合もしません。シェルの制限はElectronのセキュリティ修正に依存するので、`electron.py`の`VERSION`と同じかそれ以降のサポート中のバージョンを使ってください。
 
 `open` はElectronをホストで直接起動し、専用proxyの公開ポートに接続します。
 Electronの起動後にコマンドは戻り、出力はworkspaceごとの状態ディレクトリ（`~/.local/state/claude-devcontainer/vscode/<workspaceのハッシュ>/`）の `client.log` に入ります。

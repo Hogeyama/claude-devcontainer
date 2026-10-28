@@ -23,6 +23,8 @@ import layout  # noqa: E402
 SHELL = HERE.parent / 'shell'
 PROXY_PORT = 18086
 TOKEN = 'CLAUDE_DEVCONTAINER_VSCODE_TOKEN'
+# An Electron of the host's own to use instead, such as Nix's, whose libraries the downloaded one cannot find.
+ELECTRON = 'CLAUDE_DEVCONTAINER_ELECTRON'
 LAUNCHED = '.launched'
 USERNS_RESTRICTION = Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
 USERNS_ADVICE = ('AppArmor restricts unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns=1), '
@@ -46,9 +48,24 @@ def electron_directory(environ=os.environ):
     return cache, electron.linux_platform()
 
 
+def electron_override(environ=os.environ):
+    """The executable that ELECTRON names, by path or as a command on PATH; None when unset."""
+    name = environ.get(ELECTRON)
+    if not name:
+        return None
+    found = shutil.which(name, path=environ.get('PATH'))
+    if not found:
+        fail(f'{ELECTRON}={name} is not an executable')
+    return Path(found)
+
+
 def ensure_electron():
-    """Electron of ../electron.py, downloaded on the host's network the first time."""
-    return electron_module().ensure(*electron_directory())
+    """The Electron executable: ELECTRON's, or ../electron.py's, downloaded on the host's network the first time."""
+    if found := electron_override():
+        return found
+    electron = electron_module()
+    cache, platform = electron_directory()
+    return electron.ensure(cache, platform) / electron.executable(platform)
 
 
 def userns_restricted(path=USERNS_RESTRICTION):
@@ -95,7 +112,7 @@ def state_directory(root=None, environ=os.environ):
 
 def shell_command(electron, shell, profile, port, folder, backend):
     """Connect to the host's proxy port, keeping Chromium's sandbox enabled."""
-    command = [str(electron / 'electron'), str(shell), f'--proxy-port={port}', f'--folder={folder}',
+    command = [str(electron), str(shell), f'--proxy-port={port}', f'--folder={folder}',
                f'--user-data-dir={profile}', '--disable-gpu', f'--ozone-platform={backend}']
     if backend == 'wayland':
         command += ['--enable-features=WaylandWindowDecorations',
@@ -158,13 +175,13 @@ def report(electron, display):
 
 
 def open_window(args, state):
-    directory = ensure_electron()
+    electron = ensure_electron()
     # Retain the existing profile path when upgrading from the bwrap client.
     profile = state / 'home' / 'shell'
     with tempfile.TemporaryDirectory(prefix='code-server-') as runtime:
         shell = Path(runtime) / 'shell'
         shutil.copytree(SHELL, shell)
-        command = shell_command(directory, shell, profile, args.proxy_port, args.folder, args.backend)
+        command = shell_command(electron, shell, profile, args.proxy_port, args.folder, args.backend)
         environ = dict(os.environ)
         for name in ('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH'):
             environ.pop(name, None)
@@ -198,9 +215,12 @@ def main():
             fail(f'no connection token in {TOKEN}; open the editor with code-server.sh')
         args.backend, display = display_backend()
         if args.check:
-            cache, platform = electron_directory()
-            found = cache / f'{electron_module().VERSION}-{platform}'
-            report(found if found.is_dir() else None, f'{args.backend}: {display}')
+            found = electron_override()
+            if not found:
+                electron = electron_module()
+                cache, platform = electron_directory()
+                found = cache / f'{electron.VERSION}-{platform}' / electron.executable(platform)
+            report(found if found.is_file() else None, f'{args.backend}: {display}')
             return
         state = state_directory()
         lock = take_lock(state)  # noqa: F841 held until the launcher exits
