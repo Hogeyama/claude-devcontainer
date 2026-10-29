@@ -11,7 +11,7 @@ Usage: claude-devcontainer          start, then open claude in the agent
        claude-devcontainer code-server   start, then open the isolated editor (code-server.sh)
        claude-devcontainer code-server prepare   download the editor's Electron only
        claude-devcontainer compose ARGS...   docker compose for this environment
-       claude-devcontainer exec ARGS...   alias for compose exec agent ARGS...
+       claude-devcontainer exec ARGS...   alias for compose exec --user node agent ARGS...
 """
 import os
 from pathlib import Path
@@ -97,7 +97,9 @@ def main():
         # compose file no longer has; down removes them too.
         rest = args[1:] if command == 'compose' else ['down', '--remove-orphans']
         if command == 'exec':
-            rest = ['exec', 'agent', *args[1:]]
+            # As node, the user Dev Containers runs claude as; root goes
+            # through compose exec explicitly.
+            rest = ['exec', '--user', 'node', 'agent', *args[1:]]
         compose = layout.CORE / 'scripts/compose.sh'
         os.execve('/bin/sh', ['sh', str(compose), *rest], env)
     target = start(root, env)
