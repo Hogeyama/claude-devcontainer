@@ -156,7 +156,7 @@ class HostCommandTest(unittest.TestCase):
         self.env['FAKE_PROJECTS'] = self.project() + '\n'
         self.run_command('exec', 'sh', '-c', 'printf "%s" "hello world"')
         compose = [call['argv'] for call in self.calls() if call['argv'][:2] == ['docker', 'compose']]
-        self.assertEqual(compose[-1][-5:], ['exec', 'agent', 'sh', '-c', 'printf "%s" "hello world"'])
+        self.assertEqual(compose[-1][-7:], ['exec', '--user', 'node', 'agent', 'sh', '-c', 'printf "%s" "hello world"'])
         self.assertFalse(any(call['argv'][0] == 'devcontainer' for call in self.calls()))
 
 

@@ -395,7 +395,7 @@ claude-devcontainer up       # 起動だけ
 claude-devcontainer down     # 止める
 claude-devcontainer code-server  # 起動して、隔離エディタを開く(codeServer.enabled が必要)
 claude-devcontainer compose logs proxy  # この環境の docker compose
-claude-devcontainer exec bash  # compose exec agent bash の短縮形
+claude-devcontainer exec bash  # compose exec --user node agent bash の短縮形（rootで入るなら compose exec agent bash）
 ```
 
 - 設定は`~/.config/claude-devcontainer/claude.toml`だけを読みます。書き方は`claude.toml`と同じです。ツールは`~/.config/claude-devcontainer/agent-setup.sh`で入れます。リポジトリ内の`.devcontainer/`(`claude.toml`や`agent-setup.sh`)は読みません。
