@@ -103,7 +103,7 @@ class SettingsTest(unittest.TestCase):
 
     def test_defaults(self):
         loaded = self.load()
-        self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': []})
+        self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True})
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False})
         self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': [], 'shared_base': ''})

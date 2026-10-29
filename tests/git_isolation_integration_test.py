@@ -53,8 +53,10 @@ class GitIsolationIntegrationTest(unittest.TestCase):
         self.initial = self.git('rev-parse', 'HEAD').stdout.strip()
         scripts = self.host / '.devcontainer/claude/scripts'
         scripts.mkdir(parents=True)
-        for name in ('workspace-source.py', 'git-agent.py', 'layout.py'):
+        for name in ('workspace-source.py', 'git-agent.py', 'layout.py', 'settings.py'):
             shutil.copy(CORE / 'scripts' / name, scripts / name)
+        (scripts.parent / 'proxy').mkdir()
+        shutil.copy(CORE / 'proxy/policy.py', scripts.parent / 'proxy/policy.py')
         self.command(sys.executable, str(scripts / 'workspace-source.py'))
         self.command(sys.executable, str(scripts / 'git-agent.py'), 'register')
         self.generated = self.host / '.devcontainer/.generated'

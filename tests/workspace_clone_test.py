@@ -38,6 +38,8 @@ class WorkspaceCloneTest(unittest.TestCase):
         environment = patch.dict(os.environ, {
             'GIT_CONFIG_GLOBAL': str(config), 'GIT_CONFIG_NOSYSTEM': '1',
             'GIT_TERMINAL_PROMPT': '0',
+            # Not the user's own claude.toml, whose proxy.hosts decide the remotes.
+            'XDG_CONFIG_HOME': str(self.root / 'config'),
         })
         environment.start()
         self.addCleanup(environment.stop)
@@ -338,6 +340,44 @@ class WorkspaceCloneTest(unittest.TestCase):
         self.assertEqual(self.git(self.agent, 'remote'), '')
         self.assertEqual(self.git(self.host, 'config', '--get', 'remote.origin.url'),
                          'https://github.com/upstream/project.git')
+
+    def test_remotes_the_proxy_carries_are_inherited_for_fetch(self):
+        for name, url in [('origin', 'git@github.com:upstream/project.git'),
+                          ('fork', 'https://user:token@GitHub.com/me/project.git'),
+                          ('mirror', 'ssh://git@github.com/upstream/mirror.git'),
+                          ('other', 'https://gitlab.com/upstream/project.git'),
+                          ('port', 'https://github.com:8443/upstream/project.git'),
+                          ('local', '/srv/project.git'), ('agent', 'ext::host-only-transport'),
+                          ('host', 'https://github.com/upstream/host.git')]:
+            self.git(self.host, 'remote', 'add', name, url)
+        source.write(self.host, {'github.com'})
+        remotes = self.metadata.parent / 'remotes.json'
+        self.assertEqual(json.loads(remotes.read_text()), {
+            'fork': 'https://github.com/me/project.git', 'mirror': 'https://github.com/upstream/mirror.git',
+            'origin': 'https://github.com/upstream/project.git'})
+        clone.clone(self.metadata, self.agent)
+        self.git(self.agent, 'remote', 'add', 'fork', 'https://github.com/agent/kept.git')
+        clone.add_remotes(self.agent, remotes)
+        self.assertEqual(self.git(self.agent, 'remote', 'get-url', 'origin'), 'https://github.com/upstream/project.git')
+        self.assertEqual(self.git(self.agent, 'remote', 'get-url', 'fork'), 'https://github.com/agent/kept.git')
+        self.assertEqual(sorted(self.git(self.agent, 'remote').split()), ['fork', 'mirror', 'origin'])
+        # Without the host's file, as from an older host, nothing changes.
+        clone.add_remotes(self.agent, self.root / 'absent.json')
+        for data in ({'host': 'https://github.com/o/r.git'}, {'origin': 'https://u:p@github.com/o/r.git'},
+                     {'origin': 'ext::sh -c id'}, {'-x': 'https://github.com/o/r.git'}, ['origin']):
+            remotes.write_text(json.dumps(data))
+            with self.subTest(data=data), self.assertRaisesRegex(ValueError, 'Invalid host remotes'):
+                clone.add_remotes(self.agent, remotes)
+
+    def test_remotes_are_not_inherited_without_their_host_or_the_setting(self):
+        self.git(self.host, 'remote', 'add', 'origin', 'https://github.com/upstream/project.git')
+        source.write(self.host)
+        self.assertEqual(json.loads((self.metadata.parent / 'remotes.json').read_text()), {})
+        (self.host / '.devcontainer/claude.toml').write_text(
+            '[git]\ninherit_remotes = false\n[proxy.hosts."github.com"]\nroutes = ["/"]\n')
+        self.assertEqual(source.proxy_hosts(self.host), set())
+        (self.host / '.devcontainer/claude.toml').write_text('[proxy.hosts."github.com"]\nroutes = ["/"]\n')
+        self.assertEqual(source.proxy_hosts(self.host), {'github.com'})
 
     def test_host_remote_names_the_read_only_host_git_once(self):
         clone.clone(self.metadata, self.agent)

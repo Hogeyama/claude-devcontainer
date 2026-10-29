@@ -115,6 +115,32 @@ def clone(source, workspace):
     marker.unlink()
 
 
+# What workspace-source.py writes: names Git accepts, and HTTPS URLs without credentials.
+REMOTE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*')
+REMOTE_URL = re.compile(r'https://[a-z0-9.-]+/[^\s@]*')
+
+
+def add_remotes(workspace, source):
+    """Add the host's remotes that the agent can fetch from, once; remotes already there stay.
+
+    Fetch only: the proxy does not carry a push (git-receive-pack).
+    """
+    try:
+        data = json.loads(Path(source).read_text())
+    except FileNotFoundError:
+        return
+    if not isinstance(data, dict) or not all(
+            isinstance(name, str) and REMOTE_NAME.fullmatch(name) and name not in ('host', 'agent')
+            and isinstance(url, str) and REMOTE_URL.fullmatch(url) for name, url in data.items()):
+        raise ValueError('Invalid host remotes metadata.')
+    existing = subprocess.run(['git', '-C', str(workspace), 'remote'], check=True,
+                              capture_output=True, text=True).stdout.split()
+    for name, url in data.items():
+        if name not in existing:
+            subprocess.run(['git', '-C', str(workspace), 'remote', 'add', name, url],
+                           check=True, capture_output=True, text=True)
+
+
 def add_host_remote(workspace, host_git=HOST_GIT):
     """Name the host's read-only Git `host`, once; a remote of that name already there stays."""
     if not Path(host_git).is_dir():
@@ -231,8 +257,10 @@ if __name__ == '__main__':
             pass  # Host Git is already initialized; never reset its shared index.
         elif os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone') == 'shared':
             attach('/run/host/generated/workspace.json', '/workspace')
+            add_remotes('/workspace', '/run/host/generated/remotes.json')
         else:
             clone('/run/host/generated/workspace.json', '/workspace')
             add_host_remote('/workspace')
+            add_remotes('/workspace', '/run/host/generated/remotes.json')
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         sys.exit(f'error: workspace initialization failed: {error}')
