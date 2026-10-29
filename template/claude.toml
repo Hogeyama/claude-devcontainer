@@ -114,8 +114,9 @@
 #     "managed-by-proxy", so that tools send requests at all; the proxy
 #     replaces the credential.
 
-# GitHub, with GITHUB_TOKEN a fine-grained PAT limited to the repositories to
-# share: REST for those repositories, GraphQL, and Git over HTTPS.
+# GitHub, with GITHUB_TOKEN a read-only fine-grained PAT limited to the
+# repositories to share: REST for those repositories, GraphQL, and Git fetch
+# over HTTPS.
 [proxy.hosts."api.github.com"]
 routes = ["POST /graphql", "GET /user", '/repos/[^/]+/[^/]+(/.*)?']
 headers = ["X-GitHub-Api-Version"]
@@ -123,7 +124,9 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 env = ["GH_TOKEN"]
 
 [proxy.hosts."github.com"]
-routes = ['/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)']
+# Fetch only: without git-receive-pack, the agent cannot push past the
+# host's review, whatever the token allows.
+routes = ['/[^/]+/[^/]+\.git/(info/refs|git-upload-pack)']
 headers = ["Git-Protocol"]
 inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 
