@@ -124,7 +124,7 @@ Compose の `workspace` volume はプロジェクトごとに作る。依存の�
 
 `initialize.sh` は既存の設定生成に加え、初期 clone 用の `.devcontainer/.generated/workspace.json` を生成する。内容は、ホストのHEADの完全なコミットID（`commit`）、ブランチ名（`branch`、detached HEADなら空文字）、初期化用bare repositoryの名前（`seed`）である。ホスト側でローカルGit転送を使い、指定コミットと履歴を`.generated/workspace-<commit>.git`へ独立してコピーする。ホストの`.git/config`、hooks、index、alternatesやハードリンクは引き継がない。linked worktreeとdetached HEADにも対応する。コピーの完了後にmetadataをatomicに公開する。同一コミットのコピーは再利用し、過去のコピーは履歴の完全なコピーで容量が大きいため削除する。fetch前に中断した初期化の再試行で元のコピーがなければ、現在のコピーから初期化をやり直す。fetch後の再試行はコピーを使わない。
 
-metadataにはリモートURLを含めない。コミットのないリポジトリは停止する。
+metadataにはリモートURLを含めない。ホストのremoteは別の`.generated/remotes.json`に、proxyが許可するホストのものだけをHTTPS・認証情報なしで書き出し、agentが起動のたびに未登録の名前だけを追加する（`git.inherit_remotes`）。コミットのないリポジトリは停止する。
 
 `.generated/` と `.nix-env/` はホストで作成し、専用のパスに read-only でマウントする。`wait-ready.sh` は `/run/host/generated/images.txt` を、`bash-env.sh` は `/run/host/nix-env/env.rc` を読む。コンテナ内の管理スクリプトは、エージェントが編集できる clone 内の `.devcontainer/` から設定を読まない。
 

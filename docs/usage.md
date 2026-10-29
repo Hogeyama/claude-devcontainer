@@ -92,6 +92,8 @@ rebase-todoを含む`.git/rebase-merge`・`.git/rebase-apply`・`.git/sequencer`
 
 `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、cloneでは空のworkspace volumeにホストと同じブランチ名でcheckoutする。sharedでは同じコピーから`agent-git` volumeにHEADとindexだけを作り、ホストの作業ツリーには書かない。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
+ホストのremoteのうち、接続先が`proxy.hosts`にあるもの（GitHubの`origin`など）は、agentにも同じ名前で登録する。agentは`git fetch origin`で最新のupstreamを取り込める。URLはHTTPSにし、`user:token@`のような認証情報は除く。SSHのURL（`git@github.com:o/r.git`）は同じパスのHTTPSに変える。`file://`やローカルパス、`ext::`、proxyが許可しないホストのremote、`host`と`agent`という名前のremoteは引き継がない。登録は起動のたびに行い、agentに同じ名前のremoteがあれば変更しない。agentからのpushはproxyが拒否する（テンプレートの`proxy.hosts`は`git-receive-pack`を許可しない）。不要なら`claude.toml`で`git.inherit_remotes = false`にする。
+
 ## 受け渡し用リモート（clone、shared）
 
 起動処理がホストに`agent`リモートを自動登録する。接続先は起動中のコンテナ内の`/workspace`であり、GitHubなどの外部リポジトリは介在しない。既存の`origin`は変更しない。同名の`agent`が別用途で存在する場合は上書きせず停止するので、既存のリモートを別名にしてから起動する。

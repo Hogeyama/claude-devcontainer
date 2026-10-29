@@ -28,6 +28,10 @@
 # root. Default: [] (no paths). In-repository sumi.secrets is also hidden.
 # Set these paths in claude.local.toml. Recreate after changing this.
 # shared_hidden_paths = [".env", "private/credentials"]
+# Give the agent the host's remotes (clone and shared) whose host is in
+# proxy.hosts, as HTTPS without credentials (SSH ones converted), for fetch:
+# the proxy carries no push. Added at each start unless the name is there.
+# inherit_remotes = true
 
 [agent]
 # Directories prepended to Bash's PATH in this order. ~ and symlinks are

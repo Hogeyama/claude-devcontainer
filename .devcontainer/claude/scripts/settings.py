@@ -61,7 +61,7 @@ FILES = ('claude.toml', 'claude.local.toml')
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'claude-devcontainer'
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
-    'git': {'isolation': 'clone', 'shared_hidden_paths': []},
+    'git': {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True},
     'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False},
     'acp': {'enabled': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': [], 'shared_base': ''},
