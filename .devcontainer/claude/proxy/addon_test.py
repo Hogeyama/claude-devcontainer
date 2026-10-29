@@ -26,7 +26,7 @@ WORKSPACE = policy.parse({
         'inject': {'Authorization': {'basic': 'x-access-token:${GITHUB_TOKEN}'}},
     },
     'github.com': {
-        'routes': [r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)'],
+        'routes': [r'/[^/]+/[^/]+\.git/(info/refs|git-upload-pack)'],
         'headers': ['Git-Protocol'],
         'inject': {'Authorization': {'basic': 'x-access-token:${GITHUB_TOKEN}'}},
     },
@@ -125,7 +125,7 @@ class PolicyTest(unittest.TestCase):
         for url, method in [('https://api.github.com/user', 'GET'), ('https://api.github.com/repos/o/r/issues', 'POST'),
                             ('https://api.github.com/repos/o/r/contents/a%20b', 'PUT'),
                             ('https://github.com/o/r.git/info/refs?service=git-upload-pack', 'GET'),
-                            ('https://github.com/o/r.git/git-receive-pack', 'POST')]:
+                            ('https://github.com/o/r.git/git-upload-pack', 'POST')]:
             with self.subTest(url=url):
                 self.allowed(flow(url, method))
         for url, method in [('https://api.github.com/gists', 'POST'), ('https://api.github.com/user', 'POST'),
@@ -133,6 +133,7 @@ class PolicyTest(unittest.TestCase):
                             ('https://api.github.com/repos/a/%2e%2e/%2e%2e/gists', 'POST'),
                             ('https://api.github.com/repos/a/%252e%252e/gists', 'POST'),
                             ('https://github.com/login', 'GET'), ('http://api.github.com/user', 'GET'),
+                            ('https://github.com/o/r.git/git-receive-pack', 'POST'),
                             ('https://api.github.com:8443/user', 'GET'), ('https://example.com/user', 'GET')]:
             with self.subTest(url=url):
                 self.denied(flow(url, method))
