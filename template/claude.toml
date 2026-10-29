@@ -45,6 +45,11 @@
 # files. Values are literal ($ is not expanded) and readable by the agent, so
 # no secrets; the proxy injects those (proxy.hosts).
 # env = { GRADLE_OPTS = "-Dorg.gradle.daemon=false" }
+# Host paths to bind into the agent, as SOURCE:TARGET[:ro|rw], read-only unless
+# :rw. The source must exist; ~ and relative paths resolve like the other paths.
+# Targets that the environment manages (/workspace, /run, ~/.claude, ...) are
+# refused. Mind what the agent can read, or with :rw, change on the host.
+# mounts = ["~/.m2/repository:/home/node/.m2/repository", "~/data:/mnt/data:rw"]
 # Share Claude Code's session history of this repository with the host's
 # (~/.claude/projects/<path>), read-write, so that either resumes the other's
 # sessions. Unsafe: the agent can then write a session that the host's Claude,

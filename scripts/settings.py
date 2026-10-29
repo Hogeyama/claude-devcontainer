@@ -19,8 +19,8 @@ they read to .devcontainer/.generated/:
   agent.env     agent.env, and the dummy tokens that proxy.hosts' env names, for the agent.
   global-agent-setup.sh  a copy of CONFIG/agent-setup.sh, which the agent image
                 build runs before the workspace's agent-setup.sh.
-  workspace.compose.yaml  workspace mounts, the optional Nix store mount, the
-                host's session history (agent.share_projects) and DinD's
+  workspace.compose.yaml  workspace mounts, the optional Nix store mount,
+                agent.mounts, the host's session history (agent.share_projects) and DinD's
                 data over the shared base (docker.shared_base).
   hidden.txt    the masked paths of the shared working tree, for the agent's Git.
 
@@ -62,7 +62,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True},
-    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False},
+    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []},
     'acp': {'enabled': False, 'version': '0.90.0'},
     'docker': {'enabled': False, 'images': [], 'shared_base': ''},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
@@ -100,6 +100,10 @@ ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]
 BASE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*')
 # DinD's data directory.
 DIND_DATA = '/home/rootless/.local/share/docker'
+# Where agent.mounts may not go: what this environment mounts or manages
+# itself, which a mount would hide or replace.
+MANAGED_TARGETS = ('/workspace', '/run', '/var/run', '/public-ca', '/nix', '/home/node/.claude',
+                   '/home/node/.vscode-server', '/etc/claude-code', '/usr/local/bin', '/proc', '/sys', '/dev')
 # Claude Code's session history of /workspace, the agent's working directory.
 AGENT_PROJECT = '/home/node/.claude/projects/-workspace'
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
@@ -173,6 +177,8 @@ def check(data, source):
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
             raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
     shell_path(data.get('agent', {}).get('extra_path', []), str(source))
+    for value in data.get('agent', {}).get('mounts', []):
+        parse_mount(value, f'{source}: agent.mounts')
     for name, value in data.get('agent', {}).get('env', {}).items():
         if not ENV_NAME.fullmatch(name):
             raise ValueError(f'{source}: agent.env: {name!r} is not an environment variable name')
@@ -204,6 +210,28 @@ def check(data, source):
         match = SUBNET.fullmatch(value)
         if not match or any(int(octet) > 255 for octet in match.groups()):
             raise ValueError(f'{source}: subnets.{key}: expected the first three octets of an IPv4 /24, as "10.99.0"')
+
+
+def parse_mount(value, where='agent.mounts'):
+    """SOURCE:TARGET[:ro|rw] as (source, target, read_only); read-only unless :rw."""
+    parts = value.split(':')
+    if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] not in ('ro', 'rw')):
+        raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, SOURCE:TARGET:ro or SOURCE:TARGET:rw')
+    source, target = parts[:2]
+    if not source or ',' in value or re.search(r'[\x00-\x1f]', value):
+        raise ValueError(f'{where}: {value!r}: expected a source path without commas or control characters')
+    path = Path(target)
+    if (not path.is_absolute() or str(path) != target.rstrip('/') or '..' in path.parts or path == Path('/')
+            or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_TARGETS)):
+        raise ValueError(f'{where}: {value!r}: the target must be an absolute, normalized path outside '
+                         + ', '.join(MANAGED_TARGETS))
+    return source, str(path), len(parts) == 2 or parts[2] == 'ro'
+
+
+def resolve_mount(value, base):
+    """A mount with its source resolved like the other paths: ~ expanded, relative to base."""
+    source, target, read_only = parse_mount(value)
+    return f'{resolve(source, base)}:{target}:{"ro" if read_only else "rw"}'
 
 
 def merge(base, override, path=()):
@@ -247,6 +275,8 @@ def load(root=ROOT):
             value = data.get(table, {}).get(key)
             if value:
                 data[table][key] = str(resolve(value, source.parent))
+        if 'mounts' in data.get('agent', {}):
+            data['agent']['mounts'] = [resolve_mount(value, source.parent) for value in data['agent']['mounts']]
         settings = merge(settings, data)
     subnets = settings['subnets']
     if subnets['proxy'] and subnets['proxy'] == subnets['dind']:
@@ -590,6 +620,12 @@ def workspace_compose(settings, root, environ=os.environ):
     if settings['nix']['enabled']:
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})
+    for value in settings['agent']['mounts']:
+        source, target, read_only = parse_mount(value)
+        if not Path(source).exists():
+            raise ValueError(f'agent.mounts: {source} does not exist on the host.')
+        mounts.append({'type': 'bind', 'source': source, 'target': target, 'read_only': read_only,
+                       'bind': {'create_host_path': False}})
     if settings['agent']['share_projects']:
         # The host's history of this repository as the agent's of /workspace,
         # so that either can resume the other's sessions.
