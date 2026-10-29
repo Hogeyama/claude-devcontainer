@@ -278,6 +278,34 @@ class SettingsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'absent does not exist on the host'):
             self.generate()
 
+    def test_agent_cow_mounts(self):
+        state = self.state()
+        environ = {'XDG_STATE_HOME': str(state)}
+        source = self.root / 'maven'
+        source.mkdir()
+        (self.root / 'file').write_text('')
+        self.write('claude.toml', '[agent]\nmounts = ["../maven:/home/node/.m2/repository:cow"]\n')
+        settings.prepare_cow_mounts(self.root, environ)
+        out = self.generate(environ)
+        compose = json.loads((out / 'workspace.compose.yaml').read_text())
+        paths = settings.cow_paths(str(source), '/home/node/.m2/repository', self.root, environ)
+        self.assertTrue(paths['upper'].is_dir() and paths['work'].is_dir())
+        self.assertTrue(paths['upper'].is_relative_to(state.resolve() / 'claude-devcontainer/cow'))
+        self.assertIn({'type': 'volume', 'source': paths['volume'], 'target': '/home/node/.m2/repository',
+                       'volume': {'nocopy': True}}, compose['services']['agent']['volumes'])
+        self.assertEqual(compose['volumes'], {paths['volume']: {'driver_opts': {
+            'type': 'overlay', 'device': 'overlay',
+            'o': f'lowerdir={source},upperdir={paths["upper"]},workdir={paths["work"]}'}}})
+        # Another source or target is another volume, as Docker keeps a volume's options.
+        self.assertNotEqual(settings.cow_paths(str(source), '/mnt/other', self.root, environ)['volume'], paths['volume'])
+        self.write('claude.toml', '[agent]\nmounts = ["../file:/mnt/file:cow"]\n')
+        with self.assertRaisesRegex(ValueError, 'must be a directory'):
+            self.generate(environ)
+        (self.root / 'with space').mkdir()
+        self.write('claude.toml', '[agent]\nmounts = ["../with space:/mnt/x:cow"]\n')
+        with self.assertRaisesRegex(ValueError, 'cannot contain whitespace'):
+            self.generate(environ)
+
     def test_agent_mounts_errors(self):
         for value, message in [('/a', 'expected SOURCE:TARGET'), ('/a:/b:x', 'expected SOURCE:TARGET'),
                                ('/a:/b:ro:x', 'expected SOURCE:TARGET'), (':/b', 'source path'),

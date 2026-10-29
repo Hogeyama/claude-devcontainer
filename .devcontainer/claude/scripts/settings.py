@@ -30,7 +30,7 @@ alone, so `generate` refuses to run with one.
 
 Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
-  settings.py prepare-dependencies  create persistent Node and DinD overlay directories
+  settings.py prepare-dependencies  create persistent Node, DinD and :cow overlay directories
   settings.py check-shared-mounts   validate the host working tree's mounts before startup
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
@@ -212,11 +212,14 @@ def check(data, source):
             raise ValueError(f'{source}: subnets.{key}: expected the first three octets of an IPv4 /24, as "10.99.0"')
 
 
+MOUNT_MODES = ('ro', 'rw', 'cow')
+
+
 def parse_mount(value, where='agent.mounts'):
-    """SOURCE:TARGET[:ro|rw] as (source, target, read_only); read-only unless :rw."""
+    """SOURCE:TARGET[:ro|rw|cow] as (source, target, mode); ro unless given."""
     parts = value.split(':')
-    if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] not in ('ro', 'rw')):
-        raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, SOURCE:TARGET:ro or SOURCE:TARGET:rw')
+    if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] not in MOUNT_MODES):
+        raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, with :ro, :rw or :cow after it or not')
     source, target = parts[:2]
     if not source or ',' in value or re.search(r'[\x00-\x1f]', value):
         raise ValueError(f'{where}: {value!r}: expected a source path without commas or control characters')
@@ -225,13 +228,41 @@ def parse_mount(value, where='agent.mounts'):
             or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_TARGETS)):
         raise ValueError(f'{where}: {value!r}: the target must be an absolute, normalized path outside '
                          + ', '.join(MANAGED_TARGETS))
-    return source, str(path), len(parts) == 2 or parts[2] == 'ro'
+    return source, str(path), parts[2] if len(parts) == 3 else 'ro'
 
 
 def resolve_mount(value, base):
     """A mount with its source resolved like the other paths: ~ expanded, relative to base."""
-    source, target, read_only = parse_mount(value)
-    return f'{resolve(source, base)}:{target}:{"ro" if read_only else "rw"}'
+    source, target, mode = parse_mount(value)
+    return f'{resolve(source, base)}:{target}:{mode}'
+
+
+def cow_paths(source, target, root=ROOT, environ=os.environ):
+    """The volume and this workspace's upper and work directories of a :cow mount.
+
+    Named after the source and target too, as a volume's options are fixed
+    when Docker creates it.
+    """
+    root = Path(root).resolve()
+    state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state').resolve() / 'claude-devcontainer'
+    key = hashlib.sha256(os.fsencode(f'{source}\0{target}')).hexdigest()[:16]
+    own = state / 'cow' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24] / key
+    for path in (Path(source), own):
+        if re.search(r"[\s,:\\'=]", str(path)):
+            raise ValueError(f'agent.mounts: a :cow path cannot contain whitespace, commas, colons, equals signs, '
+                             f'backslashes or quotes: {path}')
+    return {'volume': 'cow-' + key, 'upper': own / 'upper', 'work': own / 'work'}
+
+
+def prepare_cow_mounts(root=ROOT, environ=os.environ):
+    """Create the upper and work directories of the :cow mounts."""
+    # Never clear them: the agent's changes survive ordinary recreation.
+    for value in load(root)['agent']['mounts']:
+        source, target, mode = parse_mount(value)
+        if mode == 'cow':
+            paths = cow_paths(source, target, root, environ)
+            for key in ('upper', 'work'):
+                paths[key].mkdir(parents=True, exist_ok=True)
 
 
 def merge(base, override, path=()):
@@ -620,12 +651,24 @@ def workspace_compose(settings, root, environ=os.environ):
     if settings['nix']['enabled']:
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})
+    volumes = {}
     for value in settings['agent']['mounts']:
-        source, target, read_only = parse_mount(value)
+        source, target, mode = parse_mount(value)
         if not Path(source).exists():
             raise ValueError(f'agent.mounts: {source} does not exist on the host.')
-        mounts.append({'type': 'bind', 'source': source, 'target': target, 'read_only': read_only,
-                       'bind': {'create_host_path': False}})
+        if mode != 'cow':
+            mounts.append({'type': 'bind', 'source': source, 'target': target, 'read_only': mode == 'ro',
+                           'bind': {'create_host_path': False}})
+            continue
+        if not Path(source).is_dir():
+            raise ValueError(f'agent.mounts: {source}: a :cow source must be a directory.')
+        # The host's directory as the lower, like the Node overlay: the agent
+        # writes to an upper directory of this workspace, never to the source.
+        paths = cow_paths(source, target, root, environ)
+        mounts.append({'type': 'volume', 'source': paths['volume'], 'target': target, 'volume': {'nocopy': True}})
+        volumes[paths['volume']] = {'driver_opts': {
+            'type': 'overlay', 'device': 'overlay',
+            'o': f'lowerdir={source},upperdir={paths["upper"]},workdir={paths["work"]}'}}
     if settings['agent']['share_projects']:
         # The host's history of this repository as the agent's of /workspace,
         # so that either can resume the other's sessions.
@@ -642,9 +685,11 @@ def workspace_compose(settings, root, environ=os.environ):
         paths = dind_paths(name, root, environ)
         volume = 'dind-shared-' + name
         compose['services']['dind'] = {'volumes': [{'type': 'volume', 'source': volume, 'target': DIND_DATA}]}
-        compose['volumes'] = {volume: {'driver_opts': {
+        volumes[volume] = {'driver_opts': {
             'type': 'overlay', 'device': 'overlay',
-            'o': f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}'}}}
+            'o': f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}'}}
+    if volumes:
+        compose['volumes'] = volumes
     # JSON is YAML; escape Compose interpolation separately from serialization.
     return json.dumps(compose, indent=2).replace('$', '$$') + '\n'
 
@@ -761,6 +806,7 @@ def main():
         elif sys.argv[1:] == ['prepare-dependencies']:
             prepare_node_modules()
             prepare_dind()
+            prepare_cow_mounts()
         elif sys.argv[1:] == ['check-shared-mounts']:
             check_shared_mounts()
         elif len(sys.argv) == 3 and sys.argv[1] == 'proxy-json':
