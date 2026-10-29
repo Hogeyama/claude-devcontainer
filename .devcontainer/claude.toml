@@ -34,6 +34,8 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 env = ["GH_TOKEN"]
 
 [proxy.hosts."github.com"]
-routes = ['/[^/]+/[^/]+\.git/(info/refs|git-upload-pack|git-receive-pack)']
+# Fetch only: without git-receive-pack, the agent cannot push past the
+# host's review, whatever the token allows.
+routes = ['/[^/]+/[^/]+\.git/(info/refs|git-upload-pack)']
 headers = ["Git-Protocol"]
 inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }

@@ -64,7 +64,7 @@ API keyを使う場合は、[Claude ConsoleのAPI keys](https://platform.claude.
 
 #### GitHub機能の認証（利用する場合）
 
-ホストとコンテナ間の受け渡しには認証設定は不要です。GitHubのリポジトリやAPIへアクセスする場合は、GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを付けてください。
+ホストとコンテナ間の受け渡しには認証設定は不要です。GitHubのリポジトリやAPIへアクセスする場合は、GitHubで[fine-grained PATを発行](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)してください。resource ownerを指定し、共有を許可した非公開リポジトリだけを対象にしてください。Contents、Issues、Pull requestsなど、作業に必要な権限だけを読み取り専用（Read-only）で付けてください。テンプレートの`proxy.hosts`も`git push`（`git-receive-pack`）を通さないので、agentの変更はホストでレビューしてから取り込みます。
 
 ### 3. 認証情報の取り出し方を設定する
 
