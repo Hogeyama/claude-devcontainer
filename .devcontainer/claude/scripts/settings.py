@@ -100,6 +100,7 @@ ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]
 BASE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*')
 # DinD's data directory.
 DIND_DATA = '/home/rootless/.local/share/docker'
+AGENT_HOME = '/home/node'
 # Where agent.mounts may not go: what this environment mounts or manages
 # itself, which a mount would hide or replace.
 MANAGED_TARGETS = ('/workspace', '/run', '/var/run', '/public-ca', '/nix', '/home/node/.claude',
@@ -216,15 +217,22 @@ MOUNT_MODES = ('ro', 'rw', 'cow')
 
 
 def parse_mount(value, where='agent.mounts'):
-    """SOURCE:TARGET[:ro|rw|cow] as (source, target, mode); ro unless given."""
+    """SOURCE:TARGET[:ro|rw|cow] as (source, target, mode); ro unless given.
+
+    A target of ~/... is under the agent's home, /home/node.
+    """
     parts = value.split(':')
     if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] not in MOUNT_MODES):
         raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, with :ro, :rw or :cow after it or not')
     source, target = parts[:2]
     if not source or ',' in value or re.search(r'[\x00-\x1f]', value):
         raise ValueError(f'{where}: {value!r}: expected a source path without commas or control characters')
+    if target.startswith('~/'):
+        target = AGENT_HOME + target[1:]
     path = Path(target)
-    if (not path.is_absolute() or str(path) != target.rstrip('/') or '..' in path.parts or path == Path('/')
+    # The home itself would hide the image's files there.
+    if (not path.is_absolute() or str(path) != target.rstrip('/') or '..' in path.parts
+            or path in (Path('/'), Path(AGENT_HOME))
             or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_TARGETS)):
         raise ValueError(f'{where}: {value!r}: the target must be an absolute, normalized path outside '
                          + ', '.join(MANAGED_TARGETS))

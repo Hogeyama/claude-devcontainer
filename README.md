@@ -209,11 +209,11 @@ devcontainer up --remove-existing-container
 
   - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。
   - imageの`JAVA_TOOL_OPTIONS`は、proxyのCAを含むtruststoreとproxy（Javaは`HTTPS_PROXY`を読まないため）を指定しています。上書きするときは、agentで`echo "$JAVA_TOOL_OPTIONS"`した値を残して後ろに追加してください。
-- ホストのディレクトリやファイルは、`claude.toml`の`agent.mounts`に`ホストのパス:コンテナのパス`で書くとマウントできます。既定は読み取り専用で、書き込みを許すときは末尾に`:rw`を付けます。ディレクトリに`:cow`を付けるとコピーオンライト（CoW）になり、agentは書き込めますが、変更はワークスペースごとの`~/.local/state/claude-devcontainer/cow/`の下に溜まり、ホストの元のディレクトリは変わりません。依存のキャッシュをホストから借りたいときなどに使います。CoWの元のディレクトリはagentの動作中に変更しないでください（overlayの下の層の変更は結果が不定です）。変更を捨てるには、停止中にその下の該当ディレクトリを消してください。ホストのパスは`~`や、設定ファイルからの相対パスで書けて、存在している必要があります。`/workspace`、`/run`、`~/.claude`など、この環境が管理する場所にはマウントできません。`.devcontainer`なしで使う場合も、globalの`claude.toml`に書けます。agentはマウントした内容を読め、`:rw`なら書き換えられるので、秘密を含む場所は渡さないでください。
+- ホストのディレクトリやファイルは、`claude.toml`の`agent.mounts`に`ホストのパス:コンテナのパス`で書くとマウントできます。既定は読み取り専用で、書き込みを許すときは末尾に`:rw`を付けます。ディレクトリに`:cow`を付けるとコピーオンライト（CoW）になり、agentは書き込めますが、変更はワークスペースごとの`~/.local/state/claude-devcontainer/cow/`の下に溜まり、ホストの元のディレクトリは変わりません。依存のキャッシュをホストから借りたいときなどに使います。CoWの元のディレクトリはagentの動作中に変更しないでください（overlayの下の層の変更は結果が不定です）。変更を捨てるには、停止中にその下の該当ディレクトリを消してください。ホストのパスは`~`や、設定ファイルからの相対パスで書けて、存在している必要があります。コンテナのパスの`~/`はagentのホーム（`/home/node`）を指します。`/workspace`、`/run`、`~/.claude`など、この環境が管理する場所にはマウントできません。`.devcontainer`なしで使う場合も、globalの`claude.toml`に書けます。agentはマウントした内容を読め、`:rw`なら書き換えられるので、秘密を含む場所は渡さないでください。
 
   ```toml
   [agent]
-  mounts = ["~/.m2/repository:/home/node/.m2/repository:cow", "~/data:/mnt/data:rw"]
+  mounts = ["~/.m2/repository:~/.m2/repository:cow", "~/data:/mnt/data:rw"]
   ```
 
 - named volumeなど、ほかの書き方は、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
