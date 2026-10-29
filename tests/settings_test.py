@@ -342,6 +342,18 @@ class SettingsTest(unittest.TestCase):
         self.generate()
         self.assertFalse((out / 'global-agent-setup.sh').exists())
 
+    def test_host_mode_copies_the_global_agent_setup_to_its_state(self):
+        # The host command's build context is the state directory
+        # (host/compose.yaml); the repository's own agent-setup.sh stays out.
+        state = self.root / 'state'
+        (self.root / '.devcontainer/agent-setup.sh').write_text('echo repository\n')
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'agent-setup.sh').write_text('echo global\n')
+        with mock.patch.dict(os.environ, {'CLAUDE_DEVCONTAINER_CONFIG_DIR': str(state)}):
+            settings.generate(self.root, {})
+        self.assertEqual((state / '.generated/global-agent-setup.sh').read_text(), 'echo global\n')
+        self.assertFalse((state / 'agent-setup.sh').exists())
+
     def test_paths_are_relative_to_devcontainer_and_expand_home(self):
         self.write('claude.toml', '[sumi]\nsecrets = "../.secrets/sumi/secrets.txt"\n[proxy]\nca = "ca.pem"\n')
         loaded = self.load()
