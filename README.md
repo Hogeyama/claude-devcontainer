@@ -209,7 +209,14 @@ devcontainer up --remove-existing-container
 
   - proxyとDinDのアドレスは、`claude-proxy`と`claude-dind`という名前で書けます。
   - imageの`JAVA_TOOL_OPTIONS`は、proxyのCAを含むtruststoreとproxy（Javaは`HTTPS_PROXY`を読まないため）を指定しています。上書きするときは、agentで`echo "$JAVA_TOOL_OPTIONS"`した値を残して後ろに追加してください。
-- volumeなどは、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
+- ホストのディレクトリやファイルは、`claude.toml`の`agent.mounts`に`ホストのパス:コンテナのパス`で書くとマウントできます。既定は読み取り専用で、書き込みを許すときは末尾に`:rw`を付けます。ホストのパスは`~`や、設定ファイルからの相対パスで書けて、存在している必要があります。`/workspace`、`/run`、`~/.claude`など、この環境が管理する場所にはマウントできません。`.devcontainer`なしで使う場合も、globalの`claude.toml`に書けます。agentはマウントした内容を読め、`:rw`なら書き換えられるので、秘密を含む場所は渡さないでください。
+
+  ```toml
+  [agent]
+  mounts = ["~/.m2/repository:/home/node/.m2/repository", "~/data:/mnt/data:rw"]
+  ```
+
+- named volumeなど、ほかの書き方は、`compose.yaml`の`services.agent`に、Composeの通常の書き方で追加します。
 - VS Codeの拡張機能などは、`devcontainer.json`に書きます。
 
 > [!WARNING]

@@ -104,7 +104,7 @@ class SettingsTest(unittest.TestCase):
     def test_defaults(self):
         loaded = self.load()
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True})
-        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False})
+        self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []})
         self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
         self.assertEqual(loaded['docker'], {'enabled': False, 'images': [], 'shared_base': ''})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
@@ -123,11 +123,11 @@ class SettingsTest(unittest.TestCase):
             '[proxy]\nca = "cert.pem"\n')
         self.write('claude.toml', '[agent]\ngid = 2345\n')
         loaded = self.load()
-        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin'], 'env': {}, 'share_projects': False})
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 2345, 'extra_path': ['/global/bin'], 'env': {}, 'share_projects': False, 'mounts': []})
         self.assertEqual(loaded['proxy']['ca'], settings.CONFIG / 'cert.pem')
         self.write('claude.local.toml', '[agent]\ngid = 3456\nextra_path = []\n[proxy]\nca = "local.pem"\n')
         loaded = self.load()
-        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': [], 'env': {}, 'share_projects': False})
+        self.assertEqual(loaded['agent'], {'uid': 1234, 'gid': 3456, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []})
         self.assertEqual(loaded['proxy']['ca'], self.root / '.devcontainer/local.pem')
 
     def test_local_merges_tables_and_replaces_values(self):
@@ -135,7 +135,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
         loaded = self.load()
         self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1'], 'shared_base': ''})
-        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}, 'share_projects': False})
+        self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []})
 
     def test_local_replaces_each_host_as_a_whole(self):
         self.write('claude.toml', GITHUB + '[proxy.hosts."other.example.com"]\nroutes = ["/"]\n')
@@ -260,6 +260,39 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.host_project('/home/u/my repo.git', environ), config / 'projects/-home-u-my-repo-git')
         with self.assertRaisesRegex(ValueError, 'too long'):
             settings.host_project('/' + 'a' * 200, environ)
+
+    def test_agent_mounts(self):
+        (self.root / 'data').mkdir()
+        (self.root / '.devcontainer/cache').mkdir()
+        self.write('claude.toml', '[agent]\nmounts = ["../data:/mnt/data", "cache:/home/node/.cache/tool:rw", '
+                                  '"~:/mnt/home:ro"]\n')
+        out = self.generate()
+        mounts = json.loads((out / 'workspace.compose.yaml').read_text())['services']['agent']['volumes']
+        bind = {'create_host_path': False}
+        for expected in ({'type': 'bind', 'source': str(self.root / 'data'), 'target': '/mnt/data', 'read_only': True, 'bind': bind},
+                         {'type': 'bind', 'source': str(self.root / '.devcontainer/cache'),
+                          'target': '/home/node/.cache/tool', 'read_only': False, 'bind': bind},
+                         {'type': 'bind', 'source': str(Path.home()), 'target': '/mnt/home', 'read_only': True, 'bind': bind}):
+            self.assertIn(expected, mounts)
+        self.write('claude.toml', '[agent]\nmounts = ["../absent:/mnt/absent"]\n')
+        with self.assertRaisesRegex(ValueError, 'absent does not exist on the host'):
+            self.generate()
+
+    def test_agent_mounts_errors(self):
+        for value, message in [('/a', 'expected SOURCE:TARGET'), ('/a:/b:x', 'expected SOURCE:TARGET'),
+                               ('/a:/b:ro:x', 'expected SOURCE:TARGET'), (':/b', 'source path'),
+                               ('/a,b:/b', 'source path'), ('/a:b', 'absolute, normalized'),
+                               ('/a:/b/../c', 'absolute, normalized'), ('/a:/', 'absolute, normalized'),
+                               ('/a:/workspace', 'outside'), ('/a:/workspace/x', 'outside'),
+                               ('/a:/run/host/git', 'outside'), ('/a:/home/node/.claude/projects', 'outside'),
+                               ('/a:/usr/local/bin/entrypoint.sh', 'outside'), ('/a:/nix/store', 'outside')]:
+            with self.subTest(value=value):
+                self.write('claude.toml', f'[agent]\nmounts = ["{value}"]\n')
+                with self.assertRaisesRegex(ValueError, 'agent.mounts: .*' + message):
+                    self.load()
+        self.write('claude.toml', '[agent]\nmounts = "/a:/b"\n')
+        with self.assertRaisesRegex(ValueError, 'agent.mounts: expected a list'):
+            self.load()
 
     def test_prepare_dind_checks_the_base_uid(self):
         state = self.state()
