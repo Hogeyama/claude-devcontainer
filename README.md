@@ -397,7 +397,7 @@ sh .devcontainer/claude/scripts/install-host.sh
 `~/.local/share/claude-devcontainer/`にコミット済みのコアを置き、`~/.local/bin/claude-devcontainer`を作ります。あとは任意のGitリポジトリで実行します。
 
 ```sh
-claude-devcontainer          # 起動して、agentの中でclaudeを開く
+claude-devcontainer          # 起動して（起動済みならそのまま）、agentの中でclaudeを開く
 claude-devcontainer up       # 起動だけ
 claude-devcontainer down     # 止める
 claude-devcontainer code-server  # 起動して、隔離エディタを開く(codeServer.enabled が必要)
@@ -411,6 +411,7 @@ claude-devcontainer exec bash  # compose exec --user node agent bash の短縮�
 - コアを更新するには、新しい版をチェックアウトしてインストールし直します。すべてのリポジトリが次の`claude-devcontainer`から新しい版を使います。古い版で動いている環境は、そのリポジトリで`claude-devcontainer down`してから起動し直してください(インストール時に一覧を表示します。止めないまま起動しようとするとエラーになります)。古い版は自動では消えないので、不要になったら`~/.local/share/claude-devcontainer/`から消してください。
 - 同じリポジトリを、`.devcontainer`を使う方法と同時には起動できません。
 - 設定を変えたら、`claude-devcontainer down`のあと`claude-devcontainer up`で作り直してください。
+- 引数なしの`claude-devcontainer`は、環境が起動済みなら`devcontainer up`を省き、そのままclaudeを開きます。認証情報やホストの設定のコピー、イメージの読み込みも行わないので、反映したいときは`claude-devcontainer up`を実行してください。
 
 ## 更新する
 

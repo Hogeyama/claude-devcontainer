@@ -72,6 +72,21 @@ class HostCommandTest(unittest.TestCase):
         self.assertEqual([a[1] for a in argv], ['up', 'exec'])
         self.assertEqual(argv[1][-1], 'claude')
 
+    def test_no_argument_keeps_a_running_environment(self):
+        config = CORE / 'host/devcontainer.json'
+        self.env['FAKE_PROJECTS'] = f'{self.project()}\t{config}\trunning\n'
+        self.run_command()
+        argv = [call['argv'] for call in self.calls() if call['argv'][0] == 'devcontainer']
+        self.assertEqual([a[1] for a in argv], ['exec'])
+        self.assertEqual(argv[0][-1], 'claude')
+        # A stopped one starts; up always runs devcontainer up.
+        for args, state in (((), 'exited'), (('up',), 'running')):
+            with self.subTest(args=args, state=state):
+                self.log.unlink()
+                self.env['FAKE_PROJECTS'] = f'{self.project()}\t{config}\t{state}\n'
+                self.run_command(*args)
+                self.assertTrue(any(call['argv'][:2] == ['devcontainer', 'up'] for call in self.calls()))
+
     def test_code_server_points_to_the_host_settings(self):
         self.env['XDG_CONFIG_HOME'] = str(self.top / 'config')
         result = self.run_command('code-server', check=False)
