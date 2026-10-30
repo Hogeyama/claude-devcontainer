@@ -151,7 +151,8 @@ for path in ('/workspace/.git/objects', '/workspace/.git/config', '/workspace/.g
     else:
         raise AssertionError(path)
 ''')
-        for name in ('config', 'config.worktree', 'hooks/pre-commit', 'info/attributes', 'objects/info/alternates'):
+        for name in ('config', 'config.worktree', 'hooks/pre-commit', 'info/attributes', 'objects/info/alternates',
+                     'modules/new'):
             result = self.execute('python3', '-c',
                                   'from pathlib import Path; Path("/workspace/.git/" + ' + repr(name) +
                                   ').write_text("tampered")', check=False)
