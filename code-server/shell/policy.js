@@ -1,6 +1,8 @@
 'use strict';
 // What the shell lets its pages load, as pure functions of the URL; main.js
-// applies them, and tests/electron_shell_test.py checks them with Node.
+// applies them. In the upstream development repository,
+// tests/electron_shell_test.py checks them with Node. That test file is not
+// included in the core copied into other projects; run it in an upstream checkout.
 //
 // Every origin the shell may reach is http://localhost:<port>, and
 // code-server-proxy decides where each port goes (../proxy.py): 18000 is the

@@ -2,9 +2,12 @@ The proxy policy is defined in `addon.py`, with host settings for workspace
 hosts, connectors and web search. Rebuild the image from the host to change
 the code; never mount an agent-editable addon into the running proxy.
 
-Run unit tests from the repository root, with Python and
-`.devcontainer/claude/proxy/requirements.txt` installed. The tests live in
-`tests/proxy/`:
+To develop the proxy, use a checkout of the
+[upstream repository](https://github.com/Hogeyama/claude-devcontainer) on `main`.
+The tests in `tests/proxy/` are kept outside this core directory and are not
+copied into projects that use it. Run them in the upstream checkout.
+Run the following commands from the upstream repository root, with Python and
+`.devcontainer/claude/proxy/requirements.txt` installed:
 
 ```sh
 python -m unittest discover -s tests/proxy -p '*_test.py' -v
