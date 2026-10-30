@@ -577,7 +577,22 @@ def shared_mounts(settings, root):
         mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
                        'volume': {'nocopy': True}})
         mounts.append(read_only('.git', HOST_GIT))
-    for relative in hidden_paths(settings, root):
+    hidden = hidden_paths(settings, root)
+    pinned = {Path(mount['target']) for mount in mounts}
+    read_only_roots = [Path(mount['target']) for mount in mounts if mount.get('read_only')]
+    for relative in hidden:
+        # A mask moves with its parent. Pin every ancestor so that the agent
+        # cannot rename it and leave a decoy to be masked on the next start.
+        # Do not reopen a subtree already protected by a read-only mount.
+        for parent in reversed(relative.parents):
+            target = Path('/workspace') / parent
+            if (parent == Path('.') or target in pinned
+                    or any(target.is_relative_to(path) for path in read_only_roots)):
+                continue
+            mounts.append({'type': 'bind', 'source': str(root / parent),
+                           'target': str(target), 'bind': {'create_host_path': False}})
+            pinned.add(target)
+    for relative in hidden:
         path = root / relative
         target = '/workspace/' + relative.as_posix()
         if path.is_dir():
