@@ -2,23 +2,24 @@ The proxy policy is defined in `addon.py`, with host settings for workspace
 hosts, connectors and web search. Rebuild the image from the host to change
 the code; never mount an agent-editable addon into the running proxy.
 
-Run unit tests from `.devcontainer/claude`, with Python and
-`proxy/requirements.txt` installed:
+Run unit tests from the repository root, with Python and
+`.devcontainer/claude/proxy/requirements.txt` installed. The tests live in
+`tests/proxy/`:
 
 ```sh
-python -m unittest discover -s proxy -p '*_test.py' -v
+python -m unittest discover -s tests/proxy -p '*_test.py' -v
 ```
 
 Or use the pinned image without installing Python dependencies:
 
 ```sh
-docker run --rm -v "$PWD/proxy:/work/proxy:ro" -w /work \
+docker run --rm -v "$PWD:/work:ro" -w /work \
   --entrypoint python \
   mitmproxy/mitmproxy:11.1.3@sha256:e0deb0df7edf9f909053f274a067cd1cacb90f5c17d74459e1693179c0b98d8f \
-  -m unittest discover -s proxy -p '*_test.py' -v
+  -m unittest discover -s tests/proxy -p '*_test.py' -v
 ```
 
-Build using `docker build -t claude-devcontainer-proxy --build-context
+From `.devcontainer/claude`, build using `docker build -t claude-devcontainer-proxy --build-context
 workspace-config=<.devcontainer> proxy`; the workspace's `.generated/proxy.json`
 there (`proxy.hosts` of `claude.toml`, merged by `scripts/settings.py`) is
 checked and baked in, and the build fails without it. The proxy

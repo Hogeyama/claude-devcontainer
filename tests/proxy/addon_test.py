@@ -2,8 +2,13 @@
 import base64
 import json
 from types import SimpleNamespace
+from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / '.devcontainer/claude/proxy'))
 
 from mitmproxy import connection, http
 from mitmproxy.test import tflow
