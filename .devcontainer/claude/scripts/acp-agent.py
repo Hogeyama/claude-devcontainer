@@ -197,7 +197,6 @@ class Bridge:
                 # symlink the agent plants. The agent edits on its own mounts;
                 # the editor sees the result on disk.
                 params['clientCapabilities'] = {}
-                params.pop('_meta', None)
             if method == 'authenticate':
                 raise ValueError('Use the host credential injection script; ACP login is disabled.')
             if params.get('cwd') is not None:
