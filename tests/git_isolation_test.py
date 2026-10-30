@@ -103,7 +103,7 @@ class GitIsolationTest(unittest.TestCase):
         self.assertEqual(generated['/workspace/.git']['source'], str(self.root / '.git'))
         self.assertEqual(generated['/workspace/.git/objects']['source'], str(self.root / '.git/objects'))
         self.assertNotIn('/run/host/git', generated)
-        for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree'):
+        for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'modules'):
             self.assertTrue(generated['/workspace/.git/' + name]['read_only'])
         self.assertTrue(generated['/workspace/.devcontainer']['read_only'])
         self.assertEqual(before, {name: (self.root / '.git' / name).read_bytes() for name in before})
@@ -128,7 +128,7 @@ class GitIsolationTest(unittest.TestCase):
         self.use_unsafe_shared()
         self.generated_mounts()
         protected = {self.root / '.devcontainer'}
-        protected.update(self.root / '.git' / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree'))
+        protected.update(self.root / '.git' / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'modules'))
         def access(path, mode):
             return not (Path(path) in protected and mode & os.W_OK)
         def statvfs(path):

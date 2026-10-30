@@ -84,7 +84,7 @@ isolation = "unsafe_shared"
 
 rebase-todoを含む`.git/rebase-merge`・`.git/rebase-apply`・`.git/sequencer`もRW共有し、履歴編集を制限しない。ホストで`git rebase --continue`すると、共有されたtodoの`exec`もホストで実行される。これはunsafe_sharedで許容する共有範囲に含まれる。
 
-`.devcontainer`と既存の秘密マスクは維持する。`.git/config`と`.git/config.worktree`をread-onlyにし、`.git/hooks`、`.git/info`、`.git/objects/info`は空のread-only mountで覆う。不在の保護用ディレクトリと空のconfig.worktreeは設定生成時に作成する。独自のcore.hooksPathやinclude/includeIf設定は拒否する。通常リポジトリのみ対応し、linked worktreeやalternatesは使えない。
+`.devcontainer`と既存の秘密マスクは維持する。`.git/config`と`.git/config.worktree`をread-onlyにし、`.git/hooks`、`.git/info`、`.git/objects/info`は空のread-only mountで覆う。submoduleのGitディレクトリ`.git/modules`は、それぞれのconfigとhooksをホストのGitが使うのでread-onlyにする。agentはsubmoduleの中でcommitできず、新しいsubmoduleも初期化できない。不在の保護用ディレクトリと空のconfig.worktreeは設定生成時に作成する。独自のcore.hooksPathやinclude/includeIf設定は拒否する。通常リポジトリのみ対応し、linked worktreeやalternatesは使えない。
 
 このモードはホストのGit状態を隔離しない。agentによるindexのフラグ操作や履歴変更もホストへ反映される。ホストとagentの同時Git操作を避ける。秘匿した追跡ファイルは空または削除として見えるが、ホストのindexへskip-worktreeを付けることはしないため、包括的なgit addで取り込まないこと。保護対象以外の共有ファイルをホストが実行するリスクも残る。
 
