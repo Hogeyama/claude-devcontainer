@@ -48,8 +48,11 @@ def download(url, path):
 
 
 def sha256(path):
+    digest = hashlib.sha256()
     with open(path, 'rb') as file:
-        return hashlib.file_digest(file, 'sha256').hexdigest()
+        while chunk := file.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def extract(archive, target):

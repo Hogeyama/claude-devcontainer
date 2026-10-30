@@ -14,17 +14,16 @@ loading to a detached process that runs once DinD is up. Either way, the agent's
 postStartCommand (wait-ready.sh) waits for the marker this writes into the agent.
 """
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
-import host_runtime  # noqa: E402
-from host_runtime import log  # noqa: E402
-import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
@@ -41,6 +40,9 @@ DIND_DOCKER = 'export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock; '
 
 def listed():
     """The list as settings.py writes it to .generated/images.txt, which wait-ready.sh reads."""
+    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
+    settings = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(settings)
     try:
         return settings.images_txt(settings.load(ROOT)).encode()
     except ValueError as error:
@@ -75,6 +77,18 @@ def pull(references):
             subprocess.run(['docker', 'pull', '--quiet', image], stdout=subprocess.DEVNULL)
 
 
+def find(service):
+    """Return the ID of this workspace's running container of a service, or None."""
+    projects = docker('ps', '--filter', f'label=devcontainer.local_folder={ROOT}',
+                      '--filter', 'label=com.docker.compose.service=agent',
+                      '--format', '{{.Label "com.docker.compose.project"}}').stdout.split()
+    if len(projects) != 1:
+        return None
+    found = docker('ps', '-q', '--filter', f'label=com.docker.compose.project={projects[0]}',
+                   '--filter', f'label=com.docker.compose.service={service}').stdout.split()
+    return found[0] if len(found) == 1 else None
+
+
 def in_dind(dind, script, *arguments, data=None, check=True):
     return docker('exec', '-i', '--user', 'rootless', dind, 'sh', '-c', DIND_DOCKER + script, 'sh', *arguments,
                   data=data, check=check)
@@ -105,7 +119,7 @@ def load(dind, references):
             failures.append(f'{image}: loading into DinD failed. {result.stderr.strip()}')
             continue
         loaded[image] = identity
-        log('loaded', image)
+        print(time.strftime('%F %T'), 'loaded', image, flush=True)
     in_dind(dind, f'cat > {RECORD}', data=json.dumps(loaded))
     return failures
 
@@ -124,21 +138,21 @@ def wait_and_load(content):
     references = images(content)
     failures = None
     marked = started = loaded_dind = None
-    for _ in host_runtime.poll(WAIT_SECONDS):
+    deadline = time.monotonic() + WAIT_SECONDS
+    while time.monotonic() < deadline:
         try:
-            running = host_runtime.containers(ROOT)
-            agent = running.get('agent')
+            agent = find('agent')
             if agent and agent != started:
                 finish(agent, content)
                 started = agent
             if agent:
-                dind = running.get('dind')
+                dind = find('dind')
                 if dind and dind != loaded_dind and in_dind(dind, 'docker info >/dev/null 2>&1', check=False).returncode == 0:
                     failures = load(dind, references)
                     loaded_dind = dind
                     marked = None
                     for failure in failures:
-                        log(failure)
+                        print(time.strftime('%F %T'), failure, flush=True)
                 # Keep watching for the whole startup window. An old agent may
                 # still run during a build taking more than a minute, before
                 # Compose replaces it and discards its tmpfs markers.
@@ -147,8 +161,9 @@ def wait_and_load(content):
                     marked = agent
         except subprocess.CalledProcessError:
             pass  # Not ready yet.
+        time.sleep(1)
     if failures is None:
-        log(f'DinD did not start within {WAIT_SECONDS}s.')
+        print(time.strftime('%F %T'), f'DinD did not start within {WAIT_SECONDS}s.', flush=True)
 
 
 def main():
@@ -160,14 +175,18 @@ def main():
         return
     pull(images(content))
     if mode == '--background':
-        host_runtime.background(__file__, '--wait', content, LOG)
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open('a') as log:
+            child = subprocess.Popen([sys.executable, __file__, '--wait'], stdin=subprocess.PIPE,
+                                     stdout=log, stderr=log, start_new_session=True)
+        child.stdin.write(content)
+        child.stdin.close()
         return
-    running = host_runtime.containers(ROOT)
-    dind = running.get('dind')
+    dind = find('dind')
     if not dind:
         sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
     failures = load(dind, images(content))
-    finish(running.get('agent'), content, failures)
+    finish(find('agent'), content, failures)
     if failures:
         sys.exit('\n'.join(failures))
 

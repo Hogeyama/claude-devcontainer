@@ -8,7 +8,6 @@ from urllib.parse import unquote
 from mitmproxy import http
 from credentials import read_secrets, read_snapshot
 import workspace_config
-from policy import AUTHENTICATED_HOSTS, render
 
 # --- Policy -------------------------------------------------------------------
 
@@ -75,7 +74,7 @@ def connector_routes(value):
 
 ROUTES.update(connector_routes(os.environ.get('CLAUDE_DEVCONTAINER_CONNECTORS', '')))
 # Only these get credentials. The workspace's routes go to other hosts.
-assert set(ROUTES) <= AUTHENTICATED_HOSTS
+assert set(ROUTES) <= workspace_config.AUTHENTICATED_HOSTS
 WORKSPACE = workspace_config.installed()
 ROUTES.update(WORKSPACE.routes)
 WORKSPACE_HEADERS = WORKSPACE.headers
@@ -230,7 +229,7 @@ def injected_headers(host):
     headers = []
     for name, template in entries:
         try:
-            headers.append((name, render(template, secrets)))
+            headers.append((name, workspace_config.render(template, secrets)))
         except KeyError as missing:
             raise MissingSecret(missing.args[0]) from None
     return headers
@@ -256,7 +255,7 @@ class PolicyAddon:
         except Exception as error:
             self.deny(flow, error=error)
             path = None
-        if path is not None and req.host in AUTHENTICATED_HOSTS and (req.host, path) != HELLO:
+        if path is not None and req.host in workspace_config.AUTHENTICATED_HOSTS and (req.host, path) != HELLO:
             try:
                 read_snapshot()
             except Exception:
@@ -291,7 +290,7 @@ class PolicyAddon:
                                     if name.decode('ascii').lower() in SAFE_HEADERS | passed
                                     or name.decode('ascii').lower().startswith(SAFE_HEADER_PREFIXES)])
         req.headers['Host'] = req.host
-        if req.host not in AUTHENTICATED_HOSTS:
+        if req.host not in workspace_config.AUTHENTICATED_HOSTS:
             # proxy.hosts' inject, such as a token, replacing what the agent sent.
             try:
                 for name, value in injected_headers(req.host):

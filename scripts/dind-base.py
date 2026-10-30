@@ -22,7 +22,6 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
-import settings  # noqa: E402
 
 ROOT = layout.workspace_root()
 # The storage of a DinD over a shared base (compose.yaml), which the base must share.
@@ -30,6 +29,7 @@ DOCKERD_ARGS = '--storage-driver=fuse-overlayfs --feature=containerd-snapshotter
 WAIT_SECONDS = 60
 
 
+settings = importlib.import_module('settings')
 load_images = importlib.import_module('load-images')
 
 

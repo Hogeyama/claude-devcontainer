@@ -24,8 +24,6 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
-import host_runtime  # noqa: E402
-from host_runtime import log  # noqa: E402
 import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
@@ -80,6 +78,10 @@ LOCK_ATTEMPTS = 5
 
 class Unavailable(Exception):
     pass
+
+
+def log(*message):
+    print(time.strftime('%F %T'), *message, flush=True)
 
 
 def docker(*arguments, data=None):
@@ -383,6 +385,19 @@ def snapshot(values, source, names):
                            secrets={name: values['secrets'][name] for name in names if name in values['secrets']}))
 
 
+def find_environment():
+    """Return the IDs of this workspace's running agent and proxy, or (None, None)."""
+    agents = docker('ps', '--filter', f'label=devcontainer.local_folder={ROOT}',
+                    '--filter', 'label=com.docker.compose.service=agent',
+                    '--format', '{{.ID}} {{.Label "com.docker.compose.project"}}').split()
+    if len(agents) != 2:
+        return None, None
+    agent, project = agents
+    proxies = docker('ps', '-q', '--filter', f'label=com.docker.compose.project={project}',
+                     '--filter', 'label=com.docker.compose.service=proxy').split()
+    return (agent, proxies[0]) if len(proxies) == 1 else (None, None)
+
+
 def inject(proxy, data):
     docker('exec', '-i', proxy, 'python', '/opt/proxy/credentials.py', 'inject', data=data)
 
@@ -404,9 +419,8 @@ def watch(values):
     started = last_seen = time.monotonic()
     while time.monotonic() < max(started + START_SECONDS, last_seen + WAIT_SECONDS):
         try:
-            running = host_runtime.containers(ROOT)
-            agent, proxy = running.get('agent'), running.get('proxy')
-            if agent and proxy:
+            agent, proxy = find_environment()
+            if proxy:
                 last_seen = time.monotonic()
                 if injected is None or injected[1] != proxy:
                     names = requested_secrets(proxy)
@@ -448,7 +462,12 @@ def take_over():
 
 
 def start_background(values):
-    host_runtime.background(__file__, '--watch', json.dumps(values).encode(), LOG)
+    STATE.mkdir(parents=True, exist_ok=True)
+    with LOG.open('a') as log_file:
+        child = subprocess.Popen([sys.executable, __file__, '--watch'], stdin=subprocess.PIPE,
+                                 stdout=log_file, stderr=log_file, start_new_session=True, text=True)
+    child.stdin.write(json.dumps(values))
+    child.stdin.close()
     print(f'Credentials will be injected once the proxy starts (log: {LOG}).\n'
           'If Claude reports HTTP 403 "no credentials", ' + RETRY[0].lower() + RETRY[1:])
 
@@ -462,9 +481,8 @@ def main():
             values = config(generated_secrets())
             claude(values)  # Report a missing login now, not in the log.
             return start_background(values)
-        running = host_runtime.containers(ROOT)
-        agent, proxy = running.get('agent'), running.get('proxy')
-        if not agent or not proxy:
+        agent, proxy = find_environment()
+        if not proxy:
             sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
         names = requested_secrets(proxy)
         values = config(names)

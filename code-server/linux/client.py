@@ -13,13 +13,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / 'scripts'))
 import layout  # noqa: E402
-sys.path.insert(0, str(HERE.parent))
-import electron  # noqa: E402
 
 SHELL = HERE.parent / 'shell'
 PROXY_PORT = 18086
@@ -36,9 +35,16 @@ def fail(message):
     raise SystemExit('error: ' + message)
 
 
+def electron_module():
+    sys.path.insert(0, str(HERE.parent))
+    import electron
+    return electron
+
+
 def electron_directory(environ=os.environ):
     """Where ../electron.py keeps this host's Electron, downloaded or not."""
     cache = Path(environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'claude-devcontainer/electron'
+    electron = electron_module()
     return cache, electron.linux_platform()
 
 
@@ -57,6 +63,7 @@ def ensure_electron():
     """The Electron executable: ELECTRON's, or ../electron.py's, downloaded on the host's network the first time."""
     if found := electron_override():
         return found
+    electron = electron_module()
     cache, platform = electron_directory()
     return electron.ensure(cache, platform) / electron.executable(platform)
 
@@ -88,12 +95,17 @@ def display_backend(environ=os.environ):
     fail('a Wayland or X11 session is required; set WAYLAND_DISPLAY or DISPLAY')
 
 
+def workspace_root():
+    # The repository, also in host mode, where the core is installed elsewhere.
+    return layout.workspace_root()
+
+
 def state_directory(root=None, environ=os.environ):
     """Persistent client state of one workspace: the shell's profile, and the log.
 
     Per workspace, so that two can be open at once without sharing a profile.
     """
-    root = Path(root or layout.workspace_root()).resolve()
+    root = Path(root or workspace_root()).resolve()
     state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     return state / 'claude-devcontainer/vscode' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
 
@@ -166,20 +178,23 @@ def open_window(args, state):
     electron = ensure_electron()
     # Retain the existing profile path when upgrading from the bwrap client.
     profile = state / 'home' / 'shell'
-    command = shell_command(electron, SHELL, profile, args.proxy_port, args.folder, args.backend)
-    environ = dict(os.environ)
-    for name in ('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH'):
-        environ.pop(name, None)
-    if args.backend == 'wayland':
-        environ.pop('DISPLAY', None)
-    process = subprocess.Popen(command, cwd=state, env=environ)
-    try:
-        (state / 'home' / LAUNCHED).touch()
-        return process.wait()
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            process.wait()
+    with tempfile.TemporaryDirectory(prefix='code-server-') as runtime:
+        shell = Path(runtime) / 'shell'
+        shutil.copytree(SHELL, shell)
+        command = shell_command(electron, shell, profile, args.proxy_port, args.folder, args.backend)
+        environ = dict(os.environ)
+        for name in ('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH'):
+            environ.pop(name, None)
+        if args.backend == 'wayland':
+            environ.pop('DISPLAY', None)
+        process = subprocess.Popen(command, cwd=state, env=environ)
+        try:
+            (state / 'home' / LAUNCHED).touch()
+            return process.wait()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait()
 
 
 def main():
@@ -202,6 +217,7 @@ def main():
         if args.check:
             found = electron_override()
             if not found:
+                electron = electron_module()
                 cache, platform = electron_directory()
                 found = cache / f'{electron.VERSION}-{platform}' / electron.executable(platform)
             report(found if found.is_file() else None, f'{args.backend}: {display}')
