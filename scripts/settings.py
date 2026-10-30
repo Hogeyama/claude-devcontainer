@@ -287,10 +287,10 @@ def cow_paths(source, target, root=ROOT, environ=os.environ):
     return {'volume': 'cow-' + key, 'upper': own / 'upper', 'work': own / 'work'}
 
 
-def prepare_cow_mounts(root=ROOT, environ=os.environ):
+def prepare_cow_mounts(settings, root=ROOT, environ=os.environ):
     """Create the upper and work directories of the :cow mounts."""
     # Never clear them: the agent's changes survive ordinary recreation.
-    for value in load(root)['agent']['mounts']:
+    for value in settings['agent']['mounts']:
         source, target, mode = parse_mount(value)
         if mode == 'cow':
             paths = cow_paths(cow_source(source, target, root), target, root, environ)
@@ -467,9 +467,8 @@ def dind_paths(name, root=ROOT, environ=os.environ):
     return paths
 
 
-def prepare_dind(root=ROOT, environ=os.environ):
+def prepare_dind(settings, root=ROOT, environ=os.environ):
     """Create the shared base and this workspace's overlay directories; check the base's UID."""
-    settings = load(root)
     name = shared_base(settings)
     if not name:
         return
@@ -844,8 +843,9 @@ def main():
         if sys.argv[1:] == ['generate']:
             generate()
         elif sys.argv[1:] == ['prepare-dependencies']:
-            prepare_dind()
-            prepare_cow_mounts()
+            settings = load()
+            prepare_dind(settings)
+            prepare_cow_mounts(settings)
         elif sys.argv[1:] == ['check-shared-mounts']:
             check_shared_mounts()
         elif len(sys.argv) == 3 and sys.argv[1] == 'proxy-json':

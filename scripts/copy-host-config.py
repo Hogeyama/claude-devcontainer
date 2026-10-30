@@ -19,7 +19,6 @@ initializeCommand runs it before the containers start, archive now and hand the
 archive to a detached process that copies it once the agent is up.
 """
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -33,6 +32,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import settings as settings_py  # noqa: E402
 
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
@@ -86,16 +86,6 @@ def referenced(settings):
             if '..' not in path.parts and not path.is_absolute():
                 paths.add(path)
     return sorted(paths)
-
-
-def _settings():
-    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-settings_py = _settings()
 
 
 def sumi_secrets():

@@ -55,7 +55,7 @@ def main():
     name = settings.shared_base(loaded)
     if not name:
         sys.exit('error: set docker.enabled and docker.shared_base in claude.toml first.')
-    settings.prepare_dind(ROOT)
+    settings.prepare_dind(loaded, ROOT)
     users = docker('ps', '--filter', f'label=dev.claude-devcontainer.dind-base={name}',
                    '--format', '{{.Names}}').stdout.split()
     if users:

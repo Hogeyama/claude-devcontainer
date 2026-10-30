@@ -14,7 +14,6 @@ loading to a detached process that runs once DinD is up. Either way, the agent's
 postStartCommand (wait-ready.sh) waits for the marker this writes into the agent.
 """
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -24,6 +23,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
@@ -40,9 +40,6 @@ DIND_DOCKER = 'export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock; '
 
 def listed():
     """The list as settings.py writes it to .generated/images.txt, which wait-ready.sh reads."""
-    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
-    settings = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(settings)
     try:
         return settings.images_txt(settings.load(ROOT)).encode()
     except ValueError as error:
