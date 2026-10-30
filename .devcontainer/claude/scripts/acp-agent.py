@@ -8,7 +8,7 @@ files. The host owns this boundary: it lives in .devcontainer, which shared
 mode mounts read-only for the agent.
 """
 import argparse
-import importlib.util
+import importlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -59,14 +59,6 @@ def validate_message(message):
             raise ValueError('ACP params must be an object.')
     elif 'id' not in message or ('result' in message) == ('error' in message):
         raise ValueError('Invalid ACP response.')
-
-
-def load_git_agent():
-    """git-agent.py, which finds the running agent and verifies its mounts."""
-    spec = importlib.util.spec_from_file_location('git_agent', Path(__file__).with_name('git-agent.py'))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def under(path, prefix):
@@ -313,7 +305,7 @@ def main():
                         help='host workspace (default: the checkout containing this script)')
     args = parser.parse_args()
     root = args.workspace_folder.resolve()
-    git_agent = load_git_agent()
+    git_agent = importlib.import_module('git-agent')
     container = git_agent.running_container(root)
     # The running container's mounts, not the TOML edited for its next creation.
     if git_agent.check_container(container, root) not in ('shared', 'unsafe_shared'):

@@ -14,7 +14,7 @@ directories, with its DinD data, while it is stopped.
 
 Usage: dind-base.py [IMAGE...]   (default: docker.images of this workspace)
 """
-import importlib.util
+import importlib
 from pathlib import Path
 import subprocess
 import sys
@@ -29,15 +29,8 @@ DOCKERD_ARGS = '--storage-driver=fuse-overlayfs --feature=containerd-snapshotter
 WAIT_SECONDS = 60
 
 
-def module(name, file):
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parent / file)
-    loaded = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(loaded)
-    return loaded
-
-
-settings = module('settings', 'settings.py')
-load_images = module('load_images', 'load-images.py')
+settings = importlib.import_module('settings')
+load_images = importlib.import_module('load-images')
 
 
 def docker(*arguments, check=True):
