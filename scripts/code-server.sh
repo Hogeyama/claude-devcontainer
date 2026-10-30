@@ -22,10 +22,10 @@ PY
 # WSL opens the shell on Windows; any other Linux, in a Wayland or X11 session on Linux.
 if command -v wslpath >/dev/null && command -v powershell.exe >/dev/null; then
     client=$scripts/../code-server/windows/client.py
-    windows=1
+    set --
 else
     client=$scripts/../code-server/linux/client.py
-    windows=0
+    set -- --detach
 fi
 case "$action" in
 prepare)
@@ -44,18 +44,12 @@ open)
         start='devcontainer up'
         recreate='devcontainer up --remove-existing-container'
     fi
-    # printenv prints nothing in a stopped agent as well; tell the two apart.
-    if ! compose exec -T agent true >/dev/null; then
+    if ! enabled=$(compose exec -T agent printenv CLAUDE_DEVCONTAINER_CODE_SERVER); then
         echo "error: the agent is not running; start it with $start" >&2
         exit 1
     fi
-    enabled=$(compose exec -T agent printenv CLAUDE_DEVCONTAINER_CODE_SERVER || true)
     if [ "$enabled" != 1 ]; then
         echo "error: the agent was created without codeServer.enabled; create it again with $recreate" >&2
-        exit 1
-    fi
-    if ! compose exec -T agent curl --fail --silent --noproxy '*' http://127.0.0.1:18000/healthz >/dev/null; then
-        echo "error: the editor's server in the agent is not up; see /run/claude-devcontainer/code-server.log in it" >&2
         exit 1
     fi
     compose up -d code-server-proxy
@@ -86,9 +80,5 @@ PYTHON
     # The server's token, new at each start of the agent, for the window alone.
     CLAUDE_DEVCONTAINER_VSCODE_TOKEN=$(compose exec -T agent cat /run/claude-devcontainer/vscode-token)
     export CLAUDE_DEVCONTAINER_VSCODE_TOKEN
-    if [ "$windows" = 1 ]; then
-        exec python3 "$client" --proxy-port "$port"
-    fi
-    # The lock, then Electron on the host; the launcher stays until it exits.
-    exec python3 "$client" --proxy-port "$port" --detach ;;
+    exec python3 "$client" --proxy-port "$port" "$@" ;;
 esac

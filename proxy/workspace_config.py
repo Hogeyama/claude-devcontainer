@@ -18,8 +18,6 @@ import certifi
 from cryptography import x509
 
 import policy
-# addon.py reaches these through this module.
-from policy import AUTHENTICATED_HOSTS, render
 
 DIR = Path('/opt/proxy/workspace')
 FILE = 'proxy.json'

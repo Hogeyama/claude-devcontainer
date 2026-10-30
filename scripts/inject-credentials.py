@@ -383,14 +383,6 @@ def snapshot(values, source, names):
                            secrets={name: values['secrets'][name] for name in names if name in values['secrets']}))
 
 
-def find_environment():
-    """Return the IDs of this workspace's running agent and proxy, or (None, None)."""
-    running = host_runtime.containers(ROOT)
-    if 'agent' not in running or 'proxy' not in running:
-        return None, None
-    return running['agent'], running['proxy']
-
-
 def inject(proxy, data):
     docker('exec', '-i', proxy, 'python', '/opt/proxy/credentials.py', 'inject', data=data)
 
@@ -412,8 +404,9 @@ def watch(values):
     started = last_seen = time.monotonic()
     while time.monotonic() < max(started + START_SECONDS, last_seen + WAIT_SECONDS):
         try:
-            agent, proxy = find_environment()
-            if proxy:
+            running = host_runtime.containers(ROOT)
+            agent, proxy = running.get('agent'), running.get('proxy')
+            if agent and proxy:
                 last_seen = time.monotonic()
                 if injected is None or injected[1] != proxy:
                     names = requested_secrets(proxy)
@@ -469,8 +462,9 @@ def main():
             values = config(generated_secrets())
             claude(values)  # Report a missing login now, not in the log.
             return start_background(values)
-        agent, proxy = find_environment()
-        if not proxy:
+        running = host_runtime.containers(ROOT)
+        agent, proxy = running.get('agent'), running.get('proxy')
+        if not agent or not proxy:
             sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
         names = requested_secrets(proxy)
         values = config(names)

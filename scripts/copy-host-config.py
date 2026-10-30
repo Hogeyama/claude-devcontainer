@@ -221,11 +221,6 @@ def docker(*arguments, data=None):
     return subprocess.run(['docker', *arguments], input=data, stdout=subprocess.PIPE, check=True).stdout
 
 
-def find_agent():
-    """Return the ID of this workspace's running agent, or None."""
-    return host_runtime.containers(ROOT).get('agent')
-
-
 # Run as root in the agent, with the archive on stdin and ENTRIES as arguments.
 COPY_SCRIPT = f'''set -eu
 staging=$(mktemp -d)
@@ -277,7 +272,7 @@ def wait_and_copy(data):
             log('a newer copy took over.')
             return
         try:
-            agent = find_agent()
+            agent = host_runtime.containers(ROOT).get('agent')
             if agent and agent != copied:
                 copy(agent, data)
                 copied = agent
@@ -297,7 +292,7 @@ def main():
     if mode == '--background':
         host_runtime.background(__file__, '--wait', data, LOG)
         return
-    agent = find_agent()
+    agent = host_runtime.containers(ROOT).get('agent')
     if not agent:
         sys.exit('error: no running environment for this workspace. Run `devcontainer up`, then retry.')
     copy(agent, data)

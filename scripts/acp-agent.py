@@ -193,7 +193,6 @@ class Bridge:
         try:
             if not isinstance(params, dict):
                 raise ValueError('ACP params must be an object.')
-            params = dict(params)
             # Clients often attach their host MCP config automatically,
             # including env, headers and credentials in URLs or arguments.
             # Container MCP servers must be configured inside the container.

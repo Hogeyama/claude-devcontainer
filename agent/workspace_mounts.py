@@ -123,8 +123,6 @@ def check_shared(workspace, isolation='shared', mountinfo=MOUNTINFO):
                 or not os.access(git, os.R_OK | os.W_OK | os.X_OK)):
             raise ValueError(f'{git} must be the writable agent-git volume in shared mode; '
                              'check agent.uid and agent.gid, regenerate settings and recreate the container.')
-        # Git is usable once clone-workspace.py has initialized the volume.
-        return
 
 
 def check_clone(host_git=HOST_GIT):
