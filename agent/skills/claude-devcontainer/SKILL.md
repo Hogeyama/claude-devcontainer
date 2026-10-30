@@ -39,7 +39,7 @@ In both modes:
 
 ### `unsafe_shared`
 
-The working tree AND Git index, HEAD, refs and objects are the host's. Commits immediately affect the host; do not use the agent remote or the shared-mode fetch/reset workflow. Startup preserves the host index. Coordinate Git operations with the host. Git configuration is read-only; hooks, info and objects/info are masked. .devcontainer and configured secret masks remain protected. Hidden tracked paths can appear deleted or empty; never stage them with a blanket add. Index flags and history changes affect the host too. Rebase state (including rebase-todo), rebase-apply and sequencer remain writable and shared; continuing a rebase on the host also executes its todo exec commands there.
+The working tree AND Git index, HEAD, refs and objects are the host's. Commits immediately affect the host; do not use the agent remote or the shared-mode fetch/reset workflow. Startup preserves the host index. Coordinate Git operations with the host. Git configuration is read-only; hooks, info and objects/info are masked. Submodules' Git (`.git/modules`) is read-only too: you cannot commit inside a submodule or initialize a new one here; ask the human. .devcontainer and configured secret masks remain protected. Hidden tracked paths can appear deleted or empty; never stage them with a blanket add. Index flags and history changes affect the host too. Rebase state (including rebase-todo), rebase-apply and sequencer remain writable and shared; continuing a rebase on the host also executes its todo exec commands there.
 
 ### `shared`
 

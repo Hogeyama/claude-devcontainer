@@ -561,6 +561,12 @@ def shared_mounts(settings, root):
             if not path.is_file():
                 raise ValueError(f'Expected a Git configuration file: {path}')
             mounts.append(read_only('.git/' + name, '/workspace/.git/' + name))
+        # Submodules' Git directories, with their own config and hooks that the
+        # host's Git runs in them: read-only, reserved when absent so that the
+        # agent cannot add one. Submodules are then read-only to the agent.
+        path = check_mount_path(root, Path('.git/modules'))
+        path.mkdir(exist_ok=True)
+        mounts.append(read_only('.git/modules', '/workspace/.git/modules'))
     else:
         mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
                        'volume': {'nocopy': True}})
