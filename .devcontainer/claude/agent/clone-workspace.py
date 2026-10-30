@@ -141,6 +141,63 @@ def add_remotes(workspace, source):
                            check=True, capture_output=True, text=True)
 
 
+def init_submodules(workspace, source):
+    """Check out, from the host's snapshots, the submodules that are still empty here.
+
+    Only where this HEAD still records the commit the host copied; the URL is
+    then the HTTPS one the host gave, or what .gitmodules names, for later
+    fetches. A submodule that fails stays empty, with a warning.
+    """
+    workspace = Path(workspace).absolute()
+    try:
+        data = json.loads(Path(source).read_text())
+    except FileNotFoundError:
+        return
+    def valid(entry):
+        return (isinstance(entry, dict) and set(entry) == {'name', 'path', 'commit', 'seed', 'url'}
+                and all(isinstance(entry[key], str) for key in ('name', 'path', 'commit', 'seed'))
+                and not re.search(r'[\x00-\x1f]', entry['name'] + entry['path'])
+                and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', entry['commit'])
+                and re.fullmatch(f"submodule-[0-9a-f]{{16}}-{entry['commit']}\\.git", entry['seed'])
+                and entry['path'] and not Path(entry['path']).is_absolute() and '..' not in Path(entry['path']).parts
+                and (entry['url'] is None or isinstance(entry['url'], str) and REMOTE_URL.fullmatch(entry['url'])))
+    if not isinstance(data, list) or not all(valid(entry) for entry in data):
+        raise ValueError('Invalid host submodules metadata.')
+
+    def git(*args, timeout=30):
+        return subprocess.run(['git', '-C', str(workspace), *args], check=True, timeout=timeout,
+                              capture_output=True, text=True).stdout.strip()
+
+    for entry in data:
+        name, path = entry['name'], entry['path']
+        target = workspace / path
+        if not target.is_dir() or target.is_symlink() or any(target.iterdir()):
+            continue
+        if git('ls-tree', 'HEAD', '--', path).split()[:3] != ['160000', 'commit', entry['commit']]:
+            continue
+        seed = Path(source).absolute().parent / entry['seed']
+        if not seed.is_dir():
+            continue
+        try:
+            git('submodule', 'init', '--', path)
+            configured = git('config', f'submodule.{name}.url')
+            git('config', f'submodule.{name}.url', str(seed))
+            try:
+                # Only this clone, from the host's own snapshot, uses the file transport.
+                git('-c', 'protocol.file.allow=always', '-c', f'safe.directory={seed}',
+                    'submodule', 'update', '--checkout', '--', path, timeout=300)
+            finally:
+                git('config', f'submodule.{name}.url', entry['url'] or configured)
+            # Drop the snapshot's own branch: the real remote has no bootstrap.
+            for args in (['remote', 'set-url', 'origin', entry['url'] or configured],
+                         ['update-ref', '--no-deref', '-d', 'refs/remotes/origin/HEAD'],
+                         ['update-ref', '-d', 'refs/remotes/origin/bootstrap'], ['branch', '-D', 'bootstrap']):
+                subprocess.run(['git', '-C', str(target), *args], check=True, capture_output=True, text=True)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            print(f'warning: could not check out submodule {path}: {getattr(error, "stderr", "") or error}',
+                  file=sys.stderr)
+
+
 def add_host_remote(workspace, host_git=HOST_GIT):
     """Name the host's read-only Git `host`, once; a remote of that name already there stays."""
     if not Path(host_git).is_dir():
@@ -262,5 +319,6 @@ if __name__ == '__main__':
             clone('/run/host/generated/workspace.json', '/workspace')
             add_host_remote('/workspace')
             add_remotes('/workspace', '/run/host/generated/remotes.json')
+            init_submodules('/workspace', '/run/host/generated/submodules.json')
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         sys.exit(f'error: workspace initialization failed: {error}')
