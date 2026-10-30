@@ -74,10 +74,6 @@ services:
         required: false
     volumes:
       - workspace:/workspace
-      - type: volume
-        source: node-modules
-        target: /workspace/node_modules
-        volume: {nocopy: true}
       - {type: bind, source: "${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}/.generated", target: /run/host/generated, read_only: true, bind: {create_host_path: false}}
       - {type: bind, source: "${CLAUDE_DEVCONTAINER_CONFIG_DIR:-..}/.nix-env", target: /run/host/nix-env, read_only: true, bind: {create_host_path: false}}
       - public-ca:/public-ca:ro
@@ -279,11 +275,6 @@ volumes:
   workspace:
   # The agent's Git in shared mode, under the host's working tree.
   agent-git:
-  node-modules:
-    driver_opts:
-      type: overlay
-      device: overlay
-      o: lowerdir=${CLAUDE_DEVCONTAINER_NODE_LOWER:?Run initialize.sh},upperdir=${CLAUDE_DEVCONTAINER_NODE_UPPER:?Run initialize.sh},workdir=${CLAUDE_DEVCONTAINER_NODE_WORK:?Run initialize.sh}
   claude-projects:
   vscode-server-data:
   public-ca:
