@@ -1,5 +1,9 @@
-`dind-bridge` is maintained in this repository and requires Node.js 22 or
-newer. Edit it directly here. Run `src/main.mjs`; it needs no build step.
+`dind-bridge` requires Node.js 22 or newer. Run `src/main.mjs` from this
+directory; it needs no build step. To develop it, edit
+`.devcontainer/claude/dind-bridge` in a checkout of the
+[upstream repository](https://github.com/Hogeyama/claude-devcontainer) on `main`.
+For subtree installations, update the core using the instructions in
+[the core README](../README.md).
 
 It serves the DinD Docker API on the agent's `127.0.0.1:2375` and mirrors each
 port a container publishes on `0.0.0.0` to the same port on the agent's

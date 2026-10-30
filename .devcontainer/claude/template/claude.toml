@@ -105,13 +105,14 @@
 # connectors = ["mcpsrv_01AbCdEf"]
 # Allow Claude Code's server-side WebSearch. Search traffic from Anthropic is
 # outside proxy.hosts; this also allows API calls made from Bash. Restart the
-# environment after changing it. See "WebSearchを使う" in docs/network-policy.md.
+# environment after changing it. See "WebSearchを使う" in the upstream docs:
+# https://github.com/Hogeyama/claude-devcontainer/blob/main/docs/network-policy.md
 # web_search = false
 
 # What the proxy lets through besides Anthropic, by host. The host bakes it
 # into the proxy image on every `devcontainer up`. See "通信ルールを変更する" in
-# docs/network-policy.md of claude-devcontainer. Quote host names, which
-# contain dots.
+# https://github.com/Hogeyama/claude-devcontainer/blob/main/docs/network-policy.md
+# Quote host names, which contain dots.
 #
 #   routes: the requests to let through, as "METHOD path" or a bare path (any
 #     method). The path is a regular expression for the whole URL path,

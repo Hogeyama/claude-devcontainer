@@ -3,8 +3,7 @@
 agent内の`/workspace`を、ホストの画面とIMEで編集します。画面転送はしません。
 agentの中でCoderのcode-serverを動かし、ホストでは専用のElectronシェルがそれを表示します。
 WindowsとLinuxで、同じシェル、同じproxy、同じ設定を使います。
-ホストのVS Codeをコンテナに接続する通常の方法が作る[経路](../../../docs/usage.md#vs-codeが作る経路)は、このシェルにはありません。
-設計の経緯は[設計文書](../../../docs/superpowers/specs/2026-10-15-electron-shell-design.md)にあります。
+ホストのVS Codeをコンテナに接続する通常の方法が作る[経路](https://github.com/Hogeyama/claude-devcontainer/blob/main/docs/usage.md#vs-codeが作る経路)は、このシェルにはありません。
 
 ```text
 Electronシェル（ホストのIME）
