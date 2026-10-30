@@ -285,7 +285,7 @@ class SettingsTest(unittest.TestCase):
         source.mkdir()
         (self.root / 'file').write_text('')
         self.write('claude.toml', '[agent]\nmounts = ["../maven:/home/node/.m2/repository:cow"]\n')
-        settings.prepare_cow_mounts(self.root, environ)
+        settings.prepare_cow_mounts(settings.load(self.root), self.root, environ)
         out = self.generate(environ)
         compose = json.loads((out / 'workspace.compose.yaml').read_text())
         paths = settings.cow_paths(str(source), '/home/node/.m2/repository', self.root, environ)
@@ -328,17 +328,17 @@ class SettingsTest(unittest.TestCase):
     def test_prepare_dind_checks_the_base_uid(self):
         state = self.state()
         environ = {'XDG_STATE_HOME': str(state)}
-        settings.prepare_dind(self.root, environ)
+        settings.prepare_dind(settings.load(self.root), self.root, environ)
         self.assertEqual(list(state.iterdir()), [])
         self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n[agent]\nuid = 1001\n')
-        settings.prepare_dind(self.root, environ)
+        settings.prepare_dind(settings.load(self.root), self.root, environ)
         paths = settings.dind_paths('common', self.root, environ)
         self.assertTrue(all(paths[key].is_dir() for key in ('data', 'upper', 'work')))
         self.assertEqual(paths['uid'].read_text(), '1001\n')
-        settings.prepare_dind(self.root, environ)
+        settings.prepare_dind(settings.load(self.root), self.root, environ)
         self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n')
         with self.assertRaisesRegex(ValueError, 'belongs to agent.uid = 1001, not 1000'):
-            settings.prepare_dind(self.root, environ)
+            settings.prepare_dind(settings.load(self.root), self.root, environ)
 
     def test_dummy_env_names(self):
         for name in ['HTTP_PROXY', 'https_proxy', 'NO_PROXY', 'DOCKER_HOST', 'CLAUDE_CODE_OAUTH_TOKEN',
@@ -580,7 +580,7 @@ dind = "10.99.1"
     def test_no_dependency_overlay_is_built_in(self):
         state = self.state()
         out = self.generate({'XDG_STATE_HOME': str(state)})
-        settings.prepare_cow_mounts(self.root, {'XDG_STATE_HOME': str(state)})
+        settings.prepare_cow_mounts(settings.load(self.root), self.root, {'XDG_STATE_HOME': str(state)})
         self.assertFalse((self.root / 'node_modules').exists())
         self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()))
         self.assertFalse(any('NODE' in name for name in self.env()))
@@ -594,7 +594,7 @@ dind = "10.99.1"
         out = self.generate(environ)
         self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()), 'none without it')
         (self.root / 'node_modules').mkdir()
-        settings.prepare_cow_mounts(self.root, environ)
+        settings.prepare_cow_mounts(settings.load(self.root), self.root, environ)
         self.generate(environ)
         compose = json.loads((out / 'workspace.compose.yaml').read_text())
         paths = settings.cow_paths(str(self.root.resolve() / 'node_modules'), '/workspace/node_modules', self.root, environ)
