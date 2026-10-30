@@ -236,6 +236,33 @@ class GitIsolationTest(unittest.TestCase):
         self.assertEqual((self.root / '.devcontainer/.generated/hidden.txt').read_text(),
                          '.env\nvault\nprivate/sumi.txt\n')
 
+    def test_hidden_paths_pin_all_parents_without_reopening_read_only_trees(self):
+        for name in ('private/nested/vault', '.devcontainer/private'):
+            (self.root / name).mkdir(parents=True)
+        for name in ('private/nested/token', 'private/sumi.txt', '.devcontainer/private/token'):
+            (self.root / name).write_text('secret')
+        for mode in ('shared', 'unsafe_shared'):
+            with self.subTest(mode=mode):
+                (self.root / '.devcontainer/claude.local.toml').write_text(
+                    f'[git]\nisolation = "{mode}"\n'
+                    'shared_hidden_paths = ["private/nested/token", "private/nested/vault", '
+                    '".devcontainer/private/token"]\n[sumi]\nsecrets = "../private/sumi.txt"\n')
+                generated = self.generated_mounts()
+                raw = json.loads((self.root / '.devcontainer/.generated/workspace.compose.yaml').read_text())
+                targets = [m['target'] for m in raw['services']['agent']['volumes']]
+                self.assertEqual(len(targets), len(set(targets)))
+                for name in ('private', 'private/nested'):
+                    mount = generated['/workspace/' + name]
+                    self.assertEqual(mount['type'], 'bind')
+                    self.assertEqual(mount['source'], str(self.root / name))
+                    self.assertFalse(mount.get('read_only', False))
+                    self.assertFalse(mount['bind']['create_host_path'])
+                self.assertTrue(generated['/workspace/.devcontainer']['read_only'])
+                self.assertNotIn('/workspace/.devcontainer/private', generated)
+                for name in ('private/nested/token', 'private/nested/vault', 'private/sumi.txt',
+                             '.devcontainer/private/token'):
+                    self.assertTrue(generated['/workspace/' + name]['read_only'])
+
     def test_shared_rejects_missing_extra_and_reserved_paths(self):
         for path in ('missing', '.git/config', '.devcontainer', '.devcontainer/.generated/key',
                      '.devcontainer/.nix-env'):

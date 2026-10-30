@@ -90,11 +90,12 @@ class GitIsolationIntegrationTest(unittest.TestCase):
     def execute(self, *args, check=True):
         return self.docker('exec', '--user', 'node', self.container, *args, check=check)
 
-    def start(self, mode):
+    def start(self, mode, hidden_paths=None, sumi='sumi.txt'):
         self.docker('rm', '-f', self.container, check=False)
         (self.host / '.devcontainer/claude.toml').write_text(
-            f'[git]\nisolation = "{mode}"\nshared_hidden_paths = [".secrets", ".env"]\n'
-            '[sumi]\nsecrets = "sumi.txt"\n')
+            f'[git]\nisolation = "{mode}"\n'
+            f'shared_hidden_paths = {json.dumps(hidden_paths if hidden_paths is not None else [".secrets", ".env"])}\n'
+            f'[sumi]\nsecrets = {json.dumps(sumi)}\n')
         settings.generate(self.host, {})
         volumes = [
             {'type': 'volume', 'source': 'dependencies', 'target': '/workspace/node_modules'},
@@ -130,6 +131,34 @@ class GitIsolationIntegrationTest(unittest.TestCase):
                     '[ "$(stat -c %u /workspace/node_modules)" = "$(id -u node)" ] && exit 0; '
                     'sleep 0.1; done; exit 1')
         self.execute('sh', '/usr/local/bin/wait-ready.sh')
+
+    def test_nested_secret_parents_cannot_be_moved_and_replaced(self):
+        (self.host / 'private/nested/vault').mkdir(parents=True)
+        for name in ('private/nested/token', 'private/nested/vault/key', 'private/sumi.txt'):
+            (self.host / name).write_text('host-secret')
+        for mode in ('shared', 'unsafe_shared'):
+            with self.subTest(mode=mode):
+                for _ in range(2):  # Recreate with the same protected paths.
+                    self.start(mode, ['private/nested/token', 'private/nested/vault'], '../private/sumi.txt')
+                    self.execute('python3', '-c', '''
+import errno, os
+from pathlib import Path
+root = Path('/workspace')
+for name in ('private', 'private/nested'):
+    try:
+        os.rename(root / name, root / (name + '-moved'))
+    except OSError as error:
+        assert error.errno == errno.EBUSY, (name, error)
+    else:
+        raise AssertionError('secret parent could be moved: ' + name)
+for name in ('private/nested/token', 'private/sumi.txt'):
+    assert (root / name).read_bytes() == b''
+assert list((root / 'private/nested/vault').iterdir()) == []
+(root / 'private/nested/ordinary').write_text('still writable')
+''')
+                    self.assertEqual((self.host / 'private/nested/ordinary').read_text(), 'still writable')
+                    for name in ('private/nested/token', 'private/nested/vault/key', 'private/sumi.txt'):
+                        self.assertEqual((self.host / name).read_text(), 'host-secret')
 
     def test_unsafe_shared_commits_reach_host_and_protections_hold(self):
         (self.host / 'tracked').write_text('staged on host\n')
