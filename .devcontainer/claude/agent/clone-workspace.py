@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from workspace_mounts import HOST_GIT, dependency_mounts
@@ -141,6 +142,26 @@ def add_remotes(workspace, source):
                            check=True, capture_output=True, text=True)
 
 
+def read_submodules(source):
+    """The host's submodules.json, checked; [] without it, as from an older host."""
+    try:
+        data = json.loads(Path(source).read_text())
+    except FileNotFoundError:
+        return []
+    def valid(entry):
+        return (isinstance(entry, dict) and set(entry) == {'name', 'path', 'commit', 'seed', 'url'}
+                and all(isinstance(entry[key], str) for key in ('name', 'path', 'commit', 'seed'))
+                and not re.search(r'[\x00-\x1f]', entry['name'] + entry['path'])
+                and '..' not in Path(entry['name']).parts and not Path(entry['name']).is_absolute()
+                and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', entry['commit'])
+                and re.fullmatch(f"submodule-[0-9a-f]{{16}}-{entry['commit']}\\.git", entry['seed'])
+                and entry['path'] and not Path(entry['path']).is_absolute() and '..' not in Path(entry['path']).parts
+                and (entry['url'] is None or isinstance(entry['url'], str) and REMOTE_URL.fullmatch(entry['url'])))
+    if not isinstance(data, list) or not all(valid(entry) for entry in data):
+        raise ValueError('Invalid host submodules metadata.')
+    return data
+
+
 def init_submodules(workspace, source):
     """Check out, from the host's snapshots, the submodules that are still empty here.
 
@@ -149,20 +170,7 @@ def init_submodules(workspace, source):
     fetches. A submodule that fails stays empty, with a warning.
     """
     workspace = Path(workspace).absolute()
-    try:
-        data = json.loads(Path(source).read_text())
-    except FileNotFoundError:
-        return
-    def valid(entry):
-        return (isinstance(entry, dict) and set(entry) == {'name', 'path', 'commit', 'seed', 'url'}
-                and all(isinstance(entry[key], str) for key in ('name', 'path', 'commit', 'seed'))
-                and not re.search(r'[\x00-\x1f]', entry['name'] + entry['path'])
-                and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', entry['commit'])
-                and re.fullmatch(f"submodule-[0-9a-f]{{16}}-{entry['commit']}\\.git", entry['seed'])
-                and entry['path'] and not Path(entry['path']).is_absolute() and '..' not in Path(entry['path']).parts
-                and (entry['url'] is None or isinstance(entry['url'], str) and REMOTE_URL.fullmatch(entry['url'])))
-    if not isinstance(data, list) or not all(valid(entry) for entry in data):
-        raise ValueError('Invalid host submodules metadata.')
+    data = read_submodules(source)
 
     def git(*args, timeout=30):
         return subprocess.run(['git', '-C', str(workspace), *args], check=True, timeout=timeout,
@@ -195,6 +203,66 @@ def init_submodules(workspace, source):
                 subprocess.run(['git', '-C', str(target), *args], check=True, capture_output=True, text=True)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             print(f'warning: could not check out submodule {path}: {getattr(error, "stderr", "") or error}',
+                  file=sys.stderr)
+
+
+def attach_submodules(workspace, source):
+    """Build the agent's Git of the host's checked-out submodules, in shared mode.
+
+    Their files are the host's, and each one's .git file names a directory
+    under .git/modules, which is the agent's volume here: without it, Git
+    fails in the whole repository. Build it from the host's snapshot, with
+    HEAD at the commit the superproject records and the index from the files,
+    which are left as they are. Only once per submodule; one that fails stays
+    without its Git, with a warning.
+    """
+    workspace = Path(workspace).absolute()
+    modules = workspace / '.git/modules'
+    for entry in read_submodules(source):
+        name, path = entry['name'], entry['path']
+        target = workspace / path
+        gitfile = target / '.git'
+        git_dir = modules / name
+        if not gitfile.is_file() or gitfile.is_symlink() or git_dir.exists():
+            continue
+        named = gitfile.read_text().strip().removeprefix('gitdir:').strip()
+        if Path(os.path.normpath(target / named)) != git_dir:
+            print(f'warning: submodule {path} names {named}, not .git/modules/{name}; it has no Git here.',
+                  file=sys.stderr)
+            continue
+        seed = Path(source).absolute().parent / entry['seed']
+        recorded = subprocess.run(['git', '-C', str(workspace), 'ls-tree', 'HEAD', '--', path],
+                                  check=True, capture_output=True, text=True).stdout.split()[:3]
+        if recorded != ['160000', 'commit', entry['commit']] or not seed.is_dir():
+            continue
+        temporary = modules / f'.{name.replace("/", "-")}.tmp'
+        shutil.rmtree(temporary, ignore_errors=True)
+        temporary.parent.mkdir(parents=True, exist_ok=True)
+        environment = dict(os.environ, GIT_DIR=str(temporary), GIT_WORK_TREE=str(target))
+
+        def git(*args, timeout=30):
+            return subprocess.run(['git', *args], env=environment, check=True, timeout=timeout,
+                                  capture_output=True, text=True).stdout.strip()
+        try:
+            git('init', '-q', '--template=', '--object-format=' + ('sha256' if len(entry['commit']) == 64 else 'sha1'))
+            git('config', 'core.worktree', os.path.relpath(target, git_dir))
+            git('-c', f'safe.directory={seed}', 'fetch', '--no-tags', '--no-recurse-submodules', str(seed),
+                'refs/heads/bootstrap', timeout=300)
+            git('update-ref', '--no-deref', 'HEAD', entry['commit'])
+            # The index from HEAD, refreshed against the host's files as they are.
+            git('reset', '-q', '--mixed')
+            subprocess.run(['git', '-C', str(workspace), 'submodule', 'init', '--', path],
+                           check=True, capture_output=True, text=True)
+            url = entry['url'] or subprocess.run(['git', '-C', str(workspace), 'config', f'submodule.{name}.url'],
+                                                 check=True, capture_output=True, text=True).stdout.strip()
+            subprocess.run(['git', '-C', str(workspace), 'config', f'submodule.{name}.url', url],
+                           check=True, capture_output=True, text=True)
+            git('remote', 'add', 'origin', url)
+            git_dir.parent.mkdir(parents=True, exist_ok=True)
+            temporary.rename(git_dir)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
+            shutil.rmtree(temporary, ignore_errors=True)
+            print(f'warning: could not build the Git of submodule {path}: {getattr(error, "stderr", "") or error}',
                   file=sys.stderr)
 
 
@@ -315,6 +383,7 @@ if __name__ == '__main__':
         elif os.environ.get('CLAUDE_DEVCONTAINER_GIT_ISOLATION', 'clone') == 'shared':
             attach('/run/host/generated/workspace.json', '/workspace')
             add_remotes('/workspace', '/run/host/generated/remotes.json')
+            attach_submodules('/workspace', '/run/host/generated/submodules.json')
         else:
             clone('/run/host/generated/workspace.json', '/workspace')
             add_host_remote('/workspace')

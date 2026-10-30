@@ -570,6 +570,48 @@ class WorktreeAttachTest(unittest.TestCase):
     def attach(self):
         clone.attach(self.metadata, self.workspace, self.host_git)
 
+    def test_submodules_get_their_git_without_touching_their_files(self):
+        sub = self.root / 'sub'
+        self.git(self.root, 'init', '-q', '-b', 'main', str(sub))
+        (sub / 'file').write_text('recorded\n')
+        self.git(sub, 'add', 'file')
+        self.git(sub, 'commit', '-qm', 'recorded')
+        self.git(self.host, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', str(sub), 'lib')
+        self.git(self.host, 'config', '-f', '.gitmodules', 'submodule.lib.url', 'git@github.com:upstream/lib.git')
+        self.git(self.host, 'add', '.gitmodules')
+        self.git(self.host, 'commit', '-qm', 'submodule')
+        recorded = self.git(self.host, 'rev-parse', 'HEAD:lib')
+        with patch.dict(os.environ, {'XDG_CONFIG_HOME': str(self.root / 'config')}):
+            source.write(self.host, {'github.com'})
+        # The host's files of the submodule, its .git file naming .git/modules/lib.
+        shutil.copytree(self.host / 'lib', self.workspace / 'lib', ignore=shutil.ignore_patterns('.git'))
+        shutil.copy(self.host / 'lib/.git', self.workspace / 'lib/.git')
+        shutil.copy(self.host / '.gitmodules', self.workspace / '.gitmodules')
+        (self.workspace / 'lib/file').write_text('host dirty\n')
+        self.attach()
+        modules = self.metadata.parent / 'submodules.json'
+        clone.attach_submodules(self.workspace, modules)
+        lib = self.workspace / 'lib'
+        self.assertEqual(self.git(lib, 'rev-parse', 'HEAD'), recorded)
+        self.assertEqual(self.git(lib, 'status', '--porcelain'), 'M file')
+        self.assertEqual((lib / 'file').read_text(), 'host dirty\n')
+        # The superproject sees the same commit, with the host's change in it.
+        self.assertTrue(self.git(self.workspace, 'diff', 'lib').endswith(f'+Subproject commit {recorded}-dirty'))
+        self.assertEqual(self.git(lib, 'remote', 'get-url', 'origin'), 'https://github.com/upstream/lib.git')
+        self.assertEqual(self.git(self.workspace, 'config', 'submodule.lib.url'), 'https://github.com/upstream/lib.git')
+        self.assertEqual(self.git(lib, 'for-each-ref'), '')
+        # Once built, a later start leaves it alone.
+        self.git(lib, 'commit', '-qam', 'agent work')
+        clone.attach_submodules(self.workspace, modules)
+        self.assertNotEqual(self.git(lib, 'rev-parse', 'HEAD'), recorded)
+        # A .git file naming another directory gets no Git.
+        (self.workspace / 'other').mkdir()
+        (self.workspace / 'other/.git').write_text('gitdir: /elsewhere\n')
+        data = json.loads(modules.read_text())
+        modules.write_text(json.dumps([dict(data[0], name='other', path='other')]))
+        clone.attach_submodules(self.workspace, modules)
+        self.assertFalse((self.workspace / '.git/modules/other').exists())
+
     def files(self):
         return {p.name: p.read_text() for p in self.workspace.iterdir() if p.is_file()}
 
