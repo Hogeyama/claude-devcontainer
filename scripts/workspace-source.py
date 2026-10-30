@@ -3,7 +3,6 @@
 the commits of its submodules (submodules.json), and the host's remotes that
 the agent can fetch from (remotes.json)."""
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +15,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
@@ -71,9 +71,6 @@ def remotes(root, hosts):
 
 def proxy_hosts(root):
     """The hosts of proxy.hosts, or none without git.inherit_remotes."""
-    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
-    settings = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(settings)
     loaded = settings.load(root)
     return set(loaded['proxy']['hosts']) if loaded['git']['inherit_remotes'] else set()
 

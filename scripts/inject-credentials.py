@@ -24,6 +24,8 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import host_runtime  # noqa: E402
+from host_runtime import log  # noqa: E402
 import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
@@ -78,10 +80,6 @@ LOCK_ATTEMPTS = 5
 
 class Unavailable(Exception):
     pass
-
-
-def log(*message):
-    print(time.strftime('%F %T'), *message, flush=True)
 
 
 def docker(*arguments, data=None):
@@ -387,15 +385,10 @@ def snapshot(values, source, names):
 
 def find_environment():
     """Return the IDs of this workspace's running agent and proxy, or (None, None)."""
-    agents = docker('ps', '--filter', f'label=devcontainer.local_folder={ROOT}',
-                    '--filter', 'label=com.docker.compose.service=agent',
-                    '--format', '{{.ID}} {{.Label "com.docker.compose.project"}}').split()
-    if len(agents) != 2:
+    running = host_runtime.containers(ROOT)
+    if 'agent' not in running or 'proxy' not in running:
         return None, None
-    agent, project = agents
-    proxies = docker('ps', '-q', '--filter', f'label=com.docker.compose.project={project}',
-                     '--filter', 'label=com.docker.compose.service=proxy').split()
-    return (agent, proxies[0]) if len(proxies) == 1 else (None, None)
+    return running['agent'], running['proxy']
 
 
 def inject(proxy, data):
@@ -462,12 +455,7 @@ def take_over():
 
 
 def start_background(values):
-    STATE.mkdir(parents=True, exist_ok=True)
-    with LOG.open('a') as log_file:
-        child = subprocess.Popen([sys.executable, __file__, '--watch'], stdin=subprocess.PIPE,
-                                 stdout=log_file, stderr=log_file, start_new_session=True, text=True)
-    child.stdin.write(json.dumps(values))
-    child.stdin.close()
+    host_runtime.background(__file__, '--watch', json.dumps(values).encode(), LOG)
     print(f'Credentials will be injected once the proxy starts (log: {LOG}).\n'
           'If Claude reports HTTP 403 "no credentials", ' + RETRY[0].lower() + RETRY[1:])
 

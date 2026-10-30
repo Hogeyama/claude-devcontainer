@@ -32,6 +32,8 @@ prepare)
     # Downloads Electron; no administrator rights on either.
     exec python3 "$client" --prepare ;;
 open)
+    . "$scripts/compose-context.sh"
+    prepare_compose up
     # Verify the actual backend before opening the window.
     # A setting turned on after the agent was created reaches it only when
     # the agent is created again.
@@ -43,22 +45,22 @@ open)
         recreate='devcontainer up --remove-existing-container'
     fi
     # printenv prints nothing in a stopped agent as well; tell the two apart.
-    if ! "$scripts/compose.sh" exec -T agent true >/dev/null; then
+    if ! compose exec -T agent true >/dev/null; then
         echo "error: the agent is not running; start it with $start" >&2
         exit 1
     fi
-    enabled=$("$scripts/compose.sh" exec -T agent printenv CLAUDE_DEVCONTAINER_CODE_SERVER || true)
+    enabled=$(compose exec -T agent printenv CLAUDE_DEVCONTAINER_CODE_SERVER || true)
     if [ "$enabled" != 1 ]; then
         echo "error: the agent was created without codeServer.enabled; create it again with $recreate" >&2
         exit 1
     fi
-    if ! "$scripts/compose.sh" exec -T agent curl --fail --silent --noproxy '*' http://127.0.0.1:18000/healthz >/dev/null; then
+    if ! compose exec -T agent curl --fail --silent --noproxy '*' http://127.0.0.1:18000/healthz >/dev/null; then
         echo "error: the editor's server in the agent is not up; see /run/claude-devcontainer/code-server.log in it" >&2
         exit 1
     fi
-    "$scripts/compose.sh" up -d code-server-proxy
+    compose up -d code-server-proxy
     # The published port: compose takes a free one of its range per workspace.
-    port=$("$scripts/compose.sh" port code-server-proxy 8080 | sed 's/.*://')
+    port=$(compose port code-server-proxy 8080 | sed 's/.*://')
     case $port in
     '' | *[!0-9]*) echo 'error: code-server-proxy has no published port; see compose.sh ps' >&2; exit 1 ;;
     esac
@@ -82,7 +84,7 @@ else:
     sys.exit("error: the editor's server is not reachable through code-server-proxy; see compose.sh logs code-server-proxy")
 PYTHON
     # The server's token, new at each start of the agent, for the window alone.
-    CLAUDE_DEVCONTAINER_VSCODE_TOKEN=$("$scripts/compose.sh" exec -T agent cat /run/claude-devcontainer/vscode-token)
+    CLAUDE_DEVCONTAINER_VSCODE_TOKEN=$(compose exec -T agent cat /run/claude-devcontainer/vscode-token)
     export CLAUDE_DEVCONTAINER_VSCODE_TOKEN
     if [ "$windows" = 1 ]; then
         exec python3 "$client" --proxy-port "$port"

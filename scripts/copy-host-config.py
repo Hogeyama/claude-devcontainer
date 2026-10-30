@@ -19,7 +19,6 @@ initializeCommand runs it before the containers start, archive now and hand the
 archive to a detached process that copies it once the agent is up.
 """
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -29,10 +28,12 @@ import shlex
 import subprocess
 import sys
 import tarfile
-import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import host_runtime  # noqa: E402
+from host_runtime import log  # noqa: E402
+import settings  # noqa: E402
 
 # The workspace root (scripts/layout.py).
 ROOT = layout.workspace_root()
@@ -88,20 +89,10 @@ def referenced(settings):
     return sorted(paths)
 
 
-def _settings():
-    spec = importlib.util.spec_from_file_location('settings', Path(__file__).resolve().parent / 'settings.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-settings_py = _settings()
-
-
 def sumi_secrets():
     """The secrets file of sumi.secrets. ValueError if the settings are invalid:
     without them, the file to leave out is unknown, and nothing may be copied."""
-    return settings_py.load(ROOT)['sumi']['secrets']
+    return settings.load(ROOT)['sumi']['secrets']
 
 
 def secrets_files(settings, container):
@@ -232,9 +223,7 @@ def docker(*arguments, data=None):
 
 def find_agent():
     """Return the ID of this workspace's running agent, or None."""
-    agents = docker('ps', '-q', '--filter', f'label=devcontainer.local_folder={ROOT}',
-                    '--filter', 'label=com.docker.compose.service=agent').split()
-    return agents[0].decode() if len(agents) == 1 else None
+    return host_runtime.containers(ROOT).get('agent')
 
 
 # Run as root in the agent, with the archive on stdin and ENTRIES as arguments.
@@ -283,22 +272,20 @@ def wait_and_copy(data):
     # was running when this started.
     WATCHER.write_text(str(os.getpid()))
     copied = None
-    deadline = time.monotonic() + WAIT_SECONDS
-    while time.monotonic() < deadline:
+    for _ in host_runtime.poll(WAIT_SECONDS):
         if WATCHER.read_text() != str(os.getpid()):
-            print(time.strftime('%F %T'), 'a newer copy took over.', flush=True)
+            log('a newer copy took over.')
             return
         try:
             agent = find_agent()
             if agent and agent != copied:
                 copy(agent, data)
                 copied = agent
-                print(time.strftime('%F %T'), 'copied into', agent[:12], flush=True)
+                log('copied into', agent[:12])
         except subprocess.CalledProcessError:
             pass  # Not ready yet.
-        time.sleep(1)
     if not copied:
-        print(time.strftime('%F %T'), f'no agent started within {WAIT_SECONDS}s.', flush=True)
+        log(f'no agent started within {WAIT_SECONDS}s.')
 
 
 def main():
@@ -308,12 +295,7 @@ def main():
     check_legacy_dotfiles()
     data = archive()
     if mode == '--background':
-        LOG.parent.mkdir(parents=True, exist_ok=True)
-        with LOG.open('a') as log:
-            child = subprocess.Popen([sys.executable, __file__, '--wait'], stdin=subprocess.PIPE,
-                                     stdout=log, stderr=log, start_new_session=True)
-        child.stdin.write(data)
-        child.stdin.close()
+        host_runtime.background(__file__, '--wait', data, LOG)
         return
     agent = find_agent()
     if not agent:
