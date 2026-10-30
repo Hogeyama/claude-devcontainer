@@ -92,7 +92,9 @@ rebase-todoを含む`.git/rebase-merge`・`.git/rebase-apply`・`.git/sequencer`
 
 `devcontainer up` で起動する。ホストのローカルHEADとその履歴をコピーし、cloneでは空のworkspace volumeにホストと同じブランチ名でcheckoutする。sharedでは同じコピーから`agent-git` volumeにHEADとindexだけを作り、ホストの作業ツリーには書かない。ホストがdetached HEADならコンテナ側もdetached HEADにする。ブランチ名を合わせるのは初回作成時だけで、以降はコンテナ側のブランチを維持する。事前のpushやコンテナ内での手動cloneは不要である。未pushのコミットも使えるが、未コミット・未追跡ファイルはコピーしない。
 
-cloneでは、ホストでcheckout済みのsubmoduleも、親が記録したコミットのものをホストからコピーしてcheckoutする。agentのsubmoduleのURLは、remoteと同じ規則でHTTPSにしたもの（proxyが許可しないホストなら`.gitmodules`のまま）にするので、以後は`git submodule update`などでproxy経由で取得できる。ホストで未初期化のsubmoduleや、agentのHEADが別のコミットを記録しているsubmoduleは空のまま残る。入れ子のsubmoduleは辿らない。起動のたびに、空で未初期化のsubmoduleだけを対象にする。sharedのsubmoduleには未対応。
+cloneでは、ホストでcheckout済みのsubmoduleも、親が記録したコミットのものをホストからコピーしてcheckoutする。agentのsubmoduleのURLは、remoteと同じ規則でHTTPSにしたもの（proxyが許可しないホストなら`.gitmodules`のまま）にするので、以後は`git submodule update`などでproxy経由で取得できる。ホストで未初期化のsubmoduleや、agentのHEADが別のコミットを記録しているsubmoduleは空のまま残る。入れ子のsubmoduleは辿らない。起動のたびに、空で未初期化のsubmoduleだけを対象にする。
+
+sharedでは、submoduleのファイルはホストのものだが、その`.git`ファイルが指す`.git/modules/<name>`はagent専用のvolumeにあるため、そのままではリポジトリ全体でGitが失敗する。起動時に、ホストでcheckout済みのsubmoduleについて、ホストのコピーから`.git/modules/<name>`を作り、HEADを親が記録したコミットに、indexをホストのファイルに合わせる。ファイルには書かない。URLはcloneと同じ規則にする。一度作ったものは作り直さない。`.git`ファイルが`.git/modules/<name>`以外（絶対パスなど）を指すsubmoduleや、submoduleの中に`.git`ディレクトリを持つ古い形式のものは対象外。
 
 ホストのremoteのうち、接続先が`proxy.hosts`にあるもの（GitHubの`origin`など）は、agentにも同じ名前で登録する。agentは`git fetch origin`で最新のupstreamを取り込める。URLはHTTPSにし、`user:token@`のような認証情報は除く。SSHのURL（`git@github.com:o/r.git`）は同じパスのHTTPSに変える。`file://`やローカルパス、`ext::`、proxyが許可しないホストのremote、`host`と`agent`という名前のremoteは引き継がない。登録は起動のたびに行い、agentに同じ名前のremoteがあれば変更しない。agentからのpushはproxyが拒否する（テンプレートの`proxy.hosts`は`git-receive-pack`を許可しない）。不要なら`claude.toml`で`git.inherit_remotes = false`にする。
 

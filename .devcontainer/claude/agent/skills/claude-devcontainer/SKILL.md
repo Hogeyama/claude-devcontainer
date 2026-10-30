@@ -30,7 +30,7 @@ Check the Git mode first: `echo "$CLAUDE_DEVCONTAINER_GIT_ISOLATION"` prints `cl
 In both modes:
 
 - Commit, then tell the human the branch name and the exact commit ID. The human fetches it through the host's `agent` remote, reviews it, and integrates that ID. GitHub is not involved in this exchange.
-- In clone mode, submodules the host has checked out are checked out here too, at the commit the superproject records. One left empty was not on the host; fetch it with `git submodule update --init <path>` if its URL is on an allowed host, or ask the human.
+- Submodules the host has checked out are checked out here too (in shared mode, their files are the host's and only their Git is built), at the commit the superproject records. One left empty was not on the host; fetch it with `git submodule update --init <path>` if its URL is on an allowed host, or ask the human.
 - The host's remotes on hosts the proxy allows, such as `origin` on GitHub, are here too, as HTTPS. Fetch from them (`git fetch origin`) for the latest upstream; never push to them: the proxy refuses it, and your commits reach the host only through its review.
 - If Git has no `user.name`/`user.email`, ask the human which identity to use. They can provide one with `~/.config/claude-devcontainer/dotfiles/.gitconfig` on the host, which becomes your `~/.gitconfig`. Do not invent one or write global config without asking.
 - `/run/host/generated` and `/run/host/nix-env` are read-only management inputs. Mount changes require container recreation. Run Git as node, never root.
