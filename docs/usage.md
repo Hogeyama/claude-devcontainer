@@ -207,36 +207,27 @@ git push -f agent HEAD:main
 
 ## 依存の共有と更新
 
-ルートの`node_modules`はホストをlower、agent専用の永続ディレクトリをupper/workとするCoWです。ホストに存在しなければ空のディレクトリを作ります。agentの書き込み・削除はupperに残り、ホストやpnpmのstoreには書き戻しません。upper/workの場所は`.devcontainer/.generated/settings.env`の`CLAUDE_DEVCONTAINER_NODE_UPPER`と`CLAUDE_DEVCONTAINER_NODE_WORK`で確認できます。既定は`$XDG_STATE_HOME`（未指定なら`~/.local/state`）以下で、リポジトリの絶対パスごとに分かれます。overlayのオプションとして表現できない空白、カンマ、コロン、バックスラッシュ、引用符を含むパスは拒否します。
+`node_modules`などの依存は、組み込みでは共有しません。ホストの依存をagentでも使うには、`claude.toml`の`agent.mounts`にCoW（`:cow`）で書きます。`/workspace/<パス>:cow`と書くと、リポジトリの同じパスのディレクトリをlower、agent専用の永続ディレクトリをupper/workとするoverlayになります。リポジトリにそのディレクトリがなければマウントせず、ホストにディレクトリも作りません。このため、全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`にも書けます。
 
-npm、通常のpnpm、Yarnのnode_modulesモードを対象にします。Yarn PnPや外部のvirtual storeは自動対応しません。native addonにはホストとコンテナのNode・libc等の互換性が必要です。新しい依存をオンライン取得する仕組みではありません。
-
-モノレポの各パッケージにも依存が必要なら、ホストで対応するlower/upper/workを用意して、`.devcontainer/compose.yaml`へ同じ方式のvolumeを追加します。以下の絶対パスは自分の環境のものへ置き換えてください。upper/workは同じファイルシステム上、リポジトリとビルド対象の外に置き、agentのUIDで書けるようにします。
-
-```yaml
-services:
-  agent:
-    volumes:
-      - type: volume
-        source: app-node-modules
-        target: /workspace/packages/app/node_modules
-        volume: {nocopy: true}
-volumes:
-  app-node-modules:
-    driver_opts:
-      type: overlay
-      device: overlay
-      o: lowerdir=/absolute/repo/packages/app/node_modules,upperdir=/absolute/state/app/upper,workdir=/absolute/state/app/work
+```toml
+[agent]
+mounts = ["/workspace/node_modules:cow", "/workspace/packages/app/node_modules:cow"]
 ```
 
-初回cloneは実際の`node_modules`マウントとその祖先ディレクトリだけを許容します。普通の既存ファイルや、取得コミットの追跡パスとマウントの衝突は拒否します。
+agentの書き込み・削除はupperに残り、ホストやpnpmのstoreには書き戻しません。upper/workは`$XDG_STATE_HOME`（未指定なら`~/.local/state`）の`claude-devcontainer/cow/`以下に、リポジトリとマウントごとに分かれて置かれます。overlayのオプションとして表現できない空白、カンマ、コロン、等号、バックスラッシュ、引用符を含むパスは拒否します。`/workspace`の下には`:cow`だけを書けます（`.git`と`.devcontainer`の下は不可）。
+
+npm、通常のpnpm、Yarnのnode_modulesモードを対象にします。Yarn PnPや外部のvirtual storeは自動対応しません。native addonにはホストとコンテナのNode・libc等の互換性が必要です。新しい依存をオンライン取得する仕組みではありません。Pythonの`.venv`など、ほかの依存ディレクトリも同じ書き方で共有できます。
+
+初回cloneは実際の依存のマウントとその祖先ディレクトリだけを許容します。普通の既存ファイルや、取得コミットの追跡パスとマウントの衝突は拒否します。
+
+以前は、ルートの`node_modules`を組み込みでCoWにしていました（ホストに`node_modules`がなければ空のディレクトリを作っていました）。引き続き使うなら上の`mounts`を書いてください。以前のupperの変更は引き継がれません。不要になった`~/.local/state/claude-devcontainer/node-modules/`は消して構いません。
 
 CoWはスナップショットではないため、mount中にホストのlowerを変更しないでください。依存を更新するときは次の順です。
 
 1. agent側の依存への変更に残すものがあれば退避する。
 2. ホストで`.devcontainer/claude/scripts/compose.sh down`を実行し、コンテナを停止・削除してoverlayをアンマウントする。`--volumes`は付けない。
 3. ホストで使っているpackage managerにより依存を更新する。
-4. `settings.env`に記載されたNode用のupper/workディレクトリだけを削除し、同じ場所に空で作り直す。overlayfsが作るwork内のroot所有の領域の削除には、管理者権限が必要な場合がある。追加したパッケージ用overlayも同様に更新する。
+4. `~/.local/state/claude-devcontainer/cow/`の下の、そのリポジトリとマウントのupper/workディレクトリだけを削除する。起動時に空で作り直される。overlayfsが作るwork内のroot所有の領域の削除には、管理者権限が必要な場合がある。
 5. `devcontainer up`で起動する。workspace volumeとGradleのupperは削除しない。
 
 通常の再起動・再作成はupperを保持します。Gradleは既存の`~/.gradle`のCoWを使い、`./gradlew --offline jar test`を実行します。ホストでGradleのキャッシュを更新する場合も、先にoverlayをアンマウントしてください。

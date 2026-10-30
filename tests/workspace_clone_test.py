@@ -476,6 +476,11 @@ class WorkspaceCloneTest(unittest.TestCase):
                         '3 0 0:3 / /elsewhere/node_modules rw - overlay overlay rw\n')
         self.assertEqual(clone.dependency_mounts(Path('/workspace'), info),
                          [Path('/workspace/node_modules'), Path('/workspace/packages/a b/node_modules')])
+        # A :cow overlay of any name is one too; an ordinary mount is one only as node_modules.
+        info.write_text('1 0 0:1 / /workspace/.venv rw - overlay overlay rw\n'
+                        '2 0 0:2 / /workspace/build rw - ext4 /dev/sda rw\n'
+                        '3 0 0:3 / /workspace rw - ext4 /dev/sda rw\n')
+        self.assertEqual(clone.dependency_mounts(Path('/workspace'), info), [Path('/workspace/.venv')])
 
     def test_sha256_repository_uses_matching_object_format(self):
         host = self.root / 'sha256-host'

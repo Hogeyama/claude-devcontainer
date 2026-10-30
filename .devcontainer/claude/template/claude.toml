@@ -50,10 +50,12 @@
 # upper directory of this workspace under ~/.local/state/claude-devcontainer/cow,
 # never to the source; do not change the source while the agent runs. The source
 # must exist; ~ and relative paths resolve like the other paths. A target of
-# ~/... is under the agent's home, /home/node. Targets that the environment
-# manages (/workspace, /run, ~/.claude, ...) are refused. Mind what the agent
-# can read, or with :rw, change on the host.
-# mounts = ["~/.m2/repository:~/.m2/repository:cow", "~/data:/mnt/data:rw"]
+# ~/... is under the agent's home, /home/node. Under /workspace only :cow goes,
+# for dependencies: /workspace/PATH:cow alone takes the repository's own PATH,
+# and is skipped where the repository lacks it. Other targets the environment
+# manages (/run, ~/.claude, ...) are refused. Mind what the agent can read, or
+# with :rw, change on the host.
+# mounts = ["/workspace/node_modules:cow", "~/.m2/repository:~/.m2/repository:cow", "~/data:/mnt/data:rw"]
 # Share Claude Code's session history of this repository with the host's
 # (~/.claude/projects/<path>), read-write, so that either resumes the other's
 # sessions. Unsafe: the agent can then write a session that the host's Claude,

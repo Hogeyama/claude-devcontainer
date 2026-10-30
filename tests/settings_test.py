@@ -311,7 +311,10 @@ class SettingsTest(unittest.TestCase):
                                ('/a:/b:ro:x', 'expected SOURCE:TARGET'), (':/b', 'source path'),
                                ('/a,b:/b', 'source path'), ('/a:b', 'absolute, normalized'),
                                ('/a:/b/../c', 'absolute, normalized'), ('/a:/', 'absolute, normalized'),
-                               ('/a:/workspace', 'outside'), ('/a:/workspace/x', 'outside'),
+                               ('/a:/workspace', 'only :cow'), ('/a:/workspace/x', 'only :cow'),
+                               ('/a:/workspace/x:rw', 'only :cow'), ('/workspace/.git/x:cow', 'only :cow'),
+                               ('/workspace/.devcontainer:cow', 'only :cow'), ('/workspace/x', 'expected SOURCE'),
+                               ('/workspace/x:rw', 'absolute, normalized'),
                                ('/a:/run/host/git', 'outside'), ('/a:/home/node/.claude/projects', 'outside'),
                                ('/a:/usr/local/bin/entrypoint.sh', 'outside'), ('/a:/nix/store', 'outside')]:
             with self.subTest(value=value):
@@ -574,28 +577,36 @@ dind = "10.99.1"
         self.assertEqual(set(data['proxy']['hosts']), {'api.github.com', 'github.com'})
         self.assertEqual(data['proxy']['hosts']['api.github.com']['env'], ['GH_TOKEN'])
 
-    def test_node_paths_are_repo_keyed_and_do_not_clear_state(self):
-        with tempfile.TemporaryDirectory() as state:
-            env = {'XDG_STATE_HOME': state}
-            paths = settings.node_modules_paths(self.root, env)
-            other = settings.node_modules_paths(self.root / 'other', env)
-            self.assertEqual(paths['CLAUDE_DEVCONTAINER_NODE_LOWER'], str(self.root / 'node_modules'))
-            self.assertNotEqual(paths['CLAUDE_DEVCONTAINER_NODE_UPPER'], other['CLAUDE_DEVCONTAINER_NODE_UPPER'])
-            settings.prepare_node_modules(self.root, env)
-            upper = Path(paths['CLAUDE_DEVCONTAINER_NODE_UPPER'])
-            (upper / 'keep').write_text('keep')
-            settings.prepare_node_modules(self.root, env)
-            self.assertEqual((upper / 'keep').read_text(), 'keep')
-            self.assertTrue((self.root / 'node_modules').is_dir())
-            settings.generate(self.root, env)
-            for name, value in paths.items():
-                self.assertEqual(self.env()[name], "'" + value + "'")
+    def test_no_dependency_overlay_is_built_in(self):
+        state = self.state()
+        out = self.generate({'XDG_STATE_HOME': str(state)})
+        settings.prepare_cow_mounts(self.root, {'XDG_STATE_HOME': str(state)})
+        self.assertFalse((self.root / 'node_modules').exists())
+        self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()))
+        self.assertFalse(any('NODE' in name for name in self.env()))
 
-    def test_overlay_option_delimiters_and_state_in_repo_are_refused(self):
+    def test_workspace_cow_mounts_take_the_repository_path(self):
+        state = self.state()
+        environ = {'XDG_STATE_HOME': str(state)}
+        # Global, so that it applies to every repository that has the directory.
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'claude.toml').write_text('[agent]\nmounts = ["/workspace/node_modules:cow"]\n')
+        out = self.generate(environ)
+        self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()), 'none without it')
+        (self.root / 'node_modules').mkdir()
+        settings.prepare_cow_mounts(self.root, environ)
+        self.generate(environ)
+        compose = json.loads((out / 'workspace.compose.yaml').read_text())
+        paths = settings.cow_paths(str(self.root.resolve() / 'node_modules'), '/workspace/node_modules', self.root, environ)
+        self.assertTrue(paths['upper'].is_dir())
+        self.assertIn({'type': 'volume', 'source': paths['volume'], 'target': '/workspace/node_modules',
+                       'volume': {'nocopy': True}}, compose['services']['agent']['volumes'])
+        self.assertIn(f'lowerdir={self.root.resolve() / "node_modules"},', compose['volumes'][paths['volume']]['driver_opts']['o'])
+
+    def test_cow_state_with_option_delimiters_or_in_the_repository_is_refused(self):
         for state in ('/tmp/a,b', '/tmp/a:b', str(self.root / 'state')):
             with self.subTest(state=state), self.assertRaises(ValueError):
-                settings.node_modules_paths(self.root, {'XDG_STATE_HOME': state})
-
+                settings.cow_paths('/src', '/workspace/node_modules', self.root, {'XDG_STATE_HOME': state})
 
 if __name__ == '__main__':
     unittest.main()
