@@ -25,12 +25,18 @@ def mount_points(mountinfo=MOUNTINFO):
 
 
 def dependency_mounts(workspace, mountinfo=MOUNTINFO, overlay_only=False):
-    """Actual node_modules mounts, never ordinary directories or their contents."""
+    """Actual dependency mounts under the workspace, never ordinary directories or their contents.
+
+    The copy-on-write overlays of agent.mounts' :cow, of any name, and, but
+    for overlay_only, other mounts named node_modules, such as a volume that
+    compose.yaml adds.
+    """
     mounts = []
     for target, (root, kind) in mount_points(mountinfo).items():
-        if overlay_only and (kind != 'overlay' or root != '/'):
+        if target == workspace or not target.is_relative_to(workspace):
             continue
-        if target.name == 'node_modules' and target.is_relative_to(workspace):
+        overlay = kind == 'overlay' and root == '/'
+        if overlay or (not overlay_only and target.name == 'node_modules'):
             mounts.append(target)
     return mounts
 

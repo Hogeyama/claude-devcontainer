@@ -257,14 +257,12 @@ class SettingsIntegrationTest(unittest.TestCase):
         config = self.compose_config()
         mounts = {m['target']: m for m in config['services']['agent']['volumes']}
         self.assertEqual(mounts['/workspace']['type'], 'volume')
-        self.assertEqual(mounts['/workspace/node_modules']['type'], 'volume')
+        self.assertNotIn('/workspace/node_modules', mounts, 'not built in')
+        self.assertFalse((self.root / 'node_modules').exists())
         self.assertFalse(any(p.startswith('/workspace/.git') for p in mounts))
         self.assertNotIn('/workspace/.devcontainer', mounts)
         for path in ('/run/host/generated', '/run/host/nix-env'):
             self.assertTrue(mounts[path]['read_only'])
-        options = config['volumes']['node-modules']['driver_opts']
-        self.assertEqual(options['type'], 'overlay')
-        self.assertIn('lowerdir=' + str(self.root / 'node_modules'), options['o'])
 
     def test_shared_initialization_and_switch_preserve_clone_and_git_state(self):
         self.initialize()
@@ -285,9 +283,6 @@ class SettingsIntegrationTest(unittest.TestCase):
         self.assertEqual(agent['labels']['dev.claude-devcontainer.git-isolation'], 'shared')
         self.assertEqual((generated / 'workspace.json').read_bytes(), metadata)
         self.assertEqual((self.root / '.git/config').read_bytes(), before)
-        # Compose omits unused volume declarations; Docker keeps the detached
-        # volume. Returning to clone below must resolve the original name.
-        self.assertEqual(shared['volumes']['node-modules'], clone['volumes']['node-modules'])
         self.write('claude.local.toml', '[git]\nisolation = "clone"\n')
         self.initialize()
         self.assertEqual(self.compose_config(), clone)

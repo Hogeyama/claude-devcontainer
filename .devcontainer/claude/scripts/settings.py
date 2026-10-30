@@ -30,7 +30,7 @@ alone, so `generate` refuses to run with one.
 
 Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
-  settings.py prepare-dependencies  create persistent Node, DinD and :cow overlay directories
+  settings.py prepare-dependencies  create persistent DinD and :cow overlay directories
   settings.py check-shared-mounts   validate the host working tree's mounts before startup
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
@@ -82,7 +82,7 @@ HOST_GIT = '/run/host/git'
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
     'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'DIND_SHARED', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
-    'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'ACP', 'ACP_VERSION', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH', 'NODE_LOWER', 'NODE_UPPER', 'NODE_WORK'))
+    'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'ACP', 'ACP_VERSION', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
 ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -103,7 +103,9 @@ DIND_DATA = '/home/rootless/.local/share/docker'
 AGENT_HOME = '/home/node'
 # Where agent.mounts may not go: what this environment mounts or manages
 # itself, which a mount would hide or replace.
-MANAGED_TARGETS = ('/workspace', '/run', '/var/run', '/public-ca', '/nix', '/home/node/.claude',
+# Under /workspace, only :cow mounts of dependencies go, beside these.
+MANAGED_WORKSPACE = ('/workspace/.git', '/workspace/.devcontainer')
+MANAGED_TARGETS = ('/run', '/var/run', '/public-ca', '/nix', '/home/node/.claude',
                    '/home/node/.vscode-server', '/etc/claude-code', '/usr/local/bin', '/proc', '/sys', '/dev')
 # Claude Code's session history of /workspace, the agent's working directory.
 AGENT_PROJECT = '/home/node/.claude/projects/-workspace'
@@ -219,13 +221,20 @@ MOUNT_MODES = ('ro', 'rw', 'cow')
 def parse_mount(value, where='agent.mounts'):
     """SOURCE:TARGET[:ro|rw|cow] as (source, target, mode); ro unless given.
 
-    A target of ~/... is under the agent's home, /home/node.
+    A target of ~/... is under the agent's home, /home/node. A target under
+    /workspace takes only :cow, for dependencies such as node_modules; written
+    as /workspace/PATH:cow alone, its source is the repository's own PATH
+    (source '' here, resolved by cow_source).
     """
     parts = value.split(':')
+    if len(parts) == 2 and parts[1] == 'cow' and parts[0].startswith('/workspace/'):
+        parts = ['', *parts]
     if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] not in MOUNT_MODES):
-        raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, with :ro, :rw or :cow after it or not')
+        raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, with :ro, :rw or :cow after it or not, '
+                         'or /workspace/PATH:cow')
     source, target = parts[:2]
-    if not source or ',' in value or re.search(r'[\x00-\x1f]', value):
+    if (not source and len(parts) != 3) or ',' in value or re.search(r'[\x00-\x1f]', value) or (
+            not source and parts[2] != 'cow'):
         raise ValueError(f'{where}: {value!r}: expected a source path without commas or control characters')
     if target.startswith('~/'):
         target = AGENT_HOME + target[1:]
@@ -236,13 +245,27 @@ def parse_mount(value, where='agent.mounts'):
             or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_TARGETS)):
         raise ValueError(f'{where}: {value!r}: the target must be an absolute, normalized path outside '
                          + ', '.join(MANAGED_TARGETS))
-    return source, str(path), parts[2] if len(parts) == 3 else 'ro'
+    mode = parts[2] if len(parts) == 3 else 'ro'
+    if path == Path('/workspace') or path.is_relative_to('/workspace') and (
+            mode != 'cow' or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_WORKSPACE)):
+        raise ValueError(f'{where}: {value!r}: under /workspace, only :cow mounts go, and not at '
+                         + ', '.join(['/workspace', *MANAGED_WORKSPACE]))
+    return source, str(path), mode
 
 
 def resolve_mount(value, base):
     """A mount with its source resolved like the other paths: ~ expanded, relative to base."""
     source, target, mode = parse_mount(value)
+    if not source:
+        return f'{target}:{mode}'
     return f'{resolve(source, base)}:{target}:{mode}'
+
+
+def cow_source(source, target, root):
+    """A :cow mount's source: the repository's own path for /workspace/PATH:cow."""
+    if source:
+        return source
+    return str(Path(root).resolve() / Path(target).relative_to('/workspace'))
 
 
 def cow_paths(source, target, root=ROOT, environ=os.environ):
@@ -255,6 +278,8 @@ def cow_paths(source, target, root=ROOT, environ=os.environ):
     state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state').resolve() / 'claude-devcontainer'
     key = hashlib.sha256(os.fsencode(f'{source}\0{target}')).hexdigest()[:16]
     own = state / 'cow' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24] / key
+    if own.is_relative_to(root):
+        raise ValueError('agent.mounts: the :cow state must be outside the repository and its build contexts.')
     for path in (Path(source), own):
         if re.search(r"[\s,:\\'=]", str(path)):
             raise ValueError(f'agent.mounts: a :cow path cannot contain whitespace, commas, colons, equals signs, '
@@ -268,7 +293,7 @@ def prepare_cow_mounts(root=ROOT, environ=os.environ):
     for value in load(root)['agent']['mounts']:
         source, target, mode = parse_mount(value)
         if mode == 'cow':
-            paths = cow_paths(source, target, root, environ)
+            paths = cow_paths(cow_source(source, target, root), target, root, environ)
             for key in ('upper', 'work'):
                 paths[key].mkdir(parents=True, exist_ok=True)
 
@@ -417,25 +442,6 @@ def write(path, text):
     temporary = path.with_name(path.name + '.tmp')
     temporary.write_text(text)
     temporary.replace(path)
-
-
-def node_modules_paths(root=ROOT, environ=os.environ):
-    root = Path(root).resolve()
-    state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state').resolve()
-    state = state / 'claude-devcontainer/node-modules' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24]
-    if state.is_relative_to(root):
-        raise ValueError('Node overlay state must be outside the repository and its build contexts.')
-    paths = {'LOWER': (root / 'node_modules').resolve(), 'UPPER': state / 'upper', 'WORK': state / 'work'}
-    for path in paths.values():
-        if re.search(r"[\s,:\\']", str(path)):
-            raise ValueError(f'Node overlay path cannot contain whitespace, commas, colons, backslashes or quotes: {path}')
-    return {PREFIX + 'NODE_' + key: str(path) for key, path in paths.items()}
-
-
-def prepare_node_modules(root=ROOT, environ=os.environ):
-    # Never clear upper/work here: changes survive ordinary recreation.
-    for path in node_modules_paths(root, environ).values():
-        Path(path).mkdir(parents=True, exist_ok=True)
 
 
 def shared_base(settings):
@@ -668,6 +674,11 @@ def workspace_compose(settings, root, environ=os.environ):
     volumes = {}
     for value in settings['agent']['mounts']:
         source, target, mode = parse_mount(value)
+        if not source:
+            source = cow_source(source, target, root)
+            # Only where the repository has it, so that the global claude.toml can name it.
+            if not Path(source).is_dir():
+                continue
         if not Path(source).exists():
             raise ValueError(f'agent.mounts: {source} does not exist on the host.')
         if mode != 'cow':
@@ -779,7 +790,7 @@ def generate(root=ROOT, environ=os.environ):
         (out / 'empty-secret').chmod(0o444)
         write(out / 'hidden.txt', ''.join(p.as_posix() + '\n' for p in hidden_paths(settings, root)))
     header = '# Written by scripts/settings.py from global and workspace claude.toml and claude.local.toml; do not edit.\n'
-    values = variables(settings) | node_modules_paths(root, environ)
+    values = variables(settings)
     write(out / 'settings.env', header + ''.join(f"{name}='{value}'\n" for name, value in values.items()))
     write(out / 'proxy.json', proxy_json(settings))
     write(out / 'images.txt', images_txt(settings))
@@ -818,7 +829,6 @@ def main():
         if sys.argv[1:] == ['generate']:
             generate()
         elif sys.argv[1:] == ['prepare-dependencies']:
-            prepare_node_modules()
             prepare_dind()
             prepare_cow_mounts()
         elif sys.argv[1:] == ['check-shared-mounts']:
