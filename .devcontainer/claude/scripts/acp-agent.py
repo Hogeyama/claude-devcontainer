@@ -183,8 +183,6 @@ class Bridge:
             return
         params = message.get('params', {})
         try:
-            if not isinstance(params, dict):
-                raise ValueError('ACP params must be an object.')
             params = dict(params)
             # Clients often attach their host MCP config automatically,
             # including env, headers and credentials in URLs or arguments.
