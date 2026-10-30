@@ -379,6 +379,74 @@ class WorkspaceCloneTest(unittest.TestCase):
         (self.host / '.devcontainer/claude.toml').write_text('[proxy.hosts."github.com"]\nroutes = ["/"]\n')
         self.assertEqual(source.proxy_hosts(self.host), {'github.com'})
 
+    def add_submodule(self, url):
+        """A submodule lib at a commit that is not its repository's tip, with url in .gitmodules."""
+        sub = self.root / 'sub'
+        self.git(self.root, 'init', '-q', '-b', 'main', str(sub))
+        (sub / 'file').write_text('recorded\n')
+        self.git(sub, 'add', 'file')
+        self.git(sub, 'commit', '-qm', 'recorded')
+        self.git(self.host, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', str(sub), 'lib')
+        recorded = self.git(self.host, 'rev-parse', ':lib')
+        self.git(self.host, 'config', '-f', '.gitmodules', 'submodule.lib.url', url)
+        self.git(self.host, 'add', '.gitmodules')
+        self.git(self.host, 'commit', '-qm', 'submodule')
+        (sub / 'file').write_text('later\n')
+        self.git(sub, 'commit', '-qam', 'later')
+        self.git(self.host / 'lib', '-c', 'protocol.file.allow=always', 'fetch', '-q', 'origin')
+        return recorded
+
+    def test_submodules_are_checked_out_from_the_host(self):
+        recorded = self.add_submodule('git@github.com:upstream/lib.git')
+        source.write(self.host, {'github.com'})
+        modules = json.loads((self.metadata.parent / 'submodules.json').read_text())
+        self.assertEqual([(m['name'], m['path'], m['commit'], m['url']) for m in modules],
+                         [('lib', 'lib', recorded, 'https://github.com/upstream/lib.git')])
+        clone.clone(self.metadata, self.agent)
+        clone.init_submodules(self.agent, self.metadata.parent / 'submodules.json')
+        lib = self.agent / 'lib'
+        self.assertEqual((lib / 'file').read_text(), 'recorded\n')
+        self.assertEqual(self.git(lib, 'rev-parse', 'HEAD'), recorded)
+        self.assertEqual(self.git(self.agent, 'status', '--porcelain'), '')
+        self.assertEqual(self.git(lib, 'remote', 'get-url', 'origin'), 'https://github.com/upstream/lib.git')
+        self.assertEqual(self.git(self.agent, 'config', 'submodule.lib.url'), 'https://github.com/upstream/lib.git')
+        self.assertEqual(self.git(lib, 'for-each-ref', '--format=%(refname)'), '')
+        # Once checked out, a later start leaves it alone.
+        (lib / 'file').write_text('agent work\n')
+        clone.init_submodules(self.agent, self.metadata.parent / 'submodules.json')
+        self.assertEqual((lib / 'file').read_text(), 'agent work\n')
+
+    def test_submodules_without_a_host_checkout_or_with_a_moved_gitlink_stay_empty(self):
+        self.add_submodule('https://github.com/upstream/lib.git')
+        # The agent's HEAD records another commit than the host copied.
+        source.write(self.host, set())
+        modules = self.metadata.parent / 'submodules.json'
+        self.assertIsNone(json.loads(modules.read_text())[0]['url'], 'a host outside proxy.hosts')
+        clone.clone(self.metadata, self.agent)
+        data = json.loads(modules.read_text())
+        data[0]['commit'] = '0' * 40
+        data[0]['seed'] = f"submodule-{'0' * 16}-{'0' * 40}.git"
+        modules.write_text(json.dumps(data))
+        clone.init_submodules(self.agent, modules)
+        self.assertEqual(list((self.agent / 'lib').iterdir()), [])
+        # A host that has not checked it out has nothing to copy.
+        shutil.rmtree(self.host / 'lib')
+        (self.host / 'lib').mkdir()
+        source.write(self.host, set())
+        self.assertEqual(json.loads(modules.read_text()), [])
+        self.assertEqual(list(self.metadata.parent.glob('submodule-*.git')), [], 'old snapshots are removed')
+
+    def test_invalid_submodules_metadata_is_refused(self):
+        clone.clone(self.metadata, self.agent)
+        modules = self.root / 'submodules.json'
+        entry = {'name': 'lib', 'path': 'lib', 'commit': self.start,
+                 'seed': f'submodule-{"0" * 16}-{self.start}.git', 'url': None}
+        for change in ({'path': '../outside'}, {'path': '/abs'}, {'seed': '../x.git'}, {'url': 'ext::sh'},
+                       {'commit': 'HEAD'}, {'extra': 1}):
+            modules.write_text(json.dumps([dict(entry, **change)]))
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'Invalid host submodules'):
+                clone.init_submodules(self.agent, modules)
+
     def test_host_remote_names_the_read_only_host_git_once(self):
         clone.clone(self.metadata, self.agent)
         clone.add_host_remote(self.agent, self.root / 'absent')
