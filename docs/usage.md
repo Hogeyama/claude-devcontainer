@@ -189,6 +189,8 @@ git rebase host/main   # または git merge host/main
 
 remote `host`は起動時に`/run/host/git`を指すように登録する。同名のremoteが既にあれば変更しない。linked worktreeではリポジトリ共通の`.git`を置くので、全ブランチが見える。objectsをalternatesから借りているリポジトリでは`/run/host/git`を置かない。ホストとagentのUIDが違うとGitがdubious ownershipで拒否するので、`agent.uid`/`agent.gid`をホストの所有者に合わせる。
 
+`/run/host/git`（clone、shared）では、remoteのURLや`http.extraHeader`などの認証情報をagentに見せない。`config`は、リポジトリの読み取りに要る`core.repositoryformatversion`と`extensions.*`だけを`.generated/host-git-config`に写したもので覆う。`config.worktree`は空にし、`git-crypt/`は空のread-only mountで覆う。submoduleのGitディレクトリ`modules/`はそのまま見せる。作業中にホストで追加したsubmoduleもagentが取り込めるようにするためで、それぞれの`config`は隠さない。親リポジトリをトークン付きURLでcloneし、`.gitmodules`が相対URLのsubmoduleでは、そのトークンがsubmoduleの`config`にも残る。stashや到達不能なobjectsも読めるので、秘密を含む変更をstashしない。unsafe_sharedではホストの`.git/config`がそのまま`/workspace/.git/config`に見える。
+
 ホストからコンテナの受け取り用ブランチへpushしてもよい。
 
 ```sh

@@ -300,10 +300,34 @@ class GitIsolationTest(unittest.TestCase):
         (self.root / '.secrets').symlink_to(self.root.parent)
         (self.root / '.devcontainer/claude.local.toml').write_text(
             '[git]\nisolation = "clone"\nshared_hidden_paths = [".secrets"]\n')
+        generated = self.root / '.devcontainer/.generated'
         self.assertEqual(self.generated_mounts(), {
             '/workspace': {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
             '/run/host/git': {'type': 'bind', 'source': str(self.root.resolve() / '.git'), 'target': '/run/host/git',
-                              'read_only': True, 'bind': {'create_host_path': False}}})
+                              'read_only': True, 'bind': {'create_host_path': False}},
+            '/run/host/git/config': {'type': 'bind', 'source': str(generated / 'host-git-config'),
+                                     'target': '/run/host/git/config',
+                                     'read_only': True, 'bind': {'create_host_path': False}}})
+
+    def test_host_git_hides_credentials_but_keeps_the_repository_format(self):
+        self.git('remote', 'add', 'origin', 'https://oauth2:token@example.com/team/app.git')
+        self.git('config', 'http.extraHeader', 'Authorization: Bearer token')
+        self.git('config', 'extensions.worktreeConfig', 'true')
+        (self.root / '.git/config.worktree').write_text('[user]\n\tname = t\n')
+        (self.root / '.git/git-crypt/keys').mkdir(parents=True)
+        for mode in ('clone', 'shared'):
+            with self.subTest(mode=mode):
+                (self.root / '.devcontainer/claude.local.toml').write_text(f'[git]\nisolation = "{mode}"\n')
+                mounts = self.generated_mounts()
+                config = Path(mounts['/run/host/git/config']['source']).read_text()
+                self.assertNotIn('token', config)
+                version = self.git('config', 'core.repositoryformatversion').stdout.strip()
+                self.assertIn(f'repositoryformatversion = {version}', config)
+                self.assertIn('worktreeconfig = true', config)
+                self.assertEqual(Path(mounts['/run/host/git/config.worktree']['source']).read_text(), '')
+                self.assertEqual(mounts['/run/host/git/git-crypt']['type'], 'tmpfs')
+                for target in ('/run/host/git/config', '/run/host/git/config.worktree', '/run/host/git/git-crypt'):
+                    self.assertTrue(mounts[target]['read_only'])
 
     def test_clone_shows_the_common_git_of_a_linked_worktree(self):
         self.git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-qm', 'fixture')
