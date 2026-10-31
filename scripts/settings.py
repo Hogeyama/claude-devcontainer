@@ -566,16 +566,28 @@ def shared_mounts(settings, root):
             if not path.is_file():
                 raise ValueError(f'Expected a Git configuration file: {path}')
             mounts.append(read_only('.git/' + name, '/workspace/.git/' + name))
-        # Submodules' Git directories, with their own config and hooks that the
-        # host's Git runs in them: read-only, reserved when absent so that the
-        # agent cannot add one. Submodules are then read-only to the agent.
-        path = check_mount_path(root, Path('.git/modules'))
-        path.mkdir(exist_ok=True)
-        mounts.append(read_only('.git/modules', '/workspace/.git/modules'))
+        # Git takes config, hooks and info from the directory that commondir
+        # names: pin it to .git itself, reserved when absent so that the agent
+        # cannot point it at a directory of its own.
+        path = check_mount_path(root, Path('.git/commondir'))
+        if not path.exists():
+            with path.open('x') as file:
+                file.write('.\n')
+        if not path.is_file() or path.read_text().strip() != '.':
+            raise ValueError(f'Expected a Git commondir file naming .git itself: {path}')
+        mounts.append(read_only('.git/commondir', '/workspace/.git/commondir'))
+        # Submodules' and linked worktrees' Git directories, with their own
+        # config, commondir and hooks that the host's Git runs in them:
+        # read-only, reserved when absent so that the agent cannot add one.
+        # Submodules are then read-only to the agent.
+        for name in ('modules', 'worktrees'):
+            path = check_mount_path(root, Path('.git') / name)
+            path.mkdir(exist_ok=True)
+            mounts.append(read_only('.git/' + name, '/workspace/.git/' + name))
     else:
         mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
                        'volume': {'nocopy': True}})
-        mounts.append(read_only('.git', HOST_GIT))
+        mounts += host_git_mounts(root, root / '.git')
     hidden = hidden_paths(settings, root)
     pinned = {Path(mount['target']) for mount in mounts}
     read_only_roots = [Path(mount['target']) for mount in mounts if mount.get('read_only')]
@@ -661,6 +673,46 @@ def host_git_dir(root):
     return git
 
 
+def host_git_config(git):
+    """What reading the host's repository needs of its configuration: the format, without remotes or credentials."""
+    found = subprocess.run(['git', 'config', '--file', str(git / 'config'), '--no-includes', '--null', '--get-regexp',
+                            r'^(core\.repositoryformatversion|extensions\..+)$'], capture_output=True, text=True)
+    if found.returncode not in (0, 1):
+        raise ValueError(f'Could not read {git / "config"}: {found.stderr.strip()}')
+    sections = {'core': [], 'extensions': []}
+    for record in filter(None, found.stdout.split('\0')):
+        key, _, value = record.partition('\n')
+        section, _, name = key.partition('.')
+        if not re.fullmatch(r'[A-Za-z0-9.-]+', name) or not re.fullmatch(r'[A-Za-z0-9._-]*', value):
+            raise ValueError(f'Unexpected Git repository format in {git / "config"}: {key}')
+        sections[section].append(f'\t{name} = {value}\n')
+    return ''.join(f'[{section}]\n' + ''.join(lines) for section, lines in sections.items() if lines)
+
+
+def host_git_mounts(root, git):
+    """The host's Git, read-only at HOST_GIT, without its remotes and credentials.
+
+    The agent fetches from it, which needs only the repository format of its
+    configuration (host-git-config). Submodules' Git under modules keeps its
+    own, so that the agent can fetch one the host adds while it runs.
+    """
+    generated = layout.config_dir(root) / '.generated'
+
+    def read_only(source, target):
+        return {'type': 'bind', 'source': str(source), 'target': target,
+                'read_only': True, 'bind': {'create_host_path': False}}
+    mounts = [read_only(git, HOST_GIT)]
+    # A mount needs its destination in the read-only tree: only what exists.
+    if (git / 'config').is_file():
+        mounts.append(read_only(generated / 'host-git-config', HOST_GIT + '/config'))
+    if (git / 'config.worktree').is_file():
+        mounts.append(read_only(generated / 'empty-secret', HOST_GIT + '/config.worktree'))
+    if (git / 'git-crypt').is_dir():
+        mounts.append({'type': 'tmpfs', 'target': HOST_GIT + '/git-crypt', 'read_only': True,
+                       'tmpfs': {'size': 4096, 'mode': 0o555}})
+    return mounts
+
+
 def host_project(root, environ=os.environ):
     """The host's Claude Code session history of root, named as Claude Code names it."""
     root = Path(root).resolve()
@@ -680,8 +732,7 @@ def workspace_compose(settings, root, environ=os.environ):
                    'target': '/workspace', 'bind': {'create_host_path': False}}]
         mounts += shared_mounts(settings, root)
     elif git := host_git_dir(root):
-        mounts.append({'type': 'bind', 'source': str(git), 'target': HOST_GIT,
-                       'read_only': True, 'bind': {'create_host_path': False}})
+        mounts += host_git_mounts(root, git)
     if settings['nix']['enabled']:
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})
@@ -799,9 +850,11 @@ def generate(root=ROOT, environ=os.environ):
     out = layout.config_dir(root) / '.generated'
     out.mkdir(parents=True, exist_ok=True)
     (out / '.gitignore').write_text('*\n')
+    write(out / 'empty-secret', '')
+    (out / 'empty-secret').chmod(0o444)
+    if settings['git']['isolation'] != 'unsafe_shared' and (git := host_git_dir(root)):
+        write(out / 'host-git-config', host_git_config(git))
     if settings['git']['isolation'] in SHARED_MODES:
-        write(out / 'empty-secret', '')
-        (out / 'empty-secret').chmod(0o444)
         write(out / 'hidden.txt', ''.join(p.as_posix() + '\n' for p in hidden_paths(settings, root)))
     header = '# Written by scripts/settings.py from global and workspace claude.toml and claude.local.toml; do not edit.\n'
     values = variables(settings)
