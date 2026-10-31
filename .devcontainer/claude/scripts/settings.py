@@ -566,12 +566,24 @@ def shared_mounts(settings, root):
             if not path.is_file():
                 raise ValueError(f'Expected a Git configuration file: {path}')
             mounts.append(read_only('.git/' + name, '/workspace/.git/' + name))
-        # Submodules' Git directories, with their own config and hooks that the
-        # host's Git runs in them: read-only, reserved when absent so that the
-        # agent cannot add one. Submodules are then read-only to the agent.
-        path = check_mount_path(root, Path('.git/modules'))
-        path.mkdir(exist_ok=True)
-        mounts.append(read_only('.git/modules', '/workspace/.git/modules'))
+        # Git takes config, hooks and info from the directory that commondir
+        # names: pin it to .git itself, reserved when absent so that the agent
+        # cannot point it at a directory of its own.
+        path = check_mount_path(root, Path('.git/commondir'))
+        if not path.exists():
+            with path.open('x') as file:
+                file.write('.\n')
+        if not path.is_file() or path.read_text().strip() != '.':
+            raise ValueError(f'Expected a Git commondir file naming .git itself: {path}')
+        mounts.append(read_only('.git/commondir', '/workspace/.git/commondir'))
+        # Submodules' and linked worktrees' Git directories, with their own
+        # config, commondir and hooks that the host's Git runs in them:
+        # read-only, reserved when absent so that the agent cannot add one.
+        # Submodules are then read-only to the agent.
+        for name in ('modules', 'worktrees'):
+            path = check_mount_path(root, Path('.git') / name)
+            path.mkdir(exist_ok=True)
+            mounts.append(read_only('.git/' + name, '/workspace/.git/' + name))
     else:
         mounts.append({'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git',
                        'volume': {'nocopy': True}})

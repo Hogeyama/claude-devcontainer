@@ -103,10 +103,12 @@ class GitIsolationTest(unittest.TestCase):
         self.assertEqual(generated['/workspace/.git']['source'], str(self.root / '.git'))
         self.assertEqual(generated['/workspace/.git/objects']['source'], str(self.root / '.git/objects'))
         self.assertNotIn('/run/host/git', generated)
-        for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'modules'):
+        for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'commondir', 'modules', 'worktrees'):
             self.assertTrue(generated['/workspace/.git/' + name]['read_only'])
         self.assertTrue(generated['/workspace/.devcontainer']['read_only'])
         self.assertEqual(before, {name: (self.root / '.git' / name).read_bytes() for name in before})
+        # The reserved commondir names .git itself, which leaves the host's Git as it was.
+        self.assertEqual((self.root / '.git/commondir').read_text(), '.\n')
         self.assertEqual(self.git('diff', '--cached', '--name-only').stdout.strip(), 'staged')
         self.generated_mounts()  # Idempotent, including reserved config.worktree.
 
@@ -128,7 +130,7 @@ class GitIsolationTest(unittest.TestCase):
         self.use_unsafe_shared()
         self.generated_mounts()
         protected = {self.root / '.devcontainer'}
-        protected.update(self.root / '.git' / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'modules'))
+        protected.update(self.root / '.git' / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'commondir', 'modules', 'worktrees'))
         def access(path, mode):
             return not (Path(path) in protected and mode & os.W_OK)
         def statvfs(path):

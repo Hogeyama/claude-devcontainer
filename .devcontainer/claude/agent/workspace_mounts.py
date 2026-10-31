@@ -101,7 +101,8 @@ def check_shared(workspace, isolation='shared', mountinfo=MOUNTINFO):
     host_git = workspace / '.git' if isolation == 'unsafe_shared' else HOST_GIT
     protected = [workspace / '.devcontainer']
     if isolation == 'unsafe_shared':
-        protected += [host_git / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree', 'modules')]
+        protected += [host_git / name for name in ('hooks', 'info', 'objects/info', 'config', 'config.worktree',
+                                                   'commondir', 'modules', 'worktrees')]
     else:
         protected.append(host_git)
     for path in protected:
