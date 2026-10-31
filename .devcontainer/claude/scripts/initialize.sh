@@ -27,8 +27,10 @@ python3 "$(dirname "$0")/pick-networks.py" \
     "$(setting CLAUDE_DEVCONTAINER_PROXY_NET)" "$(setting CLAUDE_DEVCONTAINER_DIND_NET)"
 python3 "$(dirname "$0")/settings.py" check-shared-mounts
 
-# Export the trusted host commit's dev shell to a read-only management mount.
-# The agent's independent refs and worktree cannot change this input. It is the
+# Export the host commit's dev shell to a read-only management mount. In clone
+# and shared, the agent's independent refs and worktree cannot change this
+# input. In unsafe_shared the agent writes the host's HEAD and refs, so the
+# flake is agent-written like the other shared files the host runs. It is the
 # script `nix develop` reads; the agent runs it, shellHook included, once it
 # starts (agent/nix-env.py).
 if [ "$(setting CLAUDE_DEVCONTAINER_NIX)" = 1 ]; then
