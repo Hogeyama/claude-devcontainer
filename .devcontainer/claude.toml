@@ -11,8 +11,10 @@ isolation = "clone"
 enabled = true
 # Images needed by this repository's offline Docker probes and the demo app
 # stack (demos/compose.yaml): postgres for the backend and the
-# Testcontainers tests, a JRE and nginx for the compose-built images.
-images = ["busybox:1.37", "testcontainers/ryuk:0.14.0", "postgres:16-alpine", "eclipse-temurin:17-jre-alpine", "nginx:1.27-alpine"]
+# Testcontainers tests, a JRE and nginx for the compose-built images; the
+# proxy's image for its unit tests (claude/proxy/README.md), by tag, since a
+# loaded image keeps no registry digest.
+images = ["busybox:1.37", "testcontainers/ryuk:0.14.0", "postgres:16-alpine", "eclipse-temurin:17-jre-alpine", "nginx:1.27-alpine", "mitmproxy/mitmproxy:11.1.3"]
 
 [nix]
 enabled = true
