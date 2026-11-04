@@ -239,10 +239,10 @@ env = ["NOTION_API_KEY"]
 
 ### ホストの設定を引き継ぐ
 
-`devcontainer up`のたびに、ホストの`~/.claude`から次のものをagentへコピーします。`.credentials.json`、セッション履歴、`plugins/`などはコピーしません。
+`devcontainer up`のたびに、ホストの`~/.claude`（`CLAUDE_CONFIG_DIR`を設定していればそのディレクトリ）から次のものをagentの`~/.claude`へコピーします。`.credentials.json`、セッション履歴、`plugins/`などはコピーしません。
 
 - `settings.json`、`CLAUDE.md`、`skills/`、`agents/`、`commands/`、`output-styles/`
-- `settings.json`の`statusLine`と`hooks`のコマンドが`~/.claude/…`（`$HOME/.claude/…`でも可）で参照するファイル
+- `settings.json`の`statusLine`と`hooks`のコマンドが`~/.claude/…`（`$HOME/.claude/…`でも可）で参照するファイル。`CLAUDE_CONFIG_DIR`を設定していれば、`$CLAUDE_CONFIG_DIR/…`やそのディレクトリのパス（`~`からでも絶対パスでも可）で参照するファイルもコピーし、コマンドのパスをagentの`~/.claude/…`に書き換えます
 
 `settings.json`はmanaged settings（`/etc/claude-code/managed-settings.d/50-host.json`）として置き、ほかのファイルはroot所有でコピーします。そのため、agentはホストで設定したhookを外したり、hookが実行するスクリプトを差し替えたりできません。
 

@@ -68,6 +68,36 @@ class ArchiveTest(unittest.TestCase):
         self.assertEqual({name for name in members if not name.startswith('.claude/skills')},
                          {'.claude/settings.json', '.claude/hook.sh'})
 
+    def test_copies_files_named_through_claude_config_dir(self):
+        # CLAUDE_CONFIG_DIR moves Claude Code's directory; the agent's stays ~/.claude.
+        home = self.root / 'home'
+        self.source = home / '.config/claude'
+        (self.source / 'skills').mkdir(parents=True)
+        (home / '.claude').mkdir()
+        for name in ('status.sh', 'a.sh', 'b.sh', 'c.sh', '.credentials.json'):
+            (self.source / name).write_text(name)
+        (home / '.claude/old.sh').write_text('old.sh')
+        self.settings({
+            'statusLine': {'type': 'command', 'command': 'bash "$CLAUDE_CONFIG_DIR/status.sh"'},
+            'hooks': {'Stop': [{'hooks': [
+                {'type': 'command', 'command': f'{self.source}/a.sh && ${{CLAUDE_CONFIG_DIR}}/b.sh'},
+                {'type': 'command', 'command': 'sh ~/.config/claude/c.sh; ~/.claude/old.sh; cat $HOME/.config/claude/.credentials.json'},
+                {'type': 'command', 'command': f'/other{self.source}/a.sh $CLAUDE_CONFIG_DIRX/a.sh'}]}]}})
+        environ = {'CLAUDE_CONFIG_DIR': str(self.source)}
+        with mock.patch.object(Path, 'home', return_value=home):
+            with tarfile.open(fileobj=io.BytesIO(copy_host_config.archive(self.source, self.dotfiles, environ))) as tar:
+                members = {member.name: tar.extractfile(member).read().decode()
+                           for member in tar.getmembers() if member.isfile()}
+        self.assertEqual(set(members), {'.claude/settings.json', '.claude/status.sh', '.claude/a.sh',
+                                        '.claude/b.sh', '.claude/c.sh', '.claude/old.sh'})
+        self.assertEqual(members['.claude/old.sh'], 'old.sh')
+        settings = json.loads(members['.claude/settings.json'])
+        self.assertEqual(settings['statusLine']['command'], 'bash "/home/node/.claude/status.sh"')
+        self.assertEqual([hook['command'] for hook in settings['hooks']['Stop'][0]['hooks']], [
+            '/home/node/.claude/a.sh && /home/node/.claude/b.sh',
+            'sh /home/node/.claude/c.sh; ~/.claude/old.sh; cat /home/node/.claude/.credentials.json',
+            f'/other{self.source}/a.sh $CLAUDE_CONFIG_DIRX/a.sh'])
+
     def test_drops_the_hosts_sumi_hooks_and_shell(self):
         sumi = {'type': 'command', 'command': '/home/me/.local/bin/sumi',
                 'args': ['hook', '--agent', 'claude', 'post-tool', '--secrets-file', '/home/me/.claude/sumi/secrets.txt']}
