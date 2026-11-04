@@ -111,13 +111,17 @@ inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 [proxy.hosts."mirror.my-company.com"]          # 平文HTTPのホスト
 routes = ["GET /debian/.+"]
 http = true
+
+[proxy.hosts."jenkins.my-company.com"]         # port 8080の平文HTTP
+routes = ["GET /job/.+"]
+http = 8080
 ```
 
 - `routes`には、通す要求を`GET /path`か、pathだけ（すべてのmethod）で書きます。pathはqueryを除いたURLのpath全体に一致させる正規表現です。`/.*`のように広く書くと、そのホストのどのAPIにも届きます。
-- ホスト名は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。ただし`http = true`を書いたホストは、port 80の平文HTTPでも同じ`routes`を通します（下記）。
+- ホスト名は小文字のDNS名だけです。ワイルドカード、IPアドレス、port番号は書けません。portは443、HTTPSに限ります。ただし`http`を書いたホストは、平文HTTPでも同じ`routes`を通します（下記）。
 - `headers`には、agentが送ってよいheaderを書きます。`Accept`や`Content-Type`などの一般的なものは書かなくても通ります。`Authorization`や`Cookie`などの認証は書けません。agentが付けた認証は常に除きます。
 - `inject`には、proxyが付けるheaderを書きます。agentが付けた同名のheaderは置き換えます。`${NAME}`は秘密の参照です。値を`{ basic = "user:password" }`にするとBasic認証になります（テンプレートのGitHubの設定を参照）。`{ … }`のインラインテーブルは1行に書く必要があります。headerが多い場合は、`[proxy.hosts."api.notion.com".inject]`のテーブルに分けて書けます。
-- `http = true`は、HTTPSに加えてport 80の平文HTTP（`http://ホスト名/...`）も通します。agentはHTTPSのときと同じく`HTTP_PROXY`でproxyを通ります。平文の要求と応答は経路上で読まれ、書き換えられえます。秘密が平文で流れないよう、`http = true`のホストには`inject`を書けません。
+- `http = true`は、HTTPSに加えてport 80の平文HTTP（`http://ホスト名/...`）も通します。ほかのportなら、`http = 8080`や`http = [80, 8080]`のようにport番号を書きます（`http://ホスト名:8080/...`）。書いたportだけを通し、80も通すなら80も並べてください。agentはHTTPSのときと同じく`HTTP_PROXY`でproxyを通ります。平文の要求と応答は経路上で読まれ、書き換えられえます。秘密が平文で流れないよう、`http`を書いたホストには`inject`を書けません。
 - `env`には、agentにダミー値`managed-by-proxy`で渡す環境変数の名前を書きます（下記）。
 - `api.anthropic.com`と`mcp-proxy.anthropic.com`は書けません。proxyがAnthropicの認証値を付ける接続先で、ルールは`addon.py`に固定しています。
 

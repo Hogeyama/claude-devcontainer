@@ -147,6 +147,8 @@ class SettingsTest(unittest.TestCase):
     def test_http_host(self):
         self.write('claude.toml', '[proxy.hosts."mirror.example.com"]\nroutes = ["GET /.+"]\nhttp = true\n')
         self.assertEqual(self.load()['proxy']['hosts'], {'mirror.example.com': {'routes': ['GET /.+'], 'http': True}})
+        self.write('claude.toml', '[proxy.hosts."mirror.example.com"]\nroutes = ["GET /.+"]\nhttp = [80, 8080]\n')
+        self.assertEqual(self.load()['proxy']['hosts'], {'mirror.example.com': {'routes': ['GET /.+'], 'http': [80, 8080]}})
 
     def test_errors_name_the_file_and_the_setting(self):
         cases = [

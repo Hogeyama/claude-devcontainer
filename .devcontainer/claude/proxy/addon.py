@@ -13,7 +13,7 @@ import workspace_config
 
 # The only requests let through, by host: (method, path regex). None allows
 # any method. Every host is reached on port 443 over HTTPS, and the ones in
-# HTTP_HOSTS also on port 80 over plain HTTP. Anthropic's are fixed here;
+# HTTP_HOSTS also over plain HTTP on their ports. Anthropic's are fixed here;
 # proxy.hosts in the workspace's claude.toml adds the others (GitHub, ...).
 ROUTES = {
     'api.anthropic.com': [
@@ -79,7 +79,7 @@ WORKSPACE = workspace_config.installed()
 ROUTES.update(WORKSPACE.routes)
 WORKSPACE_HEADERS = WORKSPACE.headers
 WORKSPACE_INJECT = WORKSPACE.inject
-# proxy.hosts' http = true. policy.py refuses inject for them.
+# proxy.hosts' http, {host: ports}. policy.py refuses inject for them.
 HTTP_HOSTS = WORKSPACE.http
 HOSTS = set(ROUTES)
 # Claude Code's startup connectivity check. It needs no credentials, so Claude
@@ -185,10 +185,10 @@ def host_routes(host):
 
 
 def upstream_allowed(host, scheme, port):
-    """Whether the proxy reaches host on port: HTTPS on 443, plain HTTP on 80 for HTTP_HOSTS."""
+    """Whether the proxy reaches host on port: HTTPS on 443, plain HTTP on HTTP_HOSTS' ports."""
     if host_routes(host) is None:
         return False
-    return (scheme == 'https' and port == 443) or (scheme == 'http' and port == 80 and host in HTTP_HOSTS)
+    return (scheme == 'https' and port == 443) or (scheme == 'http' and port in HTTP_HOSTS.get(host, ()))
 
 
 def url_path(req):

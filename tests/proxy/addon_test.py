@@ -378,6 +378,28 @@ class PolicyTest(unittest.TestCase):
                 self.addon.server_connect(data)
                 self.assertEqual(data.server.error is None, allowed, address)
 
+
+    def test_plain_http_on_the_ports_named(self):
+        mirror = policy.parse({'mirror.example.com': {'routes': ['GET /debian/.+'], 'http': [8080, 8081]}})
+        with patch.dict(addon.ROUTES, mirror.routes), patch('addon.HOSTS', {*addon.HOSTS, *mirror.routes}), \
+                patch('addon.HTTP_HOSTS', mirror.http):
+            for url in ['http://mirror.example.com:8080/debian/a.deb', 'http://mirror.example.com:8081/debian/a.deb',
+                        'https://mirror.example.com/debian/a.deb']:
+                with self.subTest(url=url):
+                    self.allowed(flow(url, 'GET', b''))
+            for url in ['http://mirror.example.com/debian/a.deb', 'http://mirror.example.com:8082/debian/a.deb',
+                        'https://mirror.example.com:8080/debian/a.deb', 'http://api.github.com:8080/user']:
+                with self.subTest(url=url):
+                    self.denied(flow(url, 'GET', b''))
+            f = flow()
+            f.request = http.Request.make('CONNECT', 'https://mirror.example.com:8080')
+            self.addon.http_connect(f)
+            self.assertIsNotNone(f.response, 'plain HTTP is proxied without CONNECT')
+            for address, allowed in [(('mirror.example.com', 8080), True), (('mirror.example.com', 443), True),
+                                     (('mirror.example.com', 80), False), (('api.github.com', 8080), False)]:
+                data = SimpleNamespace(server=connection.Server(address=address))
+                self.addon.server_connect(data)
+                self.assertEqual(data.server.error is None, allowed, address)
     def test_workspace_inject_and_headers_are_per_host(self):
         notion = policy.parse({
             'api.notion.com': {'routes': ['/v1/.+'], 'headers': ['Notion-Version'],

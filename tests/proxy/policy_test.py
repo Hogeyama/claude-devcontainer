@@ -57,13 +57,18 @@ class ParseTest(unittest.TestCase):
             'mirror.example.com': {'routes': ['GET /debian/.+'], 'headers': ['X-A'], 'http': True},
             'fonts.googleapis.com': {'routes': ['GET /css2?'], 'http': False},
         })
-        self.assertEqual(config.http, {'mirror.example.com'})
-        self.assertEqual(policy.parse({'fonts.googleapis.com': {'routes': ['/']}}).http, set())
-        for value in ['true', 1, None]:
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, r'\.http: expected true or false'):
+        self.assertEqual(config.http, {'mirror.example.com': {80}})
+        self.assertEqual(policy.parse({'fonts.googleapis.com': {'routes': ['/']}}).http, {})
+        for value, ports in [(8080, {8080}), ([80, 8080], {80, 8080}), ([8080, 8080], {8080}), (65535, {65535})]:
+            with self.subTest(value=value):
+                self.assertEqual(policy.parse(host('a.example.com', routes=['/'], http=value)).http,
+                                 {'a.example.com': ports})
+        for value in ['true', None, 0, 65536, -1, [], [True], ['8080'], 80.0, [[80]]]:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, r'\.http: expected true, false, or port'):
                 policy.parse(host('a.example.com', routes=['/'], http=value))
-        with self.assertRaisesRegex(ValueError, r'\.http: plain HTTP would send'):
-            policy.parse(host('a.example.com', routes=['/'], inject={'X-A': '${TOKEN}'}, http=True))
+        for value in [True, 8080]:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, r'\.http: plain HTTP would send'):
+                policy.parse(host('a.example.com', routes=['/'], inject={'X-A': '${TOKEN}'}, http=value))
 
     def test_secret_values_are_not_reinterpreted_as_templates_or_escapes(self):
         for value in ['${OTHER}', r'\1', r'\g<1>', '$\\']:
