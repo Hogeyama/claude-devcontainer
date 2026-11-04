@@ -4,10 +4,11 @@ Each host lists the requests to let through (routes), the request headers the
 agent may send with them (headers), and the headers the proxy adds (inject),
 whose values name secrets as ${NAME}. The secrets themselves stay on the host:
 inject-credentials.py sends the named ones, from the host's credentials file
-only, so the workspace decides where a secret goes but never sees it. http =
-true lets the routes through over plain HTTP on port 80 too, besides HTTPS on
-443; such a host takes no inject, so that no secret crosses the network in the
-clear.
+only, so the workspace decides where a secret goes but never sees it. http
+lets the routes through over plain HTTP too: true for port 80, or the port
+numbers, as 8080 or [80, 8080]; such a host takes no inject, so that no
+secret crosses the network in the clear. HTTPS is on port 443, or on the ports
+of https, as 8443 or [443, 8443].
 
 Only the standard library: the host's scripts/settings.py checks the same hosts
 with this file before the image build does.
@@ -29,7 +30,7 @@ UNPASSABLE_HEADERS = {'authorization', 'proxy-authorization', 'cookie', 'x-api-k
 # Headers that the proxy may not inject: they frame the request.
 UNINJECTABLE_HEADERS = UNPASSABLE_HEADERS - {'authorization', 'proxy-authorization', 'cookie', 'x-api-key'}
 SECRET = re.compile(r'\$\{([A-Z_][A-Z0-9_]*)\}')
-FIELDS = {'routes', 'headers', 'inject', 'http'}
+FIELDS = {'routes', 'headers', 'inject', 'http', 'https'}
 
 
 @dataclass
@@ -40,8 +41,10 @@ class Config:
     headers: dict = field(default_factory=dict)
     # {host: [(header name, template)]}; see parse_template.
     inject: dict = field(default_factory=dict)
-    # {hosts also reached over plain HTTP on port 80}
-    http: set = field(default_factory=set)
+    # {host also reached over plain HTTP: frozenset of its ports}
+    http: dict = field(default_factory=dict)
+    # {host reached over HTTPS on other ports than 443: frozenset of its ports}
+    https: dict = field(default_factory=dict)
 
     def secrets(self):
         """The names of the secrets that inject refers to."""
@@ -101,7 +104,7 @@ def parse(hosts, source='proxy.hosts'):
         if host in AUTHENTICATED_HOSTS:
             raise ValueError(f'{where}: authenticated by the proxy itself; its routes are fixed in addon.py')
         if not isinstance(settings, dict) or not set(settings) <= FIELDS:
-            raise ValueError(f'{where}: expected "routes", "headers", "inject" and "http"')
+            raise ValueError(f'{where}: expected "routes", "headers", "inject", "http" and "https"')
         routes, names, injected = settings.get('routes'), settings.get('headers', []), settings.get('inject', {})
         if not isinstance(routes, list) or not routes:
             raise ValueError(f'{where}.routes: must list the requests to let through')
@@ -119,11 +122,39 @@ def parse(hosts, source='proxy.hosts'):
             if not isinstance(name, str) or not HEADER_NAME.fullmatch(name) or name.lower() in UNINJECTABLE_HEADERS:
                 raise ValueError(f'{where}.inject: {name!r} cannot be injected')
             config.inject.setdefault(host, []).append((name, parse_template(value, f'{where}.inject.{name}')))
-        plain = settings.get('http', False)
-        if not isinstance(plain, bool):
-            raise ValueError(f'{where}.http: expected true or false')
-        if plain and injected:
+        ports = http_ports(settings.get('http', False), f'{where}.http')
+        if ports and injected:
             raise ValueError(f'{where}.http: plain HTTP would send inject\'s secrets in the clear')
-        if plain:
-            config.http.add(host)
+        if ports:
+            config.http[host] = ports
+        if 'https' in settings:
+            ports = https_ports(settings['https'], f'{where}.https')
+            if ports != {443}:
+                config.https[host] = ports
     return config
+
+
+def port_numbers(value):
+    """A port number or a non-empty list of them as a frozenset, or None."""
+    ports = value if isinstance(value, list) else [value]
+    if ports and all(isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 for port in ports):
+        return frozenset(ports)
+    return None
+
+
+def http_ports(value, where):
+    """The ports of http: true for 80, false for none, or a port number or a list of them."""
+    if isinstance(value, bool):
+        return frozenset({80}) if value else frozenset()
+    ports = port_numbers(value)
+    if ports is None:
+        raise ValueError(f'{where}: expected true, false, or port numbers as 8080 or [80, 8080]')
+    return ports
+
+
+def https_ports(value, where):
+    """The ports of https, which replace 443: a port number or a list of them."""
+    ports = port_numbers(value)
+    if ports is None:
+        raise ValueError(f'{where}: expected port numbers as 8443 or [443, 8443]')
+    return ports

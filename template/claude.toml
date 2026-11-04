@@ -124,8 +124,10 @@
 #     the ones named here are sent. { basic = "user:password" } makes Basic
 #     authentication.
 #   http: true lets routes through over plain HTTP on port 80 too, besides
-#     HTTPS on 443. Such a host cannot have inject: secrets would cross the
-#     network in the clear.
+#     HTTPS on 443; port numbers, as 8080 or [80, 8080], on those ports
+#     instead. Such a host cannot have inject: secrets would cross the network
+#     in the clear.
+#   https: the ports for HTTPS, as 8443 or [443, 8443], instead of 443.
 #   env: environment variables that the agent gets as the dummy
 #     "managed-by-proxy", so that tools send requests at all; the proxy
 #     replaces the credential.
