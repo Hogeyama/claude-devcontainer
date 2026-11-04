@@ -4,7 +4,8 @@
 The copy goes one way only: nothing in the agent's home reaches the host, where
 an agent-written hook or memory would run or be read outside the container.
 Copied are settings.json, the entries of ~/.claude in ENTRIES, and the files
-under ~/.claude that statusLine and hooks commands name. Everything in
+under ~/.claude that statusLine and hooks commands name. ~/.claude here is
+CLAUDE_CONFIG_DIR when that is set, as for Claude Code. Everything in
 DOTFILES is then mirrored onto the home directory (e.g. DOTFILES/.gitconfig
 becomes ~/.gitconfig). Symbolic links are followed on the host, so they may
 point anywhere the host can read (e.g. /nix/store).
@@ -60,32 +61,73 @@ WAIT_SECONDS = 600
 # Only the newest copy for a workspace goes on: an older one, left from an
 # earlier `up`, holds the host's configuration as it was then.
 WATCHER = LOG.parent / f'copy-config-{hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]}.pid'
-REFERENCE = re.compile(r'(?:~|\$HOME|\$\{HOME\})/\.claude/([^\s\'"`;|&<>()]+)')
+# Spellings that name the agent's ~/.claude as they are.
+HOME_CLAUDE = ('~/.claude', '$HOME/.claude', '${HOME}/.claude')
+# What a path under a spelling of the configuration directory may contain.
+REFERENCE = r'/([^\s\'"`;|&<>()]+)'
 # A command that runs sumi, as `sumi init` writes it on the host.
 SUMI = re.compile(r'(?:^|[/\s\'"])sumi(?:$|[\s\'"])')
 
 
-def referenced(settings):
-    """Return the paths under ~/.claude that statusLine and hooks commands name."""
-    commands = []
-    def collect(value):
+def spellings(source, environ=os.environ):
+    """Return how commands may name a configuration directory, each with the host directory it is.
+
+    ~/.claude is Claude Code's directory unless CLAUDE_CONFIG_DIR names another;
+    then that one is also written as $CLAUDE_CONFIG_DIR, its path, or its path
+    under ~.
+    """
+    home = Path.home()
+    default = home / '.claude' if environ.get('CLAUDE_CONFIG_DIR') else source
+    names = {spelling: default for spelling in HOME_CLAUDE}
+    if environ.get('CLAUDE_CONFIG_DIR'):
+        names['$CLAUDE_CONFIG_DIR'] = names['${CLAUDE_CONFIG_DIR}'] = source
+        for path in {environ['CLAUDE_CONFIG_DIR'].rstrip('/'), str(source)}:
+            if path:
+                names[path] = source
+        try:
+            relative = source.relative_to(home)
+        except ValueError:
+            relative = None
+        if relative is not None and relative.parts:
+            for prefix in ('~', '$HOME', '${HOME}'):
+                names[f'{prefix}/{relative}'] = source
+    return names
+
+
+def referenced(settings, source, environ=os.environ):
+    """Return the files that statusLine and hooks commands name in a configuration
+    directory, as (host path, path under ~/.claude), and point the commands
+    that name them otherwise than as ~/.claude at the agent's ~/.claude, where
+    they are copied."""
+    names = spellings(source, environ)
+    # Longest first, so that $CLAUDE_CONFIG_DIR does not stop at $C...; never
+    # in the middle of another path or variable.
+    pattern = re.compile(r'(?<![\w./~$-])(' + '|'.join(
+        re.escape(name) for name in sorted(names, key=len, reverse=True)) + ')' + REFERENCE)
+    paths = {}
+
+    def replace(match):
+        path = Path(match.group(2))
+        if '..' in path.parts or path.is_absolute():
+            return match.group(0)
+        paths[path] = names[match.group(1)] / path
+        if match.group(1) in HOME_CLAUDE:
+            return match.group(0)
+        return f'{TARGET}/.claude/{match.group(2)}'
+
+    def rewrite(value):
         if isinstance(value, dict):
             for key, item in value.items():
                 if key == 'command' and isinstance(item, str):
-                    commands.append(item)
-                collect(item)
+                    value[key] = pattern.sub(replace, item)
+                else:
+                    rewrite(item)
         elif isinstance(value, list):
             for item in value:
-                collect(item)
-    collect(settings.get('statusLine'))
-    collect(settings.get('hooks'))
-    paths = set()
-    for command in commands:
-        for match in REFERENCE.finditer(command):
-            path = Path(match.group(1))
-            if '..' not in path.parts and not path.is_absolute():
-                paths.add(path)
-    return sorted(paths)
+                rewrite(item)
+    rewrite(settings.get('statusLine'))
+    rewrite(settings.get('hooks'))
+    return sorted((host, name) for name, host in paths.items())
 
 
 def sumi_secrets():
@@ -148,15 +190,15 @@ def without_sumi(settings):
     return settings
 
 
-def archive(source=SOURCE, dotfiles=DOTFILES):
+def archive(source=SOURCE, dotfiles=DOTFILES, environ=os.environ):
     """Return a tar of the configuration to extract into the agent's home."""
-    names = [Path(name) for name in ENTRIES]
+    names = [(source / name, Path(name)) for name in ENTRIES]
     container = sumi_secrets()
     excluded = secrets_files({}, container)
     try:
         settings = json.loads((source / 'settings.json').read_text())
-        names += referenced(settings)
         excluded = secrets_files(settings, container)
+        names += referenced(settings, source, environ)
         settings = json.dumps(without_sumi(settings), indent=2).encode()
     except OSError:
         settings = None
@@ -169,8 +211,8 @@ def archive(source=SOURCE, dotfiles=DOTFILES):
             info = tarfile.TarInfo('.claude/settings.json')
             info.size, info.mode = len(settings), 0o600
             tar.addfile(info, io.BytesIO(settings))
-        for name in names:
-            add(tar, source / name, '.claude/' + str(name), excluded=excluded)
+        for path, name in names:
+            add(tar, path, '.claude/' + str(name), excluded=excluded)
         # Later members overwrite earlier ones on extraction.
         if dotfiles.is_dir():
             for path in sorted(dotfiles.iterdir()):
