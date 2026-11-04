@@ -400,6 +400,29 @@ class PolicyTest(unittest.TestCase):
                 data = SimpleNamespace(server=connection.Server(address=address))
                 self.addon.server_connect(data)
                 self.assertEqual(data.server.error is None, allowed, address)
+
+    def test_https_on_the_ports_named(self):
+        nexus = policy.parse({'nexus.example.com': {'routes': ['GET /repository/.+'], 'https': 8443, 'http': 8080}})
+        with patch.dict(addon.ROUTES, nexus.routes), patch('addon.HOSTS', {*addon.HOSTS, *nexus.routes}), \
+                patch('addon.HTTP_HOSTS', nexus.http), patch('addon.HTTPS_PORTS', nexus.https):
+            for url in ['https://nexus.example.com:8443/repository/a', 'http://nexus.example.com:8080/repository/a']:
+                with self.subTest(url=url):
+                    self.allowed(flow(url, 'GET', b''))
+            for url in ['https://nexus.example.com/repository/a', 'http://nexus.example.com:8443/repository/a',
+                        'https://nexus.example.com:8080/repository/a', 'https://api.github.com:8443/user']:
+                with self.subTest(url=url):
+                    self.denied(flow(url, 'GET', b''))
+            for target, allowed in [('https://nexus.example.com:8443', True), ('https://nexus.example.com:443', False),
+                                    ('https://api.github.com:8443', False), ('https://api.github.com:443', True)]:
+                f = flow()
+                f.request = http.Request.make('CONNECT', target)
+                self.addon.http_connect(f)
+                self.assertEqual(f.response is None, allowed, target)
+            for address, allowed in [(('nexus.example.com', 8443), True), (('nexus.example.com', 8080), True),
+                                     (('nexus.example.com', 443), False), (('api.github.com', 8443), False)]:
+                data = SimpleNamespace(server=connection.Server(address=address))
+                self.addon.server_connect(data)
+                self.assertEqual(data.server.error is None, allowed, address)
     def test_workspace_inject_and_headers_are_per_host(self):
         notion = policy.parse({
             'api.notion.com': {'routes': ['/v1/.+'], 'headers': ['Notion-Version'],

@@ -57,6 +57,8 @@ def install(source, target=DIR):
         print(f'workspace headers: {host} {" ".join(sorted(names))}')
     for host, ports in sorted(config.http.items()):
         print(f'workspace plain http: {host} {" ".join(map(str, sorted(ports)))}')
+    for host, ports in sorted(config.https.items()):
+        print(f'workspace https ports: {host} {" ".join(map(str, sorted(ports)))}')
     for host, entries in config.inject.items():
         print(f'workspace inject: {host} {" ".join(name for name, _ in entries)}')
     if config.secrets():

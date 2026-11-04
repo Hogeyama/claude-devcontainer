@@ -66,6 +66,16 @@ class ParseTest(unittest.TestCase):
         for value in ['true', None, 0, 65536, -1, [], [True], ['8080'], 80.0, [[80]]]:
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, r'\.http: expected true, false, or port'):
                 policy.parse(host('a.example.com', routes=['/'], http=value))
+        self.assertEqual(config.https, {})
+        for value, ports in [(8443, {'a.example.com': {8443}}), ([443, 8443], {'a.example.com': {443, 8443}}),
+                             (443, {}), ([443], {})]:
+            with self.subTest(https=value):
+                self.assertEqual(policy.parse(host('a.example.com', routes=['/'], https=value)).https, ports)
+        for value in [True, False, None, 0, 65536, [], ['8443']]:
+            with self.subTest(https=value), self.assertRaisesRegex(ValueError, r'\.https: expected port numbers'):
+                policy.parse(host('a.example.com', routes=['/'], https=value))
+        self.assertEqual(policy.parse(host('a.example.com', routes=['/'], inject={'X-A': '${T}'}, https=8443)).https,
+                         {'a.example.com': {8443}})
         for value in [True, 8080]:
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, r'\.http: plain HTTP would send'):
                 policy.parse(host('a.example.com', routes=['/'], inject={'X-A': '${TOKEN}'}, http=value))
