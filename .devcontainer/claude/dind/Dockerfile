@@ -12,10 +12,7 @@ RUN if [ "$ROOTLESS_UID" -le 0 ] || { [ "$ROOTLESS_UID" -ge 100000 ] && [ "$ROOT
     && sed -i "s/^rootless:x:1000:/rootless:x:$ROOTLESS_GID:/" /etc/group \
     && grep -q "^rootless:x:$ROOTLESS_UID:$ROOTLESS_GID:" /etc/passwd \
     && chown -R rootless:rootless /home/rootless \
-    # The agent's /workspace is mounted at /srv/workspace and shown at
-    # /workspace by mount-workspace.sh. In clone mode it is a volume, and DinD
-    # starts first: a new volume takes this directory's owner, the agent's.
-    && install -d -o rootless -g rootless /srv/workspace /workspace \
-    && apk add --no-cache bindfs
-COPY --chmod=755 mount-workspace.sh /usr/local/bin/
+    # The agent's /workspace is mounted here too. In clone mode it is a volume,
+    # and DinD starts first: a new volume takes this directory's owner, the agent's.
+    && install -d -o rootless -g rootless /workspace
 USER rootless
