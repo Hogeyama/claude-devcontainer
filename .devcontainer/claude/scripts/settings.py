@@ -100,6 +100,9 @@ ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]
 BASE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*')
 # DinD's data directory.
 DIND_DATA = '/home/rootless/.local/share/docker'
+# Where DinD gets the agent's /workspace; its entrypoint shows it at /workspace
+# through bindfs, for the UIDs of rootless containers (compose.yaml).
+DIND_WORKSPACE = '/srv/workspace'
 AGENT_HOME = '/home/node'
 # Where agent.mounts may not go: what this environment mounts or manages
 # itself, which a mount would hide or replace.
@@ -620,9 +623,8 @@ def dind_shared_mounts(mounts):
 
     The host's working tree with the agent's masks over it, so that its
     containers see what the agent sees and no more: the hidden paths and the
-    host's .git stay covered (rootless dockerd's user namespace locks the
-    masks). Read-only, as files that DinD's containers write would be owned by
-    its subordinate IDs, which the host's user cannot remove; nor are the pins
+    host's .git stay covered, inside the one bindfs mount that the containers
+    get. Read-only, as the working tree is the human's; nor are the pins
     against renames needed then.
     """
     dind = []
@@ -632,7 +634,8 @@ def dind_shared_mounts(mounts):
             continue  # /run/host/git, the sanitized host Git, stays the agent's.
         if mount['type'] == 'bind' and not mount.get('read_only') and target != Path('/workspace'):
             continue  # A pin, or unsafe_shared's writable .git: read-only below the root anyway.
-        dind.append(dict(mount, read_only=True))
+        relative = target.relative_to('/workspace')
+        dind.append(dict(mount, target=str(Path(DIND_WORKSPACE) / relative), read_only=True))
     return dind
 
 
@@ -749,7 +752,7 @@ def workspace_compose(settings, root, environ=os.environ):
     mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
     # The clone, the agent's own volume, at the same path, so that bind mounts
     # of its files (docker run -v /workspace/...) work.
-    dind = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
+    dind = [{'type': 'volume', 'source': 'workspace', 'target': DIND_WORKSPACE}]
     if settings['git']['isolation'] in SHARED_MODES:
         check_shared_repository(root, settings['git']['isolation'])
         mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),

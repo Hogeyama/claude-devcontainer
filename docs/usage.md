@@ -299,7 +299,10 @@ DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた�
 agentの`/workspace`はDinDの`/workspace`にも同じパスで見えるので、`docker run -v /workspace/...:/app`やTestcontainersのバインドマウントがそのまま使えます。
 
 - cloneでは、agent専用のcloneを読み書きできます。
-- sharedとunsafe_sharedでは、ホストの作業ツリーを読み取り専用で見せます。agentと同じく、`shared_hidden_paths`と`sumi.secrets`は空に、sharedの`.git`はagentの`.git`に見えます。読み取り専用なのは、DinDのコンテナが書いたファイルがDinDの内部のUID（100000〜）の所有になり、ホストのユーザーが消せなくなるためです。書き出しが要るときは、コンテナの中の別の場所かvolumeに書いてください。
+- sharedとunsafe_sharedでは、ホストの作業ツリーを読み取り専用で見せます。agentと同じく、`shared_hidden_paths`と`sumi.secrets`は空に、sharedの`.git`はagentの`.git`に見えます。書き出しが要るときは、コンテナの中の別の場所かvolumeに書いてください。
+- コンテナをどのユーザーで動かしても読み書きできます。DinDは`/workspace`をbindfs越しに見せていて、コンテナが作ったファイルは実際にはすべてagentのUIDの所有になり、agentから編集・削除できます。`chown`は無視されます。UID 1〜18000と`nobody`（65534）のユーザーには、すべてのファイルが自分の所有に見えるので、`chmod`や、PostgreSQLのような所有者の確認も通ります。それ以外のUIDでは、読み書きはできますが`chmod`は失敗します。
+  - rootless Dockerのため、bindfsを通さないと、root以外のコンテナのユーザーはDinDの内部のUID（100000〜）になり、agentのファイルに書けず、書いたファイルもagentから消せません。DinDのvolumeなど`/workspace`以外の場所では、これまでどおりです。
+  - FUSEを通るぶん、`/workspace`の読み書きは直接より遅くなります。
 - `agent.mounts`の`:cow`などで`/workspace`の下に重ねたディレクトリは、DinDからは重ねる前の中身に見えます。
 
 ```toml

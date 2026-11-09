@@ -239,7 +239,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_DIND_SHARED'], "'common'")
         compose = json.loads((out / 'workspace.compose.yaml').read_text())
         self.assertEqual(compose['services']['dind'], {'volumes': [
-            {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
+            {'type': 'volume', 'source': 'workspace', 'target': '/srv/workspace'},
             {'type': 'volume', 'source': 'dind-shared-common', 'target': '/home/rootless/.local/share/docker'}]})
         paths = settings.dind_paths('common', self.root, environ)
         self.assertEqual(paths['data'], state.resolve() / 'claude-devcontainer/dind-base/common/data')
@@ -253,7 +253,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.toml', '[docker]\nenabled = true\n')
         self.generate()
         self.assertEqual(json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind'],
-                         {'volumes': [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]})
+                         {'volumes': [{'type': 'volume', 'source': 'workspace', 'target': '/srv/workspace'}]})
 
     def test_dind_sees_the_shared_working_tree_read_only_and_masked_as_the_agent_does(self):
         mounts = [
@@ -266,11 +266,11 @@ class SettingsTest(unittest.TestCase):
             {'type': 'tmpfs', 'target': '/workspace/keys', 'read_only': True, 'tmpfs': {'size': 4096, 'mode': 0o555}},
         ]
         self.assertEqual(settings.dind_shared_mounts(mounts), [
-            {'type': 'bind', 'source': '/repo', 'target': '/workspace', 'bind': {'create_host_path': False}, 'read_only': True},
-            {'type': 'bind', 'source': '/repo/.devcontainer', 'target': '/workspace/.devcontainer', 'read_only': True},
-            {'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git', 'volume': {'nocopy': True}, 'read_only': True},
-            {'type': 'bind', 'source': '/empty-secret', 'target': '/workspace/conf/.env', 'read_only': True},
-            {'type': 'tmpfs', 'target': '/workspace/keys', 'read_only': True, 'tmpfs': {'size': 4096, 'mode': 0o555}},
+            {'type': 'bind', 'source': '/repo', 'target': '/srv/workspace', 'bind': {'create_host_path': False}, 'read_only': True},
+            {'type': 'bind', 'source': '/repo/.devcontainer', 'target': '/srv/workspace/.devcontainer', 'read_only': True},
+            {'type': 'volume', 'source': 'agent-git', 'target': '/srv/workspace/.git', 'volume': {'nocopy': True}, 'read_only': True},
+            {'type': 'bind', 'source': '/empty-secret', 'target': '/srv/workspace/conf/.env', 'read_only': True},
+            {'type': 'tmpfs', 'target': '/srv/workspace/keys', 'read_only': True, 'tmpfs': {'size': 4096, 'mode': 0o555}},
         ])
 
     def test_dind_gets_the_shared_masks(self):
@@ -285,12 +285,12 @@ class SettingsTest(unittest.TestCase):
                 dind = json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind']['volumes']
                 self.assertTrue(all(mount['read_only'] for mount in dind))
                 targets = [mount['target'] for mount in dind]
-                self.assertEqual(targets[0], '/workspace')
-                self.assertIn('/workspace/conf/.env', targets)
-                self.assertIn('/workspace/.devcontainer', targets)
-                self.assertNotIn('/workspace/conf', targets)
-                self.assertFalse([target for target in targets if not target.startswith('/workspace')])
-                self.assertEqual('/workspace/.git' in targets, mode == 'shared')
+                self.assertEqual(targets[0], '/srv/workspace')
+                self.assertIn('/srv/workspace/conf/.env', targets)
+                self.assertIn('/srv/workspace/.devcontainer', targets)
+                self.assertNotIn('/srv/workspace/conf', targets)
+                self.assertFalse([target for target in targets if not target.startswith('/srv/workspace')])
+                self.assertEqual('/srv/workspace/.git' in targets, mode == 'shared')
 
     def test_share_projects_mounts_the_host_history_of_this_repository(self):
         config = self.state()
