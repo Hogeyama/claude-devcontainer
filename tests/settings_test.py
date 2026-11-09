@@ -247,19 +247,50 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(compose['volumes']['dind-shared-common']['driver_opts']['o'],
                          f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}')
 
-    def test_dind_sees_the_clone_but_not_the_hosts_working_tree(self):
+    def test_dind_sees_the_clone(self):
         out = self.generate()
         self.assertNotIn('dind', json.loads((out / 'workspace.compose.yaml').read_text())['services'])
         self.write('claude.toml', '[docker]\nenabled = true\n')
         self.generate()
         self.assertEqual(json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind'],
                          {'volumes': [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]})
+
+    def test_dind_sees_the_shared_working_tree_read_only_and_masked_as_the_agent_does(self):
+        mounts = [
+            {'type': 'bind', 'source': '/repo', 'target': '/workspace', 'bind': {'create_host_path': False}},
+            {'type': 'bind', 'source': '/repo/.devcontainer', 'target': '/workspace/.devcontainer', 'read_only': True},
+            {'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git', 'volume': {'nocopy': True}},
+            {'type': 'bind', 'source': '/repo/.git', 'target': '/run/host/git', 'read_only': True},
+            {'type': 'bind', 'source': '/repo/conf', 'target': '/workspace/conf'},
+            {'type': 'bind', 'source': '/empty-secret', 'target': '/workspace/conf/.env', 'read_only': True},
+            {'type': 'tmpfs', 'target': '/workspace/keys', 'read_only': True, 'tmpfs': {'size': 4096, 'mode': 0o555}},
+        ]
+        self.assertEqual(settings.dind_shared_mounts(mounts), [
+            {'type': 'bind', 'source': '/repo', 'target': '/workspace', 'bind': {'create_host_path': False}, 'read_only': True},
+            {'type': 'bind', 'source': '/repo/.devcontainer', 'target': '/workspace/.devcontainer', 'read_only': True},
+            {'type': 'volume', 'source': 'agent-git', 'target': '/workspace/.git', 'volume': {'nocopy': True}, 'read_only': True},
+            {'type': 'bind', 'source': '/empty-secret', 'target': '/workspace/conf/.env', 'read_only': True},
+            {'type': 'tmpfs', 'target': '/workspace/keys', 'read_only': True, 'tmpfs': {'size': 4096, 'mode': 0o555}},
+        ])
+
+    def test_dind_gets_the_shared_masks(self):
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        (self.root / 'conf').mkdir()
+        (self.root / 'conf/.env').write_text('SECRET=1')
         for mode in ('shared', 'unsafe_shared'):
             with self.subTest(mode=mode):
-                self.write('claude.toml', f'[docker]\nenabled = true\n[git]\nisolation = "{mode}"\n')
-                self.generate()
-                self.assertNotIn('dind', json.loads((out / 'workspace.compose.yaml').read_text())['services'])
+                self.write('claude.toml', f'[docker]\nenabled = true\n[git]\nisolation = "{mode}"\n'
+                                          'shared_hidden_paths = ["conf/.env"]\n')
+                out = self.generate()
+                dind = json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind']['volumes']
+                self.assertTrue(all(mount['read_only'] for mount in dind))
+                targets = [mount['target'] for mount in dind]
+                self.assertEqual(targets[0], '/workspace')
+                self.assertIn('/workspace/conf/.env', targets)
+                self.assertIn('/workspace/.devcontainer', targets)
+                self.assertNotIn('/workspace/conf', targets)
+                self.assertFalse([target for target in targets if not target.startswith('/workspace')])
+                self.assertEqual('/workspace/.git' in targets, mode == 'shared')
 
     def test_share_projects_mounts_the_host_history_of_this_repository(self):
         config = self.state()

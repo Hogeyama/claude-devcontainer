@@ -296,7 +296,11 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは、同じ`[docker]`の`images`に`名前:tag`の形で並べてください。
 
-cloneモードでは、agentの`/workspace`（agent専用のclone）がDinDの`/workspace`にも同じパスで見えるので、`docker run -v /workspace/...:/app`やTestcontainersのバインドマウントがそのまま使えます。ただし`agent.mounts`の`:cow`などで`/workspace`の下に重ねたディレクトリは、DinDからは重ねる前の中身に見えます。sharedとunsafe_sharedでは`/workspace`がホストの作業ツリーなので、DinDには見せません。
+agentの`/workspace`はDinDの`/workspace`にも同じパスで見えるので、`docker run -v /workspace/...:/app`やTestcontainersのバインドマウントがそのまま使えます。
+
+- cloneでは、agent専用のcloneを読み書きできます。
+- sharedとunsafe_sharedでは、ホストの作業ツリーを読み取り専用で見せます。agentと同じく、`shared_hidden_paths`と`sumi.secrets`は空に、sharedの`.git`はagentの`.git`に見えます。読み取り専用なのは、DinDのコンテナが書いたファイルがDinDの内部のUID（100000〜）の所有になり、ホストのユーザーが消せなくなるためです。書き出しが要るときは、コンテナの中の別の場所かvolumeに書いてください。
+- `agent.mounts`の`:cow`などで`/workspace`の下に重ねたディレクトリは、DinDからは重ねる前の中身に見えます。
 
 ```toml
 [docker]

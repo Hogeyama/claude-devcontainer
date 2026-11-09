@@ -615,6 +615,27 @@ def shared_mounts(settings, root):
     return mounts
 
 
+def dind_shared_mounts(mounts):
+    """The agent's /workspace of the shared modes for DinD: all of it read-only.
+
+    The host's working tree with the agent's masks over it, so that its
+    containers see what the agent sees and no more: the hidden paths and the
+    host's .git stay covered (rootless dockerd's user namespace locks the
+    masks). Read-only, as files that DinD's containers write would be owned by
+    its subordinate IDs, which the host's user cannot remove; nor are the pins
+    against renames needed then.
+    """
+    dind = []
+    for mount in mounts:
+        target = Path(mount['target'])
+        if not target.is_relative_to('/workspace'):
+            continue  # /run/host/git, the sanitized host Git, stays the agent's.
+        if mount['type'] == 'bind' and not mount.get('read_only') and target != Path('/workspace'):
+            continue  # A pin, or unsafe_shared's writable .git: read-only below the root anyway.
+        dind.append(dict(mount, read_only=True))
+    return dind
+
+
 def hidden_paths(settings, root):
     """The existing files and directories to mask, relative to the root, parents first."""
     root = Path(root).resolve()
@@ -726,11 +747,15 @@ def host_project(root, environ=os.environ):
 
 def workspace_compose(settings, root, environ=os.environ):
     mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
+    # The clone, the agent's own volume, at the same path, so that bind mounts
+    # of its files (docker run -v /workspace/...) work.
+    dind = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
     if settings['git']['isolation'] in SHARED_MODES:
         check_shared_repository(root, settings['git']['isolation'])
         mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),
                    'target': '/workspace', 'bind': {'create_host_path': False}}]
         mounts += shared_mounts(settings, root)
+        dind = dind_shared_mounts(mounts)
     elif git := host_git_dir(root):
         mounts += host_git_mounts(root, git)
     if settings['nix']['enabled']:
@@ -767,13 +792,8 @@ def workspace_compose(settings, root, environ=os.environ):
         mounts.append({'type': 'bind', 'source': str(project), 'target': AGENT_PROJECT,
                        'bind': {'create_host_path': False}})
     compose = {'services': {'agent': {'volumes': mounts}}}
-    dind = []
-    if settings['docker']['enabled'] and settings['git']['isolation'] not in SHARED_MODES:
-        # The clone, the agent's own volume, at the same path, so that bind
-        # mounts of its files (docker run -v /workspace/...) work. Never the
-        # host's working tree of the shared modes: DinD is privileged, and its
-        # containers would see the files that the agent's masks hide.
-        dind.append({'type': 'volume', 'source': 'workspace', 'target': '/workspace'})
+    if not settings['docker']['enabled']:
+        dind = []
     if name := shared_base(settings):
         # Copy-on-write over the shared base, like the Node overlay; DinD
         # stores its data with fuse-overlayfs then, since the kernel's overlay

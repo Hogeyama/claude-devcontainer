@@ -74,7 +74,7 @@ Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docke
 - The only images are those the human listed in `images` under `[docker]` in `.devcontainer/claude.toml`; `docker images` shows them. If one is missing, give the human its exact `name:tag`.
 - Build with `docker build --network=none`, from images already loaded and dependency files already on disk. Run Gradle with `--offline`.
 - Publish ports on `0.0.0.0` (`-p 8080` or `-p 18080:8080`) and connect to `127.0.0.1:<published port>`. Ports published on loopback only (`-p 127.0.0.1:8080:8080`) and port 2375 are not relayed.
-- In clone mode DinD sees `/workspace` at the same path, so bind mounts of its files work (`-v /workspace/app:/app`); directories that `agent.mounts` lays over it (`:cow`) show DinD what is beneath them. In shared and unsafe_shared modes DinD has no `/workspace`: copy files in with `docker cp` or build them into an image.
+- DinD sees `/workspace` at the same path, so bind mounts of its files work (`-v /workspace/app:/app`). In shared and unsafe_shared modes it is read-only there, with the same hidden paths: have containers write elsewhere, such as a volume. Directories that `agent.mounts` lays over `/workspace` (`:cow`) show DinD what is beneath them.
 - `DOCKER_HOST` and the Testcontainers variables are already set. Testcontainers also needs the Ryuk image (e.g. `testcontainers/ryuk:0.14.0`) in that list.
 
 ## Adding tools and dependencies
