@@ -296,6 +296,8 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは、同じ`[docker]`の`images`に`名前:tag`の形で並べてください。
 
+cloneモードでは、agentの`/workspace`（agent専用のclone）がDinDの`/workspace`にも同じパスで見えるので、`docker run -v /workspace/...:/app`やTestcontainersのバインドマウントがそのまま使えます。ただし`agent.mounts`の`:cow`などで`/workspace`の下に重ねたディレクトリは、DinDからは重ねる前の中身に見えます。sharedとunsafe_sharedでは`/workspace`がホストの作業ツリーなので、DinDには見せません。
+
 ```toml
 [docker]
 enabled = true

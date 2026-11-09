@@ -11,5 +11,8 @@ RUN if [ "$ROOTLESS_UID" -le 0 ] || { [ "$ROOTLESS_UID" -ge 100000 ] && [ "$ROOT
     && sed -i "s/^rootless:x:1000:1000:/rootless:x:$ROOTLESS_UID:$ROOTLESS_GID:/" /etc/passwd \
     && sed -i "s/^rootless:x:1000:/rootless:x:$ROOTLESS_GID:/" /etc/group \
     && grep -q "^rootless:x:$ROOTLESS_UID:$ROOTLESS_GID:" /etc/passwd \
-    && chown -R rootless:rootless /home/rootless
+    && chown -R rootless:rootless /home/rootless \
+    # In clone mode the agent's workspace volume is mounted here too, and DinD
+    # starts first: a new volume takes this directory's owner, the agent's.
+    && install -d -o rootless -g rootless /workspace
 USER rootless

@@ -767,6 +767,13 @@ def workspace_compose(settings, root, environ=os.environ):
         mounts.append({'type': 'bind', 'source': str(project), 'target': AGENT_PROJECT,
                        'bind': {'create_host_path': False}})
     compose = {'services': {'agent': {'volumes': mounts}}}
+    dind = []
+    if settings['docker']['enabled'] and settings['git']['isolation'] not in SHARED_MODES:
+        # The clone, the agent's own volume, at the same path, so that bind
+        # mounts of its files (docker run -v /workspace/...) work. Never the
+        # host's working tree of the shared modes: DinD is privileged, and its
+        # containers would see the files that the agent's masks hide.
+        dind.append({'type': 'volume', 'source': 'workspace', 'target': '/workspace'})
     if name := shared_base(settings):
         # Copy-on-write over the shared base, like the Node overlay; DinD
         # stores its data with fuse-overlayfs then, since the kernel's overlay
@@ -774,10 +781,12 @@ def workspace_compose(settings, root, environ=os.environ):
         # own name, as the options of one are fixed when Docker creates it.
         paths = dind_paths(name, root, environ)
         volume = 'dind-shared-' + name
-        compose['services']['dind'] = {'volumes': [{'type': 'volume', 'source': volume, 'target': DIND_DATA}]}
+        dind.append({'type': 'volume', 'source': volume, 'target': DIND_DATA})
         volumes[volume] = {'driver_opts': {
             'type': 'overlay', 'device': 'overlay',
             'o': f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}'}}
+    if dind:
+        compose['services']['dind'] = {'volumes': dind}
     if volumes:
         compose['volumes'] = volumes
     # JSON is YAML; escape Compose interpolation separately from serialization.

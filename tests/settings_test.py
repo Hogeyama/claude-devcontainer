@@ -239,12 +239,27 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_DIND_SHARED'], "'common'")
         compose = json.loads((out / 'workspace.compose.yaml').read_text())
         self.assertEqual(compose['services']['dind'], {'volumes': [
+            {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
             {'type': 'volume', 'source': 'dind-shared-common', 'target': '/home/rootless/.local/share/docker'}]})
         paths = settings.dind_paths('common', self.root, environ)
         self.assertEqual(paths['data'], state.resolve() / 'claude-devcontainer/dind-base/common/data')
         self.assertTrue(paths['upper'].is_relative_to(state.resolve() / 'claude-devcontainer/dind'))
         self.assertEqual(compose['volumes']['dind-shared-common']['driver_opts']['o'],
                          f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}')
+
+    def test_dind_sees_the_clone_but_not_the_hosts_working_tree(self):
+        out = self.generate()
+        self.assertNotIn('dind', json.loads((out / 'workspace.compose.yaml').read_text())['services'])
+        self.write('claude.toml', '[docker]\nenabled = true\n')
+        self.generate()
+        self.assertEqual(json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind'],
+                         {'volumes': [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]})
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        for mode in ('shared', 'unsafe_shared'):
+            with self.subTest(mode=mode):
+                self.write('claude.toml', f'[docker]\nenabled = true\n[git]\nisolation = "{mode}"\n')
+                self.generate()
+                self.assertNotIn('dind', json.loads((out / 'workspace.compose.yaml').read_text())['services'])
 
     def test_share_projects_mounts_the_host_history_of_this_repository(self):
         config = self.state()
