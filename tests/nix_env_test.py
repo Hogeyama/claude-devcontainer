@@ -99,9 +99,44 @@ class EnvRcTest(unittest.TestCase):
         self.assertEqual(run(nix_env.env_rc(BASE, dev_env), before='PATH="/agent/bin:$PATH"', after='echo "$PATH"'),
                          f'/nix/store/a/bin:/agent/bin:{BASE["PATH"]}\n')
 
+    def test_reading_it_again_prepends_nothing_more(self):
+        # Claude Code's shell snapshot puts back its PATH, then CLAUDE_ENV_FILE reads env.rc again.
+        dev_env = dict(BASE, PATH=f"/nix/store/a b/bin:/nix/store/c/bin:{BASE['PATH']}",
+                       XDG_DATA_DIRS='/nix/store/d/share:/usr/share')
+        rc = nix_env.env_rc(dict(BASE, XDG_DATA_DIRS='/usr/share'), dev_env)
+        expected = f"/extra:/nix/store/a b/bin:/nix/store/c/bin:{BASE['PATH']}|/nix/store/d/share:/usr/share\n"
+        self.assertEqual(run(rc, before='XDG_DATA_DIRS=/usr/share', after=(
+            'PATH="/extra:$PATH"\n' + rc + 'echo "$PATH|$XDG_DATA_DIRS"')), expected)
+        snapshot = f'XDG_DATA_DIRS=/usr/share\n{rc}PATH="/extra:$PATH"\nPATH={BASE["PATH"]}\n'
+        self.assertEqual(run(rc + 'PATH="/extra:$PATH"\n', before=snapshot, after='echo "$PATH"'),
+                         f"/extra:/nix/store/a b/bin:/nix/store/c/bin:{BASE['PATH']}\n")
+
     def test_quotes_values(self):
         dev_env = dict(BASE, FOO="it's $HOME `x`")
         self.assertEqual(run(nix_env.env_rc(BASE, dev_env), after='printf %s "$FOO"'), "it's $HOME `x`")
+
+
+class ClaudeEnvFileTest(unittest.TestCase):
+    """Claude Code's Bash tool: BASH_ENV, then its shell snapshot, then CLAUDE_ENV_FILE."""
+
+    def test_the_dev_shell_and_extra_path_survive_the_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = ROOT / '.devcontainer/claude/agent'
+            # The same scripts, reading the files under root instead of /run and /etc.
+            for name in ('bash-env.sh', 'claude-env.sh'):
+                text = (agent / name).read_text().replace('/run/claude-devcontainer/', f'{root}/')
+                (root / name).write_text(text.replace('/run/host/generated/', f'{root}/').replace('/etc/', f'{root}/'))
+            (root / 'nix-env.rc').write_text(nix_env.env_rc(BASE, dict(BASE, PATH=f"/nix/store/a/bin:{BASE['PATH']}",
+                                                                         FROM_NIX='1')))
+            (root / 'shell-path.sh').write_text("case :${PATH-}: in *:/extra:*) ;; *) export PATH=/extra\"${PATH:+:$PATH}\" ;; esac\n")
+            snapshot = root / 'snapshot.sh'
+            snapshot.write_text(f"export PATH={BASE['PATH']}\n")
+            command = f'source {snapshot} && {(root / "claude-env.sh").read_text()}\n: && eval \'echo "$PATH|$FROM_NIX"\''
+            output = subprocess.run(['bash', '-c', command], stdout=subprocess.PIPE, text=True, check=True,
+                                    env={'PATH': BASE['PATH'], 'BASH_ENV': str(root / 'bash-env.sh'),
+                                         'CLAUDE_DEVCONTAINER_NIX': '1'}).stdout
+        self.assertEqual(output, f"/extra:/nix/store/a/bin:{BASE['PATH']}|1\n")
 
 
 class MainTest(unittest.TestCase):

@@ -888,7 +888,10 @@ def shell_path(paths, source='agent.extra_path'):
             resolved.append(directory)
     if not resolved:
         return ''
-    return 'export PATH=' + shlex.quote(':'.join(resolved)) + '"${PATH:+:$PATH}"\n'
+    # Unless PATH holds them already: the agent's Bash may read this twice
+    # (agent/claude-env.sh).
+    prefix = shlex.quote(':'.join(resolved))
+    return f'case :${{PATH-}}: in *:{prefix}:*) ;; *) export PATH={prefix}"${{PATH:+:$PATH}}" ;; esac\n'
 
 
 def main():
