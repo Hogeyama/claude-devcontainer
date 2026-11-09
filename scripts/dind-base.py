@@ -67,14 +67,17 @@ def main():
     if not references:
         sys.exit('error: no images: name them, or list them in docker.images.')
     load_images.pull(references)
-    uid, gid = loaded['agent']['uid'], loaded['agent']['gid']
-    data = settings.dind_paths(name, ROOT)['data']
-    command = (f"exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd "
-               f"--host=unix:///run/user/{uid}/docker.sock {DOCKERD_ARGS}' rootless")
+    # As the workspace's DinD runs it (compose.yaml), on data of its ID mapping.
+    ids = settings.dind_ids(loaded)
+    uid, gid, agent_gid = ids['DIND_UID'], ids['DIND_GID'], loaded['agent']['gid']
+    data = settings.dind_paths(settings.dind_store(loaded), ROOT)['data']
+    command = (f"chown {uid}:{gid} {settings.DIND_DATA}; "
+               f"exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd "
+               f"--host=unix:///run/user/{uid}/docker.sock {ids['DIND_ARGS']} {DOCKERD_ARGS}' rootless")
     # No network: it only loads what the host sends.
     container = docker('run', '-d', '--rm', '--init', '--privileged', '--network', 'none', '--user', '0:0',
                        '-e', 'DOCKER_TLS_CERTDIR=', '-e', 'TINI_SUBREAPER=1',
-                       '--tmpfs', f'/run/user/{uid}:uid={uid},gid={gid},mode=0700',
+                       '--tmpfs', f'/run/user/{uid}:uid={uid},gid={agent_gid},mode=0750',
                        '--mount', f'type=bind,source={data},target={settings.DIND_DATA}',
                        '--entrypoint', 'sh', image, '-euc', command).stdout.strip()
     try:

@@ -43,6 +43,7 @@ if sys.version_info < (3, 11):
 
 import copy
 import hashlib
+import itertools
 import importlib.util
 import json
 import os
@@ -64,7 +65,7 @@ DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True},
     'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []},
     'acp': {'enabled': False, 'version': '0.90.0'},
-    'docker': {'enabled': False, 'images': [], 'shared_base': ''},
+    'docker': {'enabled': False, 'images': [], 'shared_base': '', 'map_agent_ids': True},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
     'codeServer': {'enabled': False, 'extensions': []},
@@ -81,7 +82,8 @@ HOST_GIT = '/run/host/git'
 # elsewhere; compose sets others, such as _PROXY_ADDRESS, in the containers.
 PREFIX = 'CLAUDE_DEVCONTAINER_'
 VARIABLES = tuple(PREFIX + name for name in (
-    'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'DIND_SHARED', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
+    'GIT_ISOLATION', 'UID', 'GID', 'PROXY_NET', 'DIND_NET', 'DIND', 'DIND_SHARED', 'DIND_UID', 'DIND_GID',
+    'DIND_MAP', 'DIND_ARGS', 'NIX', 'NIX_REF', 'NIX_SHELL', 'SUMI', 'SUMI_DIR', 'SUMI_FILE',
     'CODE_SERVER', 'CODE_SERVER_EXTENSIONS', 'ACP', 'ACP_VERSION', 'PROXY_CA', 'CONNECTORS', 'WEB_SEARCH'))
 DUMMY = 'managed-by-proxy'
 DOTENV_KEY = re.compile(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:[=:]|$)')
@@ -112,6 +114,11 @@ AGENT_PROJECT = '/home/node/.claude/projects/-workspace'
 SUBNET = re.compile(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})')
 # rootlesskit in DinD maps these subordinate IDs besides the agent's UID.
 SUBORDINATE_IDS = range(100000, 165536)
+# The IDs that DinD's containers have besides root, which SUBORDINATE_IDS back.
+MAPPED_IDS = len(SUBORDINATE_IDS) - 1
+# docker.map_agent_ids: DinD's dockerd runs as this UID, or the next one that
+# is neither agent.uid nor agent.gid, with a group of the same number.
+DIND_ID = 2000
 
 
 def _policy():
@@ -348,6 +355,10 @@ def load(root=ROOT):
     if settings['docker']['enabled'] and settings['agent']['uid'] in SUBORDINATE_IDS:
         raise ValueError(f'agent.uid: {settings["agent"]["uid"]} is used by DinD; with docker.enabled it must be '
                          f'outside {SUBORDINATE_IDS.start}-{SUBORDINATE_IDS.stop - 1}')
+    if (settings['docker']['enabled'] and settings['docker']['map_agent_ids']
+            and max(settings['agent']['uid'], settings['agent']['gid']) > MAPPED_IDS):
+        raise ValueError(f'docker.map_agent_ids: agent.uid and agent.gid must be at most {MAPPED_IDS}, '
+                         'the IDs of DinD\'s containers; or set docker.map_agent_ids = false')
     both = sorted(set(settings['agent']['env']) & set(dummies(settings)))
     if both:
         raise ValueError(f'agent.env: {", ".join(both)} is also the env of a host in proxy.hosts, '
@@ -389,6 +400,7 @@ def variables(settings):
         PREFIX + 'GID': str(settings['agent']['gid']),
         PREFIX + 'DIND': '1' if settings['docker']['enabled'] else '0',
         PREFIX + 'DIND_SHARED': shared_base(settings),
+        **{PREFIX + key: value for key, value in dind_ids(settings).items()},
         PREFIX + 'NIX': '1' if settings['nix']['enabled'] else '0',
         PREFIX + 'NIX_REF': settings['nix']['ref'],
         PREFIX + 'NIX_SHELL': settings['nix']['shell'],
@@ -444,6 +456,32 @@ def write(path, text):
     temporary.replace(path)
 
 
+def dind_ids(settings):
+    """The user of DinD's rootless dockerd, as settings.env variables.
+
+    Rootless dockerd maps its containers' root to its own UID and their other
+    IDs to SUBORDINATE_IDS. With docker.map_agent_ids, it runs as a UID of its
+    own (DIND_ID) and maps the containers' agent.uid and agent.gid to the
+    agent's (dind/Dockerfile), so that files a container writes as that user,
+    as in images whose user is 1000, are the agent's. Its socket then belongs
+    to agent.gid, which the containers' IDs name as they are (--group). The
+    data, laid out for either mapping, has a volume of its own for each.
+    """
+    uid, gid = settings['agent']['uid'], settings['agent']['gid']
+    if not settings['docker']['map_agent_ids']:
+        return {'DIND_UID': str(uid), 'DIND_GID': str(gid), 'DIND_MAP': '0', 'DIND_ARGS': ''}
+    own = next(value for value in itertools.count(DIND_ID) if value not in (uid, gid))
+    return {'DIND_UID': str(own), 'DIND_GID': str(own), 'DIND_MAP': '1', 'DIND_ARGS': f'--group={gid}'}
+
+
+def dind_store(settings):
+    """The name of docker.shared_base's directories and volume: one for each ID mapping."""
+    name = shared_base(settings)
+    if name and settings['docker']['map_agent_ids']:
+        return f'{name}.map-{settings["agent"]["uid"]}-{settings["agent"]["gid"]}'
+    return name
+
+
 def shared_base(settings):
     """docker.shared_base, or '' without DinD, so that the global claude.toml can name it."""
     return settings['docker']['shared_base'] if settings['docker']['enabled'] else ''
@@ -453,7 +491,7 @@ def dind_paths(name, root=ROOT, environ=os.environ):
     """The shared base of DinD's data and this workspace's overlay over it.
 
     base/data is the lower: the data of a dockerd that dind-base.py runs, and
-    base/uid the agent.uid that owns it. upper and work are this workspace's.
+    base/uid the UID of that dockerd (dind_ids), which owns it. upper and work are this workspace's.
     """
     root = Path(root).resolve()
     state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state').resolve() / 'claude-devcontainer'
@@ -469,11 +507,11 @@ def dind_paths(name, root=ROOT, environ=os.environ):
 
 def prepare_dind(settings, root=ROOT, environ=os.environ):
     """Create the shared base and this workspace's overlay directories; check the base's UID."""
-    name = shared_base(settings)
+    name = dind_store(settings)
     if not name:
         return
     paths = dind_paths(name, root, environ)
-    uid = str(settings['agent']['uid'])
+    uid = dind_ids(settings)['DIND_UID']
     if paths['uid'].is_file() and paths['uid'].read_text().strip() != uid:
         raise ValueError(f'docker.shared_base: {name} belongs to agent.uid = {paths["uid"].read_text().strip()}, '
                          f'not {uid}; DinD could not read its files. Use another base.')
@@ -615,6 +653,27 @@ def shared_mounts(settings, root):
     return mounts
 
 
+def dind_shared_mounts(mounts):
+    """The agent's /workspace of the shared modes for DinD: all of it read-only.
+
+    The host's working tree with the agent's masks over it, so that its
+    containers see what the agent sees and no more: the hidden paths and the
+    host's .git stay covered (rootless dockerd's user namespace locks the
+    masks). Read-only, as files that DinD's containers write would be owned by
+    its subordinate IDs, which the host's user cannot remove; nor are the pins
+    against renames needed then.
+    """
+    dind = []
+    for mount in mounts:
+        target = Path(mount['target'])
+        if not target.is_relative_to('/workspace'):
+            continue  # /run/host/git, the sanitized host Git, stays the agent's.
+        if mount['type'] == 'bind' and not mount.get('read_only') and target != Path('/workspace'):
+            continue  # A pin, or unsafe_shared's writable .git: read-only below the root anyway.
+        dind.append(dict(mount, read_only=True))
+    return dind
+
+
 def hidden_paths(settings, root):
     """The existing files and directories to mask, relative to the root, parents first."""
     root = Path(root).resolve()
@@ -726,11 +785,15 @@ def host_project(root, environ=os.environ):
 
 def workspace_compose(settings, root, environ=os.environ):
     mounts = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
+    # The clone, the agent's own volume, at the same path, so that bind mounts
+    # of its files (docker run -v /workspace/...) work.
+    dind = [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]
     if settings['git']['isolation'] in SHARED_MODES:
         check_shared_repository(root, settings['git']['isolation'])
         mounts = [{'type': 'bind', 'source': str(Path(root).resolve()),
                    'target': '/workspace', 'bind': {'create_host_path': False}}]
         mounts += shared_mounts(settings, root)
+        dind = dind_shared_mounts(mounts)
     elif git := host_git_dir(root):
         mounts += host_git_mounts(root, git)
     if settings['nix']['enabled']:
@@ -767,14 +830,9 @@ def workspace_compose(settings, root, environ=os.environ):
         mounts.append({'type': 'bind', 'source': str(project), 'target': AGENT_PROJECT,
                        'bind': {'create_host_path': False}})
     compose = {'services': {'agent': {'volumes': mounts}}}
-    dind = []
-    if settings['docker']['enabled'] and settings['git']['isolation'] not in SHARED_MODES:
-        # The clone, the agent's own volume, at the same path, so that bind
-        # mounts of its files (docker run -v /workspace/...) work. Never the
-        # host's working tree of the shared modes: DinD is privileged, and its
-        # containers would see the files that the agent's masks hide.
-        dind.append({'type': 'volume', 'source': 'workspace', 'target': '/workspace'})
-    if name := shared_base(settings):
+    if not settings['docker']['enabled']:
+        dind = []
+    if name := dind_store(settings):
         # Copy-on-write over the shared base, like the Node overlay; DinD
         # stores its data with fuse-overlayfs then, since the kernel's overlay
         # cannot keep its upper directories on this overlay. A volume of its
@@ -785,6 +843,10 @@ def workspace_compose(settings, root, environ=os.environ):
         volumes[volume] = {'driver_opts': {
             'type': 'overlay', 'device': 'overlay',
             'o': f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}'}}
+    elif settings['docker']['enabled'] and settings['docker']['map_agent_ids']:
+        # Data laid out for the mapping of dind_ids, apart from dind-data's.
+        dind.append({'type': 'volume', 'source': 'dind-data-mapped', 'target': DIND_DATA})
+        volumes['dind-data-mapped'] = {}
     if dind:
         compose['services']['dind'] = {'volumes': dind}
     if volumes:

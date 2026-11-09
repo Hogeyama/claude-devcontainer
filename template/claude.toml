@@ -82,6 +82,12 @@
 # with every DinD over it stopped; they need the same agent.uid. Empty: none.
 # Ignored while enabled is false, so the global claude.toml can set it.
 # shared_base = ""
+# Make agent.uid and agent.gid in DinD's containers the agent's, so that
+# files that a container writes as that user (1000, as node in the node
+# images) are the agent's. dockerd then runs as a UID of its own (2000), which
+# a container's root is. false: dockerd runs as agent.uid, which a container's
+# root is, and every other user is one of DinD's subordinate IDs.
+# map_agent_ids = true
 
 [nix]
 # Mount the host's /nix/store and load the flake's dev shell, evaluated at a
