@@ -105,7 +105,7 @@ devcontainer exec claude
 ```
 
 Dev Containersがimageのビルドとコンテナ（本体とプロキシ他）の起動を行います。
-起動時に3.で設定した認証情報がプロキシに読み込まれます。既定のcloneモードでは、空のworkspace volumeにホストのHEADと同じコミットを自動取得し、ホストと同じブランチ名でcheckoutします（ホストがdetached HEADなら同じくdetached HEAD）。必要ならコンテナ内で`git switch -c agent/task-name`して作業ブランチを作れます。再起動・再作成では既存cloneをfetch/resetせず、ブランチと未コミットの変更を保持します。
+起動時に3.で設定した認証情報がプロキシに読み込まれます。既定のcloneモードでは、空のworkspace volumeにホストのHEADと同じコミットを自動取得し、ホストと同じブランチ名でcheckoutします（ホストがdetached HEADなら同じくdetached HEAD）。必要ならコンテナ内で`git switch -c task-name`して作業ブランチを作れます。ホストからは`agent` remoteのブランチ（`agent/task-name`）として見えるので、名前に`agent/`は付けません。再起動・再作成では既存cloneをfetch/resetせず、ブランチと未コミットの変更を保持します。
 
 > [!NOTE]
 > Claudeが接続できない場合は、[接続できない場合](docs/troubleshooting.md)を確認してください。
