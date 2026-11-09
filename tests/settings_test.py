@@ -106,7 +106,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['git'], {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True})
         self.assertEqual(loaded['agent'], {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []})
         self.assertEqual(loaded['acp'], {'enabled': False, 'version': '0.90.0'})
-        self.assertEqual(loaded['docker'], {'enabled': False, 'images': [], 'shared_base': ''})
+        self.assertEqual(loaded['docker'], {'enabled': False, 'images': [], 'shared_base': '', 'map_agent_ids': True})
         self.assertEqual(loaded['nix'], {'enabled': False, 'ref': 'HEAD', 'shell': ''})
         self.assertEqual(loaded['sumi']['secrets'], Path(settings.DEFAULTS['sumi']['secrets']))
         self.assertEqual(loaded['codeServer'], {'enabled': False, 'extensions': []})
@@ -134,7 +134,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.toml', '[docker]\nenabled = true\nimages = ["a:1", "b:1"]\n[agent]\nuid = 1001\n')
         self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
         loaded = self.load()
-        self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1'], 'shared_base': ''})
+        self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1'], 'shared_base': '', 'map_agent_ids': True})
         self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []})
 
     def test_local_replaces_each_host_as_a_whole(self):
@@ -234,26 +234,60 @@ class SettingsTest(unittest.TestCase):
         out = self.generate(environ)
         self.assertNotIn('volumes', json.loads((out / 'workspace.compose.yaml').read_text()))
         self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_DIND_SHARED'], "''")
-        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n')
-        self.generate(environ)
-        self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_DIND_SHARED'], "'common'")
-        compose = json.loads((out / 'workspace.compose.yaml').read_text())
-        self.assertEqual(compose['services']['dind'], {'volumes': [
-            {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
-            {'type': 'volume', 'source': 'dind-shared-common', 'target': '/home/rootless/.local/share/docker'}]})
-        paths = settings.dind_paths('common', self.root, environ)
-        self.assertEqual(paths['data'], state.resolve() / 'claude-devcontainer/dind-base/common/data')
-        self.assertTrue(paths['upper'].is_relative_to(state.resolve() / 'claude-devcontainer/dind'))
-        self.assertEqual(compose['volumes']['dind-shared-common']['driver_opts']['o'],
-                         f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}')
+        # A base for each ID mapping, whose data is laid out for it.
+        for mapping, store in [('', 'common.map-1000-1000'), ('map_agent_ids = false\n', 'common')]:
+            with self.subTest(store=store):
+                self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n' + mapping)
+                self.generate(environ)
+                self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_DIND_SHARED'], "'common'")
+                compose = json.loads((out / 'workspace.compose.yaml').read_text())
+                self.assertEqual(compose['services']['dind'], {'volumes': [
+                    {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
+                    {'type': 'volume', 'source': f'dind-shared-{store}', 'target': '/home/rootless/.local/share/docker'}]})
+                paths = settings.dind_paths(store, self.root, environ)
+                self.assertEqual(paths['data'], state.resolve() / f'claude-devcontainer/dind-base/{store}/data')
+                self.assertTrue(paths['upper'].is_relative_to(state.resolve() / 'claude-devcontainer/dind'))
+                self.assertEqual(compose['volumes'][f'dind-shared-{store}']['driver_opts']['o'],
+                                 f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}')
 
     def test_dind_sees_the_clone(self):
         out = self.generate()
         self.assertNotIn('dind', json.loads((out / 'workspace.compose.yaml').read_text())['services'])
-        self.write('claude.toml', '[docker]\nenabled = true\n')
+        self.write('claude.toml', '[docker]\nenabled = true\nmap_agent_ids = false\n')
         self.generate()
         self.assertEqual(json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind'],
                          {'volumes': [{'type': 'volume', 'source': 'workspace', 'target': '/workspace'}]})
+
+    def test_dind_maps_the_agents_ids(self):
+        self.write('claude.toml', '[docker]\nenabled = true\n')
+        out = self.generate()
+        env = self.env()
+        self.assertEqual({key: env['CLAUDE_DEVCONTAINER_' + key] for key in ('DIND_UID', 'DIND_GID', 'DIND_MAP', 'DIND_ARGS')},
+                         {'DIND_UID': "'2000'", 'DIND_GID': "'2000'", 'DIND_MAP': "'1'", 'DIND_ARGS': "'--group=1000'"})
+        # The data of the other mapping is not used: its files would have the wrong owners.
+        compose = json.loads((out / 'workspace.compose.yaml').read_text())
+        self.assertEqual(compose['services']['dind']['volumes'][-1],
+                         {'type': 'volume', 'source': 'dind-data-mapped', 'target': '/home/rootless/.local/share/docker'})
+        self.assertEqual(compose['volumes'], {'dind-data-mapped': {}})
+        # dockerd's own UID and GID are neither of the agent's.
+        self.write('claude.toml', '[docker]\nenabled = true\n[agent]\nuid = 2000\ngid = 2001\n')
+        self.generate()
+        self.assertEqual((self.env()['CLAUDE_DEVCONTAINER_DIND_UID'], self.env()['CLAUDE_DEVCONTAINER_DIND_ARGS']),
+                         ("'2002'", "'--group=2001'"))
+        self.write('claude.toml', '[docker]\nenabled = true\nmap_agent_ids = false\n[agent]\nuid = 1500\ngid = 1600\n')
+        self.generate()
+        env = self.env()
+        self.assertEqual({key: env['CLAUDE_DEVCONTAINER_' + key] for key in ('DIND_UID', 'DIND_GID', 'DIND_MAP', 'DIND_ARGS')},
+                         {'DIND_UID': "'1500'", 'DIND_GID': "'1600'", 'DIND_MAP': "'0'", 'DIND_ARGS': "''"})
+
+    def test_mapped_ids_must_be_ids_of_dinds_containers(self):
+        for key in ('uid', 'gid'):
+            with self.subTest(key=key):
+                self.write('claude.toml', f'[docker]\nenabled = true\n[agent]\n{key} = 70000\n')
+                with self.assertRaisesRegex(ValueError, 'at most 65535.*map_agent_ids = false'):
+                    self.load()
+        self.write('claude.toml', '[docker]\nenabled = true\nmap_agent_ids = false\n[agent]\nuid = 70000\n')
+        self.load()
 
     def test_dind_sees_the_shared_working_tree_read_only_and_masked_as_the_agent_does(self):
         mounts = [
@@ -282,7 +316,8 @@ class SettingsTest(unittest.TestCase):
                 self.write('claude.toml', f'[docker]\nenabled = true\n[git]\nisolation = "{mode}"\n'
                                           'shared_hidden_paths = ["conf/.env"]\n')
                 out = self.generate()
-                dind = json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind']['volumes']
+                dind = [mount for mount in json.loads((out / 'workspace.compose.yaml').read_text())['services']['dind']['volumes']
+                        if mount['target'].startswith('/workspace')]
                 self.assertTrue(all(mount['read_only'] for mount in dind))
                 targets = [mount['target'] for mount in dind]
                 self.assertEqual(targets[0], '/workspace')
@@ -378,13 +413,14 @@ class SettingsTest(unittest.TestCase):
         environ = {'XDG_STATE_HOME': str(state)}
         settings.prepare_dind(settings.load(self.root), self.root, environ)
         self.assertEqual(list(state.iterdir()), [])
-        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n[agent]\nuid = 1001\n')
+        # Without docker.map_agent_ids, which gives each mapping a base of its own.
+        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\nmap_agent_ids = false\n[agent]\nuid = 1001\n')
         settings.prepare_dind(settings.load(self.root), self.root, environ)
         paths = settings.dind_paths('common', self.root, environ)
         self.assertTrue(all(paths[key].is_dir() for key in ('data', 'upper', 'work')))
         self.assertEqual(paths['uid'].read_text(), '1001\n')
         settings.prepare_dind(settings.load(self.root), self.root, environ)
-        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n')
+        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\nmap_agent_ids = false\n')
         with self.assertRaisesRegex(ValueError, 'belongs to agent.uid = 1001, not 1000'):
             settings.prepare_dind(settings.load(self.root), self.root, environ)
 
@@ -505,7 +541,9 @@ dind = "10.99.1"
         self.assertEqual({k: v for k, v in self.env().items() if '_NODE_' not in k}, {
             'CLAUDE_DEVCONTAINER_GIT_ISOLATION': "'clone'",
             'CLAUDE_DEVCONTAINER_UID': "'1001'", 'CLAUDE_DEVCONTAINER_GID': "'1000'",
-            'CLAUDE_DEVCONTAINER_DIND': "'1'", 'CLAUDE_DEVCONTAINER_DIND_SHARED': "''", 'CLAUDE_DEVCONTAINER_NIX': "'0'",
+            'CLAUDE_DEVCONTAINER_DIND': "'1'", 'CLAUDE_DEVCONTAINER_DIND_SHARED': "''",
+            'CLAUDE_DEVCONTAINER_DIND_UID': "'2000'", 'CLAUDE_DEVCONTAINER_DIND_GID': "'2000'",
+            'CLAUDE_DEVCONTAINER_DIND_MAP': "'1'", 'CLAUDE_DEVCONTAINER_DIND_ARGS': "'--group=1000'", 'CLAUDE_DEVCONTAINER_NIX': "'0'",
             'CLAUDE_DEVCONTAINER_NIX_REF': "'HEAD'",
             # Single quotes keep compose from interpolating $.
             'CLAUDE_DEVCONTAINER_NIX_SHELL': "'devShells.x86_64-linux.$foo'",

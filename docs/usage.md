@@ -299,8 +299,22 @@ DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた�
 agentの`/workspace`はDinDの`/workspace`にも同じパスで見えるので、`docker run -v /workspace/...:/app`やTestcontainersのバインドマウントがそのまま使えます。
 
 - cloneでは、agent専用のcloneを読み書きできます。
-- sharedとunsafe_sharedでは、ホストの作業ツリーを読み取り専用で見せます。agentと同じく、`shared_hidden_paths`と`sumi.secrets`は空に、sharedの`.git`はagentの`.git`に見えます。読み取り専用なのは、DinDのコンテナが書いたファイルがDinDの内部のUID（100000〜）の所有になり、ホストのユーザーが消せなくなるためです。書き出しが要るときは、コンテナの中の別の場所かvolumeに書いてください。
+- sharedとunsafe_sharedでは、ホストの作業ツリーを読み取り専用で見せます。agentと同じく、`shared_hidden_paths`と`sumi.secrets`は空に、sharedの`.git`はagentの`.git`に見えます。読み取り専用なのは、作業ツリーがホストのユーザーのものだからです。書き出しが要るときは、コンテナの中の別の場所かvolumeに書いてください。
 - `agent.mounts`の`:cow`などで`/workspace`の下に重ねたディレクトリは、DinDからは重ねる前の中身に見えます。
+
+DinDのdockerdはrootlessで、コンテナのUIDとGIDは外では別の番号になります。既定（`docker.map_agent_ids = true`）では、次のように対応します。agentのUIDとGIDを1000とした場合です。
+
+| コンテナの中 | 外（agentから見た所有者） |
+|---|---|
+| UID・GID 1000（`node`イメージの`node`ユーザーなど） | agent自身 |
+| root | dockerdのユーザー（UID・GID 2000。agentと重なるときは次の空いた番号） |
+| それ以外のn | DinDの内部のID（100000 + n − 1） |
+
+- UID 1000で動くコンテナが`/workspace`に書いたファイルは、agentのファイルになり、agentから編集・削除できます。
+- rootのコンテナもagentのファイルを読み書きできますが、新しく作ったファイルはdockerdのユーザーの所有になり、agentからは変更できません。消したいときは、DinDでrootのコンテナから消してください（`docker run --rm -v /workspace:/w busybox rm -r /w/<パス>`）。所有者をagentに戻すなら`chown -R 1000:1000`です。
+- dockerdのソケットはagentのグループに渡すので、agentからはこれまでどおり使えます。
+- この対応のため、DinDのデータはそれまでのvolume（`dind-data`）とは別の`dind-data-mapped`に置きます。イメージは次の`up`で読み込み直されます。古いvolumeは要らなければ削除してください。`shared_base`のベースも、対応ごとに別のディレクトリ（`<名前>.map-<UID>-<GID>`）になるので、`dind-base.py`で読み込み直してください。
+- `docker.map_agent_ids = false`にすると、以前の対応に戻ります。dockerdはagentのUIDで動き、コンテナのrootがagentになり、それ以外のユーザーはすべてDinDの内部のIDです。agentのUIDかGIDが65535より大きいときは、こちらにしてください。
 
 ```toml
 [docker]
@@ -328,7 +342,7 @@ Testcontainersでは、テスト対象とRyukのイメージを事前に投入�
 ```sh
 DOCKER_HOST=tcp://127.0.0.1:2375
 TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
-TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/1000/docker.sock  # 1000はagentのUID
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/user/2000/docker.sock  # 2000はDinDのdockerdのUID
 ```
 
 ### DinDのイメージを複数のリポジトリで共有する

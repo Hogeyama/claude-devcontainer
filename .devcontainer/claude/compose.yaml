@@ -57,7 +57,7 @@ services:
       no_proxy: localhost,127.0.0.1,::1,${CLAUDE_DEVCONTAINER_DIND_NET:-10.231.71}.10
       DOCKER_HOST: tcp://127.0.0.1:2375
       TESTCONTAINERS_HOST_OVERRIDE: 127.0.0.1
-      TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock
+      TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /run/user/${CLAUDE_DEVCONTAINER_DIND_UID:-1000}/docker.sock
       CLAUDE_DEVCONTAINER_DIND: ${CLAUDE_DEVCONTAINER_DIND:-0}
       CLAUDE_DEVCONTAINER_CODE_SERVER: ${CLAUDE_DEVCONTAINER_CODE_SERVER:-0}
       CLAUDE_DEVCONTAINER_CODE_SERVER_PROXY_ADDRESS: ${CLAUDE_DEVCONTAINER_PROXY_NET:-10.231.70}.30
@@ -185,8 +185,13 @@ services:
     build:
       context: dind
       args:
-        ROOTLESS_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
-        ROOTLESS_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
+        # dockerd's user, and with docker.map_agent_ids the agent's IDs that
+        # its containers share (scripts/settings.py dind_ids).
+        ROOTLESS_UID: ${CLAUDE_DEVCONTAINER_DIND_UID:-1000}
+        ROOTLESS_GID: ${CLAUDE_DEVCONTAINER_DIND_GID:-1000}
+        AGENT_UID: ${CLAUDE_DEVCONTAINER_UID:-1000}
+        AGENT_GID: ${CLAUDE_DEVCONTAINER_GID:-1000}
+        MAP_AGENT_IDS: ${CLAUDE_DEVCONTAINER_DIND_MAP:-0}
     privileged: true
     # rootlesskit would be PID 1, which reaps no orphans.
     init: true
@@ -209,13 +214,16 @@ services:
         # Over a shared base, the data is on an overlay, where the kernel's
         # overlay cannot keep upper directories: use fuse-overlayfs, as
         # scripts/dind-base.py does for the base.
-        exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/${CLAUDE_DEVCONTAINER_UID:-1000}/docker.sock ${CLAUDE_DEVCONTAINER_DIND_SHARED:+--storage-driver=fuse-overlayfs --feature=containerd-snapshotter=false}' rootless
+        # The data's top directory is dockerd's: over a shared base it is the
+        # host's directory, made by the host's user.
+        chown ${CLAUDE_DEVCONTAINER_DIND_UID:-1000}:${CLAUDE_DEVCONTAINER_DIND_GID:-1000} /home/rootless/.local/share/docker
+        exec su -s /bin/sh -c 'exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/${CLAUDE_DEVCONTAINER_DIND_UID:-1000}/docker.sock ${CLAUDE_DEVCONTAINER_DIND_ARGS:-} ${CLAUDE_DEVCONTAINER_DIND_SHARED:+--storage-driver=fuse-overlayfs --feature=containerd-snapshotter=false}' rootless
     environment:
       DOCKER_TLS_CERTDIR: ""
       # The image's tini is not PID 1, so it must register as a subreaper.
       TINI_SUBREAPER: "1"
     volumes:
-      - dind-run:/run/user/${CLAUDE_DEVCONTAINER_UID:-1000}
+      - dind-run:/run/user/${CLAUDE_DEVCONTAINER_DIND_UID:-1000}
       - dind-data:/home/rootless/.local/share/docker
     networks:
       dind-internal:
@@ -280,11 +288,12 @@ volumes:
   public-ca:
   proxy-private-ca:
   dind-data:
+  # dockerd's runtime directory, with its socket; the agent reads it as its group.
   dind-run:
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: uid=${CLAUDE_DEVCONTAINER_UID:-1000},gid=${CLAUDE_DEVCONTAINER_GID:-1000},mode=0700
+      o: uid=${CLAUDE_DEVCONTAINER_DIND_UID:-1000},gid=${CLAUDE_DEVCONTAINER_GID:-1000},mode=0750
   sumi-run:
     driver_opts:
       type: tmpfs
