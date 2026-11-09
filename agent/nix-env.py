@@ -73,6 +73,17 @@ def dev_shell(script, base, workspace, log, timeout):
     return {name: value for name, _, value in variables}, bash.returncode
 
 
+def prepend(name, prefix):
+    """Bash that puts prefix before name's entries, unless they already hold it.
+
+    The agent's Bash may read env.rc twice: Claude Code's shell snapshot puts
+    back the PATH it saved after BASH_ENV, and CLAUDE_ENV_FILE reads it again.
+    """
+    quoted = shlex.quote(prefix)
+    return (f'case :${{{name}-}}: in *:{quoted}:*) ;; '
+            f'*) export {name}={quoted}"${{{name}:+:${name}}}" ;; esac')
+
+
 def env_rc(base, dev_env):
     """The Bash that turns base into dev_env, kept to what env.rc should hold."""
     lines = []
@@ -84,8 +95,7 @@ def env_rc(base, dev_env):
             lines.append(f'unset {name}')
         elif before and value.endswith(':' + before):
             # A search path such as PATH: the agent's own entries stay after the dev shell's.
-            prefix = shlex.quote(value[:-len(before) - 1])
-            lines.append(f'export {name}={prefix}"${{{name}:+:${name}}}"')
+            lines.append(prepend(name, value[:-len(before) - 1]))
         else:
             lines.append(f'export {name}={shlex.quote(value)}')
     return ''.join(line + '\n' for line in lines)

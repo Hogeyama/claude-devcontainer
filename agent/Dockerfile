@@ -153,7 +153,7 @@ COPY --chown=node:node --chmod=600 agent/claude.json /home/node/.claude.json
 # in the workspace), the agent cannot change them, and copying the host's
 # ~/.claude/skills does not replace them.
 COPY agent/skills/ /etc/claude-code/.claude/skills/
-COPY agent/bash-env.sh /etc/bash-env.sh
+COPY agent/bash-env.sh agent/claude-env.sh /etc/
 COPY --chmod=755 agent/entrypoint.sh agent/start-code-server.sh agent/init-firewall.sh agent/wait-ready.sh agent/clone-workspace.py agent/workspace_mounts.py agent/nix-env.py agent/java-truststore.py /usr/local/bin/
 # Node's fetch ignores HTTPS_PROXY unless told; without the proxy it cannot
 # reach anything (a Next.js server calling an API, for one).
@@ -168,6 +168,7 @@ ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/managed-proxy.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     HOME=/home/node \
     BASH_ENV=/etc/bash-env.sh \
+    CLAUDE_ENV_FILE=/etc/claude-env.sh \
     SHELL=/bin/bash \
     CLAUDE_CODE_SHELL=/bin/bash
 # Java reads none of the above, only its own truststore: the same bundle as
