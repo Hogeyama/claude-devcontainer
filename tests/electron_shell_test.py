@@ -131,6 +131,14 @@ got.allowsLogin = [
   ['http://localhost:3000/x', null],
 ].map(([url, info]) => policy.allowsLogin(url, info));
 got.loginOrigin = policy.loginOrigin('http://localhost:3000/a/b?c');
+got.filePath = [
+  ['file:///C:/Users/a%20b/shell/login.html?origin=x#y', true],
+  ['file://server/share/login.html', true],
+  ['file:///home/a%20b/shell/login.html?origin=x', false],
+  ['file://server/share/login.html', false],
+  ['http://localhost:3000/login.html', false],
+  ['not a url', true],
+].map(([url, windows]) => policy.filePath(url, windows));
 got.ideUrl = policy.ideUrl('/workspace');
 console.log(JSON.stringify(got));
 '''
@@ -140,6 +148,8 @@ console.log(JSON.stringify(got));
         self.assertEqual(got['allowsRedirect'], [True, False, True, False])
         self.assertEqual(got['allowsLogin'], [True, True, False, False, False, False, False, False])
         self.assertEqual(got['loginOrigin'], 'http://localhost:3000')
+        self.assertEqual(got['filePath'], ['C:\\Users\\a b\\shell\\login.html', '\\\\server\\share\\login.html',
+                                           '/home/a b/shell/login.html', None, None, None])
         self.assertEqual(got['ideUrl'], 'http://localhost:18000/?folder=%2Fworkspace')
 
 

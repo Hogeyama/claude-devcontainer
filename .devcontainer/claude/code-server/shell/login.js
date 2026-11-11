@@ -22,14 +22,7 @@ const CHANNEL = 'login-prompt';
 
 function lockDown(ses) {
   ses.webRequest.onBeforeRequest((details, callback) => {
-    let file = null;
-    try {
-      const url = new URL(details.url);
-      file = url.protocol === 'file:' ? path.normalize(decodeURIComponent(url.pathname)) : null;
-    } catch {
-      file = null;
-    }
-    callback({ cancel: !FILES.has(file) });
+    callback({ cancel: !FILES.has(policy.filePath(details.url)) });
   });
   ses.setPermissionRequestHandler((webContents, permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
