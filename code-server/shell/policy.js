@@ -11,6 +11,8 @@
 // iframe only when every frame above it is of the top page's site, and the
 // Simple Browser shows an app in an iframe of a webview's iframe.
 
+const { fileURLToPath } = require('node:url');
+
 const IDE_PORT = 18000;
 // The only permission granted: copying in the IDE writes the clipboard.
 // Reading it is denied. paste.js handles physical paste shortcuts through
@@ -96,6 +98,21 @@ function loginOrigin(url) {
   return parse(url).origin;
 }
 
+// The local path of a file: URL, without its query, or null; the sign-in
+// window may load only its own files. fileURLToPath, not the URL's pathname,
+// which on Windows is /C:/... with forward slashes. windows: as on Windows,
+// by default when on it.
+function filePath(url, windows = process.platform === 'win32') {
+  if (typeof url !== 'string' || !url.startsWith('file:')) {
+    return null;
+  }
+  try {
+    return fileURLToPath(url.split(/[?#]/)[0], { windows });
+  } catch {
+    return null;
+  }
+}
+
 // The first page opens the folder. main.js supplies authentication in a header.
 function ideUrl(folder) {
   const url = new URL(`http://localhost:${IDE_PORT}/`);
@@ -105,5 +122,5 @@ function ideUrl(folder) {
 
 module.exports = {
   IDE_PORT, isServer, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, allowsLogin,
-  loginOrigin, ideUrl,
+  loginOrigin, filePath, ideUrl,
 };
