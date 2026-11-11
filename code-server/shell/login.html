@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
+<title>Sign in</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 20px 22px; font: 13px/1.45 system-ui, sans-serif; background: #1f1f1f; color: #cccccc; }
+  h1 { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: #ffffff; }
+  p { margin: 0 0 8px; }
+  #origin { font-family: ui-monospace, monospace; color: #ffffff; word-break: break-all; }
+  #realm { word-break: break-word; }
+  .warning { color: #cca700; }
+  label { display: block; margin-top: 10px; }
+  input { box-sizing: border-box; width: 100%; margin-top: 3px; padding: 5px 7px; font: inherit;
+    color: #cccccc; background: #313131; border: 1px solid #3c3c3c; border-radius: 3px; }
+  input:focus { outline: 1px solid #0078d4; border-color: #0078d4; }
+  .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  button { padding: 5px 14px; font: inherit; border-radius: 3px; border: 1px solid #3c3c3c;
+    color: #cccccc; background: #313131; cursor: pointer; }
+  button[type=submit] { color: #ffffff; background: #0078d4; border-color: #0078d4; }
+</style>
+</head>
+<body>
+<h1>Sign in to the agent's app</h1>
+<p><span id="origin"></span> asks for a user name and password.</p>
+<p id="realm-line" hidden>The server's message: <span id="realm"></span></p>
+<p class="warning">The agent can change this server and read what you type. Use a password for this app only.</p>
+<form id="form">
+  <label>User name <input id="username" autocomplete="off" autofocus></label>
+  <label>Password <input id="password" type="password" autocomplete="off"></label>
+  <div class="buttons">
+    <button type="button" id="cancel">Cancel</button>
+    <button type="submit">Sign in</button>
+  </div>
+</form>
+<script src="login-page.js"></script>
+</body>
+</html>
