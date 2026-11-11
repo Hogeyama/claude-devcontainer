@@ -337,6 +337,7 @@ app.on('browser-window-created', (event, window) => {{
     }}))()`);
     shown.windowTitle = window.getTitle();
     shown.modal = window.isModal();
+    shown.visible = window.isVisible();
     fs.appendFileSync({json.dumps(str(prompts))}, JSON.stringify(shown) + '\\n');
     window.webContents.executeJavaScript(`document.getElementById('username').value = 'user';
       document.getElementById('password').value = 'pa ss';
@@ -366,6 +367,7 @@ require({json.dumps(str(SHELL / 'main.js'))});
         self.assertEqual(shown[0]['origin'], 'http://localhost:3000')
         self.assertEqual(shown[0]['windowTitle'], 'Sign in to http://localhost:3000 [agent]')
         self.assertTrue(shown[0]['modal'])
+        self.assertTrue(shown[0]['visible'])
         # The realm is the server's text, not markup.
         self.assertEqual(shown[0]['realm'], '&lt;b&gt;probe&lt;/b&gt;')
         self.assertTrue(shown[0]['url'].startswith('file://'), shown[0]['url'])

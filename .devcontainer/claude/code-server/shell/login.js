@@ -78,7 +78,10 @@ function installLoginPrompt(parent) {
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
-      show: false,
+      // Shown at once: ready-to-show does not always come, which would leave
+      // the request waiting on a window nobody sees. backgroundColor keeps it
+      // from flashing white meanwhile.
+      show: true,
       title: `Sign in to ${origin} [agent]`,
       backgroundColor: '#1f1f1f',
       webPreferences: {
@@ -97,7 +100,6 @@ function installLoginPrompt(parent) {
     current = { key, window, answered: false };
     installPasteShortcut(window.webContents);
     window.on('page-title-updated', (event) => event.preventDefault());
-    window.once('ready-to-show', () => window.show());
     window.on('closed', () => {
       if (!current.answered) {
         settle(key, null);
