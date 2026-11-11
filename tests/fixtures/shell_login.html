@@ -1,0 +1,22 @@
+<!doctype html>
+<title>login probe</title>
+<script>
+// Served as the IDE by tests/electron_shell_test.py LoginTest: an app behind
+// Basic authentication in a frame, then one that the proxy asks to sign in.
+function frame(src) {
+  return new Promise((resolve) => {
+    const element = document.createElement('iframe');
+    element.addEventListener('load', () => resolve('loaded'));
+    setTimeout(() => resolve('timeout'), 20000);
+    element.src = src;
+    document.body.appendChild(element);
+  });
+}
+window.addEventListener('load', async () => {
+  const results = {};
+  results.secret = await frame('http://localhost:3000/secret');
+  results.proxy = await frame('http://localhost:3001/proxy-auth');
+  await fetch('/done', { method: 'POST', body: JSON.stringify(results) });
+});
+</script>
+<body></body>

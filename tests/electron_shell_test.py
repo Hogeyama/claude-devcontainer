@@ -7,6 +7,7 @@ recording proxy that stands in for code-server-proxy, and the page tries
 every way out it can. What the shell lets out reaches the proxy, or a
 listener on the host's loopback that nothing may reach.
 """
+import base64
 import importlib.util
 import json
 import os
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SHELL = ROOT / '.devcontainer/claude/code-server/shell'
 FIXTURES = Path(__file__).resolve().parent / 'fixtures'
 TOKEN = 'probe-token'
+LOGIN_AUTHORIZATION = 'Basic ' + base64.b64encode('user:pa ss'.encode()).decode()
 
 
 def electron_executable():
@@ -118,6 +120,17 @@ got.allowsRedirect = [
   policy.allowsRedirect('http://localhost:18000/', 'http://localhost:3000/'),
   policy.allowsRedirect('http://[', 'http://localhost:3000/'),
 ];
+got.allowsLogin = [
+  ['http://localhost:3000/x', {{ isProxy: false, scheme: 'basic', realm: 'r' }}],
+  ['http://localhost:18000/x', {{ isProxy: false, scheme: 'Digest' }}],
+  ['http://localhost:3000/x', {{ isProxy: true, scheme: 'basic' }}],
+  ['http://localhost:3000/x', {{ isProxy: false, scheme: 'ntlm' }}],
+  ['http://localhost:3000/x', {{ isProxy: false, scheme: 'negotiate' }}],
+  ['http://example.com/', {{ isProxy: false, scheme: 'basic' }}],
+  ['ws://localhost:3000/', {{ isProxy: false, scheme: 'basic' }}],
+  ['http://localhost:3000/x', null],
+].map(([url, info]) => policy.allowsLogin(url, info));
+got.loginOrigin = policy.loginOrigin('http://localhost:3000/a/b?c');
 got.ideUrl = policy.ideUrl('/workspace');
 console.log(JSON.stringify(got));
 '''
@@ -125,6 +138,8 @@ console.log(JSON.stringify(got));
         for name, inputs in cases.items():
             self.assertEqual(got[name], inputs, name)
         self.assertEqual(got['allowsRedirect'], [True, False, True, False])
+        self.assertEqual(got['allowsLogin'], [True, True, False, False, False, False, False, False])
+        self.assertEqual(got['loginOrigin'], 'http://localhost:3000')
         self.assertEqual(got['ideUrl'], 'http://localhost:18000/?folder=%2Fworkspace')
 
 
@@ -133,10 +148,12 @@ class Recorder(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, canary):
+    def __init__(self, canary, page='shell_probe.html'):
         self.canary = canary
+        self.page = page
         self.requests = []
         self.cookies = {}
+        self.authorization = {}
         self.reports = {}
         self.done = threading.Event()
         super().__init__(('127.0.0.1', 0), Handler)
@@ -155,6 +172,7 @@ class Handler(socketserver.StreamRequestHandler):
         body = self.rfile.read(int(headers.get('content-length', 0)))
         self.server.requests.append((method, target))
         self.server.cookies[target] = headers.get('cookie', '')
+        self.server.authorization.setdefault(target, []).append(headers.get('authorization'))
         if method == 'CONNECT':
             self.wfile.write(b'HTTP/1.1 200 Connection established\r\n\r\n')
             return
@@ -163,6 +181,13 @@ class Handler(socketserver.StreamRequestHandler):
             return self.reply(451, b'blocked')
         if url.port == 18000:
             return self.ide(method, url, body)
+        if url.path == '/secret':
+            # An app behind Basic authentication, whose realm is HTML.
+            if headers.get('authorization') == LOGIN_AUTHORIZATION:
+                return self.reply(200, b'secret')
+            return self.reply(401, b'', {'WWW-Authenticate': 'Basic realm="<b>probe</b>"'})
+        if url.path == '/proxy-auth':
+            return self.reply(407, b'', {'Proxy-Authenticate': 'Basic realm="proxy"'})
         return self.reply(200, b'app', {'Access-Control-Allow-Origin': '*'})
 
     def ide(self, method, url, body):
@@ -172,7 +197,7 @@ class Handler(socketserver.StreamRequestHandler):
                 self.server.done.set()
             return self.reply(204, b'')
         if url.path == '/':
-            page = (FIXTURES / 'shell_probe.html').read_text().replace('__CANARY__', str(self.server.canary))
+            page = (FIXTURES / self.server.page).read_text().replace('__CANARY__', str(self.server.canary))
             return self.reply(200, page.encode(), {'Content-Type': 'text/html'})
         if url.path in ('/worker.js', '/sw.js'):
             name = 'shell_probe_worker.js' if url.path == '/worker.js' else 'shell_probe_sw.js'
@@ -276,6 +301,83 @@ class EnforcementTest(unittest.TestCase):
         self.assertIn('http://localhost:18000/download', targets)
         self.assertEqual([path.name for path in home.rglob('probe*')], [])
 
+
+
+@unittest.skipUnless(electron_executable(), 'no Electron: set ELECTRON_SHELL_TEST_ELECTRON or run code-server.sh prepare')
+class LoginTest(unittest.TestCase):
+    """login.js: an app's Basic authentication asks the person, in a window that reaches nothing."""
+
+    def test_an_apps_sign_in_is_asked_for_and_the_proxys_cancelled(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        recorder = Recorder(0, page='shell_login.html')
+        self.addCleanup(recorder.server_close)
+        threading.Thread(target=recorder.serve_forever, daemon=True).start()
+        self.addCleanup(recorder.shutdown)
+        prompts = tmp / 'prompts.jsonl'
+        # The person, in the sign-in window: what it shows, whether it reaches
+        # the network, and then the user name and password.
+        app = tmp / 'app'
+        app.mkdir()
+        (app / 'package.json').write_text('{"main": "main.js"}')
+        (app / 'main.js').write_text(f"""
+const {{ app }} = require('electron');
+const fs = require('node:fs');
+app.requestSingleInstanceLock = () => true;
+app.on('browser-window-created', (event, window) => {{
+  window.webContents.once('did-finish-load', async () => {{
+    if (!window.getParentWindow()) {{
+      return;
+    }}
+    const shown = await window.webContents.executeJavaScript(`(async () => ({{
+      url: location.href, title: document.title,
+      origin: document.getElementById('origin').textContent,
+      realm: document.getElementById('realm').innerHTML,
+      fetch: await fetch('http://localhost:3000/from-prompt').then((r) => r.status, (e) => 'error'),
+    }}))()`);
+    shown.windowTitle = window.getTitle();
+    shown.modal = window.isModal();
+    fs.appendFileSync({json.dumps(str(prompts))}, JSON.stringify(shown) + '\\n');
+    window.webContents.executeJavaScript(`document.getElementById('username').value = 'user';
+      document.getElementById('password').value = 'pa ss';
+      document.querySelector('button[type=submit]').click();`);
+  }});
+}});
+require({json.dumps(str(SHELL / 'main.js'))});
+""")
+        home = tmp / 'home'
+        home.mkdir()
+        env = {'PATH': os.environ['PATH'], 'HOME': str(home), 'XDG_CONFIG_HOME': str(home / '.config'),
+               'CLAUDE_DEVCONTAINER_VSCODE_TOKEN': TOKEN}
+        log = open(tmp / 'electron.log', 'w')
+        self.addCleanup(log.close)
+        process = subprocess.Popen(
+            [electron_executable(), str(app), f'--proxy-port={recorder.server_address[1]}', '--folder=/workspace',
+             f'--user-data-dir={tmp / "profile"}', '--ozone-platform=headless', '--disable-gpu'],
+            env=env, stdout=subprocess.DEVNULL, stderr=log)
+        self.addCleanup(process.wait)
+        self.addCleanup(process.kill)
+        self.assertTrue(recorder.done.wait(60), (tmp / 'electron.log').read_text()[-3000:])
+        results = recorder.reports['/done']
+
+        shown = [json.loads(line) for line in prompts.read_text().splitlines()]
+        # One window for the app; none for the proxy's 407.
+        self.assertEqual(len(shown), 1, shown)
+        self.assertEqual(shown[0]['origin'], 'http://localhost:3000')
+        self.assertEqual(shown[0]['windowTitle'], 'Sign in to http://localhost:3000 [agent]')
+        self.assertTrue(shown[0]['modal'])
+        # The realm is the server's text, not markup.
+        self.assertEqual(shown[0]['realm'], '&lt;b&gt;probe&lt;/b&gt;')
+        self.assertTrue(shown[0]['url'].startswith('file://'), shown[0]['url'])
+        self.assertEqual(shown[0]['fetch'], 'error')
+        targets = [target for method, target in recorder.requests]
+        self.assertNotIn('http://localhost:3000/from-prompt', targets)
+        # The answer went to the app, which the frame then showed.
+        self.assertIn(LOGIN_AUTHORIZATION, recorder.authorization['http://localhost:3000/secret'])
+        self.assertEqual(results['secret'], 'loaded')
+        # The proxy's sign-in is cancelled: nothing is sent again with credentials.
+        self.assertEqual([value for value in recorder.authorization.get('http://localhost:3001/proxy-auth', []) if value], [])
+        self.assertIn('sign-in cancelled for the proxy', (tmp / 'electron.log').read_text())
 
 if __name__ == '__main__':
     unittest.main()

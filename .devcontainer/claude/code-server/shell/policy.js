@@ -80,6 +80,22 @@ function allowsPermission(permission) {
   return PERMISSIONS.has(permission);
 }
 
+// A sign-in that the person is asked for (login.js): HTTP authentication by a
+// page of the agent's, with a password typed in, never the proxy's (which
+// asks for none) nor a scheme that could answer with the host's own
+// credentials (NTLM, Negotiate).
+const LOGIN_SCHEMES = new Set(['basic', 'digest']);
+
+function allowsLogin(url, authInfo) {
+  return Boolean(authInfo) && !authInfo.isProxy && LOGIN_SCHEMES.has(String(authInfo.scheme).toLowerCase())
+    && isAgent(url) && parse(url).protocol === 'http:';
+}
+
+// The origin to name to the person, from the URL that asked.
+function loginOrigin(url) {
+  return parse(url).origin;
+}
+
 // The first page opens the folder. main.js supplies authentication in a header.
 function ideUrl(folder) {
   const url = new URL(`http://localhost:${IDE_PORT}/`);
@@ -88,5 +104,6 @@ function ideUrl(folder) {
 }
 
 module.exports = {
-  IDE_PORT, isServer, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, ideUrl,
+  IDE_PORT, isServer, allowsNavigation, allowsRequest, allowsRedirect, allowsPermission, allowsLogin,
+  loginOrigin, ideUrl,
 };

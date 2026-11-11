@@ -12,6 +12,7 @@
 const { app, BrowserWindow, Menu, session } = require('electron');
 const policy = require('./policy');
 const { installPasteShortcut } = require('./paste');
+const { installLoginPrompt } = require('./login');
 
 const PARTITION = 'persist:ide';
 
@@ -146,6 +147,9 @@ app.on('second-instance', () => {
 });
 
 app.on('window-all-closed', () => app.quit());
+
+// The IDE's window is the one without a parent; the sign-in window has it.
+installLoginPrompt(() => BrowserWindow.getAllWindows().find((window) => !window.getParentWindow()) || null);
 
 app.whenReady().then(async () => {
   if (!first) {
