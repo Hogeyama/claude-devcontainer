@@ -121,6 +121,26 @@ agentでは、`agent/start-code-server.sh`がcode-serverを127.0.0.1の18000番�
 - agentのfirewallは、code-server-proxyからの接続をすべてagentの127.0.0.1の同じポートへ転送します（`agent/init-firewall.sh`）。これにはcomposeが設定する`net.ipv4.conf.all.route_localnet=1`が必要です。ほかの送信元からの接続は、INPUTの既定のDROPで拒否されます。
 - ユーザー設定（`settings.json`、`keybindings.json`など）と拡張の状態は、serverの`~/.vscode-server/data/User/`に保存され、`vscode-server-data` volumeに残ります。volumeはworkspaceごとに別なので、リポジトリを切り替えると別の設定になります。Machine設定は、起動のたびにimageの内容（ターミナルを`/bin/bash`で起動する設定と、localhostのリンクをSimple Browserで開く設定）に戻ります。シェルのプロファイルに残るのは、ウィンドウの状態（レイアウトや開いていたエディタなど）だけです。
 
+## 全workspaceで同じユーザー設定を使う
+
+ユーザー設定はworkspaceごとのvolumeに保存されるため、リポジトリを切り替えると別の設定になります。
+全workspaceでvolumeを共有しないのは、あるworkspaceのagentが書いた設定（タスク、ターミナル、拡張が起動するコマンドなど）が、別のworkspaceのagentで効いてしまうのを防ぐためです。
+
+共通の設定は、ホストの`~/.config/claude-devcontainer/dotfiles/`に置いてください。
+起動のたびに、ホストからagentへ一方向でコピーされます（[ホストの設定を引き継ぐ](../../../README.md#ホストの設定を引き継ぐ)）。
+
+```sh
+d=~/.config/claude-devcontainer/dotfiles/.vscode-server/data/User
+mkdir -p "$d"
+cp settings.json "$d/settings.json"        # symlinkでも構いません
+cp keybindings.json "$d/keybindings.json"  # 必要なら
+```
+
+- 起動のたびにホスト側の内容で上書きします。エディタで変えた設定は、次の起動で元に戻ります。残したい変更は、ホスト側のファイルに書いてください。
+- コピーはagentの起動後に行われます。code-serverは`settings.json`の変更を検知するので、起動直後に少し遅れて反映されます。
+- 置いたファイルはagentから読めます。秘密情報は書かないでください。
+- Machine設定はUser設定より優先されるため、この方法では変わりません。
+
 ## agent内のWebアプリを開く
 
 agent内の3000番で起動したWebアプリは、エディタのSimple Browserで `http://localhost:3000/` を開くと表示できます。
