@@ -78,8 +78,9 @@
 # Testcontainers also needs the Ryuk image of the version your library uses.
 # images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
 # A base of DinD's data shared by the workspaces that name it, which run at
-# once, each copy-on-write over it. scripts/dind-base.py loads images into it,
-# with every DinD over it stopped; they need the same agent.uid. Empty: none.
+# once, each copy-on-write over it. `up` adds the images of images that it
+# lacks, while other workspaces run; scripts/dind-base.py adds others. Empty:
+# none.
 # Ignored while enabled is false, so the global claude.toml can set it.
 # shared_base = ""
 # Make agent.uid and agent.gid in DinD's containers the agent's, so that
