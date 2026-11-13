@@ -30,23 +30,36 @@ ROOT = layout.workspace_root()
 DOCKERD_ARGS = '--storage-driver=fuse-overlayfs --feature=containerd-snapshotter=false'
 WAIT_SECONDS = 60
 # The loader: DinD's data an overlay of the new generation over the others,
-# with dockerd as compose.yaml runs it. The overlay's upper and work
-# directories share a mount, as overlayfs requires. On docker stop, it stops
-# dockerd and removes the work directory, and with /srv/discard the new
-# generation too: their files are DinD's, which the host's user may not remove.
+# with dockerd as compose.yaml runs it. All of gens/ is mounted, at /srv/gens:
+# the overlay's upper and work directories must share a mount, and the new
+# generation must be made in gens/ itself. Its top directory becomes DinD's
+# (chown), and moving a directory to another parent needs write access to it,
+# which the host's user then lacks; a rename in the same directory does not.
+# On docker stop, it stops dockerd and removes the work directory, and with
+# /srv/discard the new generation too: their files are DinD's, which the host's
+# user may not remove.
 LOADER = '''set -eu
 data=/home/rootless/.local/share/docker
-mount -t overlay overlay -o "lowerdir=$1,upperdir=/srv/loading/new,workdir=/srv/loading/work" "$data"
-chown "$2" "$data"
-su -s /bin/sh -c "exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/$3/docker.sock $4" rootless &
+# Named here: in stop, $1, $2, ... are its own arguments.
+new=/srv/gens/$2 work=/srv/gens/$3
+mount -t overlay overlay -o "lowerdir=$1,upperdir=$new,workdir=$work" "$data"
+chown "$4" "$data"
+su -s /bin/sh -c "exec dockerd-entrypoint.sh dockerd --host=unix:///run/user/$5/docker.sock $6" rootless &
 dockerd=$!
 stop() {
-    kill "$dockerd" 2>/dev/null || true
+    # All of rootless dockerd: rootlesskit, containerd and dockerd outlive su,
+    # and hold the overlay until they exit.
+    pkill -TERM -u rootless || true
     wait "$dockerd" || true
+    i=0
+    while pkill -0 -u rootless && [ "$i" -lt 60 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
     umount "$data"
-    rm -rf /srv/loading/work
+    rm -rf "$work"
     if [ -e /srv/discard ]; then
-        rm -rf /srv/loading/new
+        rm -rf "$new"
     fi
     exit 0
 }
@@ -101,19 +114,19 @@ def add_generation(loaded, paths, references, record):
     image = build(loaded)
     below = settings.dind_generations(paths)
     number = int(below[0].name) + 1
-    # In gens/, so that the new generation moves into place by a rename.
-    loading = paths['gens'] / f'.loading-{number}-{os.getpid()}'
-    (loading / 'new').mkdir(parents=True)
-    (loading / 'work').mkdir()
-    mounts = [f'type=bind,source={gen},target=/srv/gens/{gen.name},readonly' for gen in below]
-    mounts.append(f'type=bind,source={loading},target=/srv/loading')
+    # In gens/, beside the generations, so that the new one takes its place by
+    # a rename in the same directory (LOADER).
+    new = paths['gens'] / f'.new-{number}-{os.getpid()}'
+    work = paths['gens'] / f'.work-{number}-{os.getpid()}'
+    new.mkdir()
+    work.mkdir()
     lowerdir = ':'.join(f'/srv/gens/{gen.name}' for gen in below)
     # No network: it only loads what the host sends.
     container = docker('run', '-d', '--rm', '--init', '--privileged', '--network', 'none', '--user', '0:0',
                        '-e', 'DOCKER_TLS_CERTDIR=', '-e', 'TINI_SUBREAPER=1',
                        '--tmpfs', f'/run/user/{uid}:uid={uid},gid={loaded["agent"]["gid"]},mode=0750',
-                       *(argument for mount in mounts for argument in ('--mount', mount)),
-                       '--entrypoint', 'sh', image, '-euc', LOADER, 'loader', lowerdir,
+                       '--mount', f'type=bind,source={paths["gens"]},target=/srv/gens',
+                       '--entrypoint', 'sh', image, '-euc', LOADER, 'loader', lowerdir, new.name, work.name,
                        f'{uid}:{ids["DIND_GID"]}', uid, f'{ids["DIND_ARGS"]} {DOCKERD_ARGS}').stdout.strip()
     failures, done = list(references), False
     try:
@@ -137,10 +150,8 @@ def add_generation(loaded, paths, references, record):
             docker('exec', container, 'touch', '/srv/discard', check=False)
         docker('stop', '--time', '60', container, check=False)
     if not done:
-        loading.rmdir()
         return failures
-    (loading / 'new').rename(paths['gens'] / str(number))
-    loading.rmdir()
+    new.rename(paths['gens'] / str(number))
     temporary = paths['images'].with_name(paths['images'].name + '.tmp')
     temporary.write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
     temporary.replace(paths['images'])
