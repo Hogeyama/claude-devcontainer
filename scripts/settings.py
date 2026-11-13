@@ -30,7 +30,7 @@ alone, so `generate` refuses to run with one.
 
 Usage, from anywhere:
   settings.py generate         check the settings and write .generated/
-  settings.py prepare-dependencies  create persistent DinD and :cow overlay directories
+  settings.py prepare-dependencies  create persistent DinD and cow overlay directories
   settings.py check-shared-mounts   validate the host working tree's mounts before startup
   settings.py proxy-json FILE  print proxy.json for one claude.toml, as for a
                                test build of the proxy image
@@ -63,12 +63,12 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'c
 # {table: {key: default}}; the defaults also give each setting's type.
 DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True},
-    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': []},
+    'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': {}},
     'acp': {'enabled': False, 'version': '0.90.0'},
-    'docker': {'enabled': False, 'images': [], 'shared_base': '', 'map_agent_ids': True},
+    'docker': {'enabled': False, 'images': {}, 'shared_base': '', 'map_agent_ids': True},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
-    'codeServer': {'enabled': False, 'extensions': []},
+    'codeServer': {'enabled': False, 'extensions': {}},
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
@@ -93,7 +93,8 @@ RESERVED_ENV = {'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'DOCKER_HOST', 'CLAUDE_
 RESERVED_ENV_PREFIXES = ('TESTCONTAINERS_', PREFIX)
 CONNECTOR = re.compile(r'mcp(srv|rs)_[A-Za-z0-9]+')
 # A Marketplace extension ID, publisher.name, optionally @version.
-EXTENSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(@[0-9][0-9A-Za-z.+-]*)?')
+EXTENSION_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*')
+EXTENSION_VERSION = re.compile(r'[0-9][0-9A-Za-z.+-]*')
 # Exact package versions only, including prereleases; no moving tags or ranges.
 ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
                          r'(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
@@ -175,6 +176,13 @@ def check(data, source):
             if key not in DEFAULTS[table]:
                 raise ValueError(f'{where}: unknown setting')
             default = DEFAULTS[table][key]
+            if (table, key) in KEYED:
+                # A table by item, or the older list.
+                if not isinstance(value, (dict, list)) or (
+                        isinstance(value, list) and not all(isinstance(item, str) for item in value)):
+                    raise ValueError(f'{where}: expected a table, or a list of strings')
+                KEYED[table, key](value, where)
+                continue
             # bool is an int in Python, but not a UID.
             if type(value) is not type(default) or (isinstance(value, list) and not all(isinstance(item, str) for item in value)):
                 raise ValueError(f'{where}: expected {type_name(default)}')
@@ -187,8 +195,6 @@ def check(data, source):
         if not value or path.is_absolute() or path == Path('.') or '..' in path.parts or '\n' in value or '\r' in value:
             raise ValueError(f'{source}: git.shared_hidden_paths: expected a path below the repository root: {value!r}')
     shell_path(data.get('agent', {}).get('extra_path', []), str(source))
-    for value in data.get('agent', {}).get('mounts', []):
-        parse_mount(value, f'{source}: agent.mounts')
     for name, value in data.get('agent', {}).get('env', {}).items():
         if not ENV_NAME.fullmatch(name):
             raise ValueError(f'{source}: agent.env: {name!r} is not an environment variable name')
@@ -203,15 +209,9 @@ def check(data, source):
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
             raise ValueError(f'{source}: agent.{key}: must be positive')
-    for image in docker.get('images', []):
-        if not image or re.search(r'[\s#]', image):
-            raise ValueError(f'{source}: docker.images: {image!r} is not an image name')
     if docker.get('shared_base') and not BASE_NAME.fullmatch(docker['shared_base']):
         raise ValueError(f'{source}: docker.shared_base: {docker["shared_base"]!r} is not a name '
                          '(letters, digits, _ . -)')
-    for item in data.get('codeServer', {}).get('extensions', []):
-        if not EXTENSION.fullmatch(item):
-            raise ValueError(f'{source}: codeServer.extensions: {item!r} is not an extension ID (publisher.name)')
     for item in proxy.get('connectors', []):
         if not CONNECTOR.fullmatch(item):
             raise ValueError(f'{source}: proxy.connectors: {item!r} is not a connector ID (mcpsrv_...)')
@@ -225,24 +225,22 @@ def check(data, source):
 MOUNT_MODES = ('ro', 'rw', 'cow')
 
 
-def parse_mount(value, where='agent.mounts'):
-    """SOURCE:TARGET[:ro|rw|cow] as (source, target, mode); ro unless given.
-
-    A target of ~/... is under the agent's home, /home/node. A target under
-    /workspace takes only :cow, for dependencies such as node_modules; written
-    as /workspace/PATH:cow alone, its source is the repository's own PATH
-    (source '' here, resolved by cow_source).
-    """
+def mount_entry(value, where='agent.mounts'):
+    """The list form, SOURCE:TARGET[:ro|rw|cow] or /workspace/PATH:cow, as (target, value) of the table."""
     parts = value.split(':')
     if len(parts) == 2 and parts[1] == 'cow' and parts[0].startswith('/workspace/'):
-        parts = ['', *parts]
+        return parts[0], 'cow'
     if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] not in MOUNT_MODES):
         raise ValueError(f'{where}: {value!r}: expected SOURCE:TARGET, with :ro, :rw or :cow after it or not, '
                          'or /workspace/PATH:cow')
-    source, target = parts[:2]
-    if (not source and len(parts) != 3) or ',' in value or re.search(r'[\x00-\x1f]', value) or (
-            not source and parts[2] != 'cow'):
-        raise ValueError(f'{where}: {value!r}: expected a source path without commas or control characters')
+    # The mode always, so that a source named like one stays a source.
+    return parts[1], f'{parts[0]}:{parts[2] if len(parts) == 3 else "ro"}'
+
+
+def mount_target(target, at):
+    """A target as an absolute, normalized path, with ~/... under the agent's home."""
+    if not isinstance(target, str) or ',' in target or re.search(r'[\x00-\x1f]', target):
+        raise ValueError(f'{at}: expected a target path without commas or control characters')
     if target.startswith('~/'):
         target = AGENT_HOME + target[1:]
     path = Path(target)
@@ -250,22 +248,117 @@ def parse_mount(value, where='agent.mounts'):
     if (not path.is_absolute() or str(path) != target.rstrip('/') or '..' in path.parts
             or path in (Path('/'), Path(AGENT_HOME))
             or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_TARGETS)):
-        raise ValueError(f'{where}: {value!r}: the target must be an absolute, normalized path outside '
+        raise ValueError(f'{at}: the target must be an absolute, normalized path outside '
                          + ', '.join(MANAGED_TARGETS))
-    mode = parts[2] if len(parts) == 3 else 'ro'
+    return str(path)
+
+
+def parse_mount(target, value, where='agent.mounts'):
+    """TARGET = "SOURCE[:ro|rw|cow]" as (source, target, mode); ro unless given.
+
+    A target of ~/... is under the agent's home, /home/node. A target under
+    /workspace takes only cow, for dependencies such as node_modules; with the
+    value "cow" alone, its source is the repository's own path there (source
+    '' here, resolved by cow_source).
+    """
+    at = f'{where}: {target!r} = {value!r}'
+    if not isinstance(value, str):
+        raise ValueError(f'{at}: expected "SOURCE", with :ro, :rw or :cow after it or not, '
+                         'or false to drop the mount of another file')
+    source, mode = value, 'ro'
+    if value in MOUNT_MODES:
+        source, mode = '', value
+    else:
+        head, colon, tail = value.rpartition(':')
+        if colon and tail in MOUNT_MODES:
+            source, mode = head, tail
+    if ',' in source or re.search(r'[\x00-\x1f]', source):
+        raise ValueError(f'{at}: expected a source path without commas or control characters')
+    path = Path(mount_target(target, at))
+    if not source and not (mode == 'cow' and path.is_relative_to('/workspace') and path != Path('/workspace')):
+        raise ValueError(f'{at}: expected a source path; only a target under /workspace takes "cow" alone')
     if path == Path('/workspace') or path.is_relative_to('/workspace') and (
             mode != 'cow' or any(path == Path(managed) or path.is_relative_to(managed) for managed in MANAGED_WORKSPACE)):
-        raise ValueError(f'{where}: {value!r}: under /workspace, only :cow mounts go, and not at '
+        raise ValueError(f'{at}: under /workspace, only cow mounts go, and not at '
                          + ', '.join(['/workspace', *MANAGED_WORKSPACE]))
     return source, str(path), mode
 
 
-def resolve_mount(value, base):
-    """A mount with its source resolved like the other paths: ~ expanded, relative to base."""
-    source, target, mode = parse_mount(value)
-    if not source:
-        return f'{target}:{mode}'
-    return f'{resolve(source, base)}:{target}:{mode}'
+def mount_table(mounts, where='agent.mounts'):
+    """One file's agent.mounts, a table or the list form, as {target: (source, mode), or False}.
+
+    False drops the mount of that target that another file gives.
+    """
+    entries = [mount_entry(value, where) for value in mounts] if isinstance(mounts, list) else mounts.items()
+    table = {}
+    for target, value in entries:
+        if value is False:
+            target, mount = mount_target(target, f'{where}: {target!r}'), False
+        else:
+            source, target, mode = parse_mount(target, value, where)
+            mount = (source, mode)
+        if target in table:
+            raise ValueError(f'{where}: {target} is given twice')
+        table[target] = mount
+    return table
+
+
+def resolve_mounts(mounts, base):
+    """One file's agent.mounts as {target: "SOURCE:MODE", or "cow", or False}, sources resolved like the
+    other paths: ~ expanded, relative to base."""
+    return {target: mount and (f'{resolve(mount[0], base)}:{mount[1]}' if mount[0] else mount[1])
+            for target, mount in mount_table(mounts).items()}
+
+
+def image_table(images, where='docker.images'):
+    """One file's docker.images, a table or the list form, as {image: True, or False}.
+
+    False drops the image that another file gives.
+    """
+    table = dict.fromkeys(images, True) if isinstance(images, list) else images
+    for image, keep in table.items():
+        if not image or re.search(r'[\s#]', image):
+            raise ValueError(f'{where}: {image!r} is not an image name')
+        if not isinstance(keep, bool):
+            raise ValueError(f'{where}: {image!r}: expected true, or false to drop the image of another file')
+    return table
+
+
+def extension_table(extensions, where='codeServer.extensions'):
+    """One file's codeServer.extensions, a table or the list form of ID[@VERSION],
+    as {ID: VERSION, or True for the latest, or False}.
+
+    False drops the extension that another file gives.
+    """
+    if isinstance(extensions, list):
+        table = {}
+        for item in extensions:
+            extension, at, version = item.partition('@')
+            if at and not EXTENSION_VERSION.fullmatch(version):
+                raise ValueError(f'{where}: {item!r}: expected ID@VERSION, as vscodevim.vim@1.27.3')
+            if extension in table:
+                raise ValueError(f'{where}: {extension} is given twice')
+            table[extension] = version if at else True
+    else:
+        table = extensions
+    for extension, version in table.items():
+        if not EXTENSION_ID.fullmatch(extension):
+            raise ValueError(f'{where}: {extension!r} is not an extension ID (publisher.name)')
+        if not (isinstance(version, bool) or isinstance(version, str) and EXTENSION_VERSION.fullmatch(version)):
+            raise ValueError(f'{where}: {extension}: expected true, a version such as "1.27.3", '
+                             'or false to drop the extension of another file')
+    return table
+
+
+# The settings that take a table by item, merged by key across the files, or
+# the older list.
+KEYED = {('agent', 'mounts'): mount_table, ('docker', 'images'): image_table,
+         ('codeServer', 'extensions'): extension_table}
+
+
+def agent_mounts(settings):
+    """The merged agent.mounts as (source, target, mode)."""
+    return [parse_mount(target, value) for target, value in settings['agent']['mounts'].items()]
 
 
 def cow_source(source, target, root):
@@ -297,8 +390,7 @@ def cow_paths(source, target, root=ROOT, environ=os.environ):
 def prepare_cow_mounts(settings, root=ROOT, environ=os.environ):
     """Create the upper and work directories of the :cow mounts."""
     # Never clear them: the agent's changes survive ordinary recreation.
-    for value in settings['agent']['mounts']:
-        source, target, mode = parse_mount(value)
+    for source, target, mode in agent_mounts(settings):
         if mode == 'cow':
             paths = cow_paths(cow_source(source, target, root), target, root, environ)
             for key in ('upper', 'work'):
@@ -347,8 +439,19 @@ def load(root=ROOT):
             if value:
                 data[table][key] = str(resolve(value, source.parent))
         if 'mounts' in data.get('agent', {}):
-            data['agent']['mounts'] = [resolve_mount(value, source.parent) for value in data['agent']['mounts']]
+            data['agent']['mounts'] = resolve_mounts(data['agent']['mounts'], source.parent)
+        if 'images' in data.get('docker', {}):
+            data['docker']['images'] = image_table(data['docker']['images'])
+        if 'extensions' in data.get('codeServer', {}):
+            data['codeServer']['extensions'] = extension_table(data['codeServer']['extensions'])
         settings = merge(settings, data)
+    # Merged by key; false drops another file's.
+    settings['agent']['mounts'] = {target: value for target, value in settings['agent']['mounts'].items()
+                                   if value is not False}
+    settings['docker']['images'] = [image for image, keep in settings['docker']['images'].items() if keep]
+    settings['codeServer']['extensions'] = [extension if version is True else f'{extension}@{version}'
+                                            for extension, version in settings['codeServer']['extensions'].items()
+                                            if version is not False]
     subnets = settings['subnets']
     if subnets['proxy'] and subnets['proxy'] == subnets['dind']:
         raise ValueError('subnets: proxy and dind must differ')
@@ -815,8 +918,7 @@ def workspace_compose(settings, root, environ=os.environ):
         mounts.append({'type': 'bind', 'source': '/nix/store', 'target': '/nix/store',
                        'read_only': True, 'bind': {'create_host_path': False}})
     volumes = {}
-    for value in settings['agent']['mounts']:
-        source, target, mode = parse_mount(value)
+    for source, target, mode in agent_mounts(settings):
         if not source:
             source = cow_source(source, target, root)
             # Only where the repository has it, so that the global claude.toml can name it.
