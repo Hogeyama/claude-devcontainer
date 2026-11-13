@@ -24,6 +24,10 @@ if [ ! -d "$data/$tree" ]; then
     git -C "$top" archive "HEAD:$core" | tar -x -C "$temporary"
     mv "$temporary" "$data/$tree"
 fi
+# The images copy the files with their modes, and the proxy and the others run
+# as users other than the host's: keep them readable whatever the umask, as
+# Git has them. Also repairs a core installed under a stricter umask.
+chmod -R go+rX "$data/$tree"
 ln -sfn "$tree" "$data/current"
 ln -sfn "$data/current/scripts/claude-devcontainer" "$HOME/.local/bin/claude-devcontainer"
 echo "Installed $data/$tree; run claude-devcontainer in a Git repository."
