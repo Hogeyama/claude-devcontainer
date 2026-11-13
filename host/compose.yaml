@@ -1,7 +1,7 @@
 # The host command's environment (scripts/claude-devcontainer), for a
 # repository without .devcontainer: the state directory that the command names
 # stands in for .devcontainer/. Every repository uses this one file, so the
-# project is named after the workspace (claude-<folder>-<hash>; layout.py
+# project is named after the workspace (claude-<folder>; layout.py
 # project_name).
 name: ${CLAUDE_DEVCONTAINER_PROJECT:?run claude-devcontainer}
 include:

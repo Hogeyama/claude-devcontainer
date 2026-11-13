@@ -43,12 +43,12 @@ def workspace_id(root):
 
 
 def project_name(root):
-    """The compose project of host mode: claude-<folder>-<hash>, the folder's
-    name for people to tell environments apart, and its path's hash so that
-    two folders of the same name differ."""
+    """The compose project of host mode: claude-<folder>. As in repository
+    mode, whose project the Dev Containers CLI names <folder>_devcontainer,
+    two folders of the same name share it, and should not run at once."""
     root = Path(root).resolve()
     folder = re.sub(r'[^a-z0-9]+', '-', root.name.lower()).strip('-')[:40].strip('-') or 'workspace'
-    return f'claude-{folder}-{workspace_id(root)[:8]}'
+    return f'claude-{folder}'
 
 
 def state_dir(root):
