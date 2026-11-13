@@ -12,6 +12,7 @@
 | `.devcontainer/claude/scripts/compose.sh ARGS` | `claude-devcontainer compose ARGS` |
 | `.devcontainer/claude/scripts/code-server.sh` | `claude-devcontainer code-server` |
 | `.devcontainer/.generated/` | `~/.local/state/claude-devcontainer/workspaces/<ID>/.generated/` |
+| Composeのプロジェクト名（`<フォルダー名>_devcontainer`） | `claude-<フォルダー名>`（例：`claude-my-app`）。コンテナは`claude-my-app-agent-1`のような名前になる。どちらも、同じ名前のフォルダーの環境を同時に使うと衝突する |
 
 `.devcontainer/compose.yaml`や`agent-setup.sh`への追加、`inject-credentials.py`・`load-images.py`・`acp-agent.py`の直接実行は、この方法では使えません。
 

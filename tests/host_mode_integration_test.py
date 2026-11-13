@@ -33,7 +33,7 @@ class HostModeComposeTest(unittest.TestCase):
                         XDG_STATE_HOME=str(self.top / 'xdg-state'),
                         CLAUDE_DEVCONTAINER_WORKSPACE=str(self.repo),
                         CLAUDE_DEVCONTAINER_CONFIG_DIR=str(self.state),
-                        CLAUDE_DEVCONTAINER_WORKSPACE_ID='0123456789abcdef')
+                        CLAUDE_DEVCONTAINER_PROJECT='claude-repo')
         subprocess.run([sys.executable, str(CORE / 'scripts/settings.py'), 'generate'],
                        env=self.env, check=True, cwd=self.repo)
         (self.state / '.generated/networks.env').write_text(
@@ -46,7 +46,7 @@ class HostModeComposeTest(unittest.TestCase):
         return json.loads(result.stdout)
 
     def test_project_is_named_after_the_workspace(self):
-        self.assertEqual(self.config()['name'], 'cdc-0123456789abcdef')
+        self.assertEqual(self.config()['name'], 'claude-repo')
 
     def test_state_directory_stands_in_for_devcontainer(self):
         config = self.config()

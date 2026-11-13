@@ -1,5 +1,4 @@
 """The host command, with stand-ins for devcontainer and Docker."""
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -47,7 +46,7 @@ class HostCommandTest(unittest.TestCase):
                               capture_output=True, text=True, check=check)
 
     def project(self):
-        return 'cdc-' + hashlib.sha256(os.fsencode(self.repo.resolve())).hexdigest()[:16]
+        return 'claude-repo'
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
@@ -62,7 +61,7 @@ class HostCommandTest(unittest.TestCase):
         self.assertEqual(env['CLAUDE_DEVCONTAINER_WORKSPACE'], str(self.repo.resolve()))
         self.assertTrue(env['CLAUDE_DEVCONTAINER_CONFIG_DIR'].startswith(str(self.top / 'state')))
         self.assertTrue(Path(env['CLAUDE_DEVCONTAINER_CONFIG_DIR']).is_dir())
-        self.assertRegex(env['CLAUDE_DEVCONTAINER_WORKSPACE_ID'], r'^[0-9a-f]{16}$')
+        self.assertEqual(env['CLAUDE_DEVCONTAINER_PROJECT'], self.project())
         self.assertEqual(env['CLAUDE_DEVCONTAINER_CORE'], str(CORE))
         self.assertFalse((self.repo / '.devcontainer').exists())
 

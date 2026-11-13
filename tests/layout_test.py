@@ -13,6 +13,16 @@ spec.loader.exec_module(layout)
 
 
 class LayoutTest(unittest.TestCase):
+    def test_host_mode_project_names_the_folder(self):
+        for folder, expected in [('my-app', 'claude-my-app'), ('My_App.v2', 'claude-my-app-v2'),
+                                 ('日本語', 'claude-workspace'), ('--x--', 'claude-x'),
+                                 ('a' * 60, 'claude-' + 'a' * 40)]:
+            with self.subTest(folder=folder):
+                project = layout.project_name(Path('/home/me/src') / folder)
+                self.assertEqual(project, expected)
+                # What compose accepts as a project name.
+                self.assertRegex(project, r'^[a-z0-9][a-z0-9_-]*$')
+
     def test_repository_mode_is_found_from_the_core(self):
         self.assertEqual(layout.CORE, ROOT / '.devcontainer/claude')
         self.assertFalse(layout.host_mode({}))

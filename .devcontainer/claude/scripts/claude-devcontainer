@@ -42,12 +42,12 @@ def environment(root):
     return dict(os.environ, **{
         layout.WORKSPACE: str(root),
         layout.CONFIG_DIR: str(state),
-        'CLAUDE_DEVCONTAINER_WORKSPACE_ID': layout.workspace_id(root),
+        'CLAUDE_DEVCONTAINER_PROJECT': layout.project_name(root),
         'CLAUDE_DEVCONTAINER_CORE': str(layout.CORE),
     })
 
 
-def check_alone(root, config):
+def check_alone(root, config, own):
     """Refuse when the folder has a repository mode environment: the scripts find
     an environment by its folder, and would find two. Refuse also when its own
     environment was started from another installed core: devcontainer up would
@@ -58,7 +58,6 @@ def check_alone(root, config):
                              '--format', '{{.Label "com.docker.compose.project"}}\t{{.Label "devcontainer.config_file"}}'
                              '\t{{.State}}'],
                             capture_output=True, text=True, check=True)
-    own = 'cdc-' + layout.workspace_id(root)
     agents = [(line.split('\t') + ['', ''])[:3] for line in result.stdout.splitlines() if line.strip()]
     others = sorted({project for project, _, _ in agents} - {own})
     if others:
@@ -76,7 +75,7 @@ def start(root, env, reuse=False):
     if not shutil.which('devcontainer'):
         sys.exit('error: claude-devcontainer needs the devcontainer CLI (npm install -g @devcontainers/cli).')
     config = layout.CORE / 'host/devcontainer.json'
-    running = check_alone(root, config)
+    running = check_alone(root, config, env['CLAUDE_DEVCONTAINER_PROJECT'])
     target = ['--workspace-folder', str(root), '--config', str(config)]
     if reuse and running:
         return target
