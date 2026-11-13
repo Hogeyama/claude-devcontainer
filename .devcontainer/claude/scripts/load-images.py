@@ -91,13 +91,51 @@ def in_dind(dind, script, *arguments, data=None, check=True):
                   data=data, check=check)
 
 
-def load(dind, references):
-    """Copy each image into DinD unless it is there already; return the failures."""
+def base_images():
+    """{image: {"host": ID, "dind": ID}} of this workspace's docker.shared_base, or {}."""
+    try:
+        loaded = settings.load(ROOT)
+    except ValueError:
+        return {}
+    name = settings.dind_store(loaded)
+    if not name:
+        return {}
+    try:
+        record = json.loads(settings.dind_paths(name, ROOT)['images'].read_text())
+    except (OSError, ValueError):
+        return {}
+    return {image: entry for image, entry in record.items()
+            if isinstance(entry, dict) and isinstance(entry.get('host'), str) and isinstance(entry.get('dind'), str)}
+
+
+def name_base_images(dind, base):
+    """Tag in DinD the base's images that it has but does not name.
+
+    DinD's image list is one file. Once a DinD over the shared base has
+    written its own, that copy hides the base's, so the images of generations
+    added later are there, but unnamed (settings.dind_paths).
+    """
+    for image, entry in base.items():
+        if in_dind(dind, 'docker image inspect "$1" >/dev/null 2>&1', image, check=False).returncode == 0:
+            continue
+        if in_dind(dind, 'docker tag "$1" "$2"', entry['dind'], image, check=False).returncode == 0:
+            print(time.strftime('%F %T'), 'named', image, 'from the shared base', flush=True)
+
+
+def load(dind, references, base=None):
+    """Copy each image into DinD unless it is there already; return the failures.
+
+    base: base_images(), whose images DinD has from its shared base.
+    """
+    base = base_images() if base is None else base
+    name_base_images(dind, base)
     record = in_dind(dind, f'cat {RECORD} 2>/dev/null || echo {{}}').stdout
     try:
         loaded = json.loads(record)
     except ValueError:
         loaded = {}
+    # The base's, unless this DinD loaded its own since.
+    loaded = {**{image: entry['host'] for image, entry in base.items()}, **loaded}
     failures = []
     for image in references:
         identity = host_id(image)

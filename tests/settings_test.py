@@ -241,14 +241,29 @@ class SettingsTest(unittest.TestCase):
                 self.generate(environ)
                 self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_DIND_SHARED'], "'common'")
                 compose = json.loads((out / 'workspace.compose.yaml').read_text())
+                paths = settings.dind_paths(store, self.root, environ)
+                gen = state.resolve() / f'claude-devcontainer/dind-base/{store}/gens/0'
+                self.assertEqual(paths['gens'] / '0', gen)
                 self.assertEqual(compose['services']['dind'], {'volumes': [
                     {'type': 'volume', 'source': 'workspace', 'target': '/workspace'},
-                    {'type': 'volume', 'source': f'dind-shared-{store}', 'target': '/home/rootless/.local/share/docker'}]})
-                paths = settings.dind_paths(store, self.root, environ)
-                self.assertEqual(paths['data'], state.resolve() / f'claude-devcontainer/dind-base/{store}/data')
+                    {'type': 'volume', 'source': f'dind-shared-{store}-0', 'target': '/home/rootless/.local/share/docker'}]})
                 self.assertTrue(paths['upper'].is_relative_to(state.resolve() / 'claude-devcontainer/dind'))
-                self.assertEqual(compose['volumes'][f'dind-shared-{store}']['driver_opts']['o'],
-                                 f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}')
+                self.assertEqual(compose['volumes'][f'dind-shared-{store}-0']['driver_opts']['o'],
+                                 f'lowerdir={gen},upperdir={paths["upper"]},workdir={paths["work"]}')
+
+    def test_dind_runs_over_every_generation_of_the_base(self):
+        state = self.state()
+        environ = {'XDG_STATE_HOME': str(state)}
+        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\n')
+        paths = settings.dind_paths('common.map-1000-1000', self.root, environ)
+        # Generations as dind-base.py leaves them, and one it is still making.
+        for name in ('0', '1', '2', '10', '.new-11-123'):
+            (paths['gens'] / name).mkdir(parents=True)
+        self.assertEqual([gen.name for gen in settings.dind_generations(paths)], ['10', '2', '1', '0'])
+        compose = json.loads((self.generate(environ) / 'workspace.compose.yaml').read_text())
+        self.assertEqual(list(compose['volumes']), ['dind-shared-common.map-1000-1000-10'])
+        lowerdir = compose['volumes']['dind-shared-common.map-1000-1000-10']['driver_opts']['o'].split(',')[0]
+        self.assertEqual(lowerdir, 'lowerdir=' + ':'.join(str(paths['gens'] / name) for name in ('10', '2', '1', '0')))
 
     def test_dind_sees_the_clone(self):
         out = self.generate()
@@ -417,7 +432,7 @@ class SettingsTest(unittest.TestCase):
         self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\nmap_agent_ids = false\n[agent]\nuid = 1001\n')
         settings.prepare_dind(settings.load(self.root), self.root, environ)
         paths = settings.dind_paths('common', self.root, environ)
-        self.assertTrue(all(paths[key].is_dir() for key in ('data', 'upper', 'work')))
+        self.assertTrue(all(path.is_dir() for path in (paths['gens'] / '0', paths['upper'], paths['work'])))
         self.assertEqual(paths['uid'].read_text(), '1001\n')
         settings.prepare_dind(settings.load(self.root), self.root, environ)
         self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "common"\nmap_agent_ids = false\n')

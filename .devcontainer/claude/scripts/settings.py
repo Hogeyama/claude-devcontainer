@@ -490,19 +490,34 @@ def shared_base(settings):
 def dind_paths(name, root=ROOT, environ=os.environ):
     """The shared base of DinD's data and this workspace's overlay over it.
 
-    base/data is the lower: the data of a dockerd that dind-base.py runs, and
-    base/uid the UID of that dockerd (dind_ids), which owns it. upper and work are this workspace's.
+    The base is a stack of generations, base/gens/<n>, each the data that a
+    dockerd of dind-base.py wrote over the ones below it. A generation never
+    changes once made, so that the overlays over it stay sound while more are
+    added: a DinD keeps the ones it started with, and the next start takes the
+    new ones too. gens/0 is empty. base/images.json records what the base
+    holds, as {image: {"host": the host's ID, "dind": DinD's}}, by which
+    load-images.py names in a DinD the images of generations added after it
+    first named its own; base/uid the UID of its dockerd
+    (dind_ids), which owns it; base/lock serializes the making of generations.
+    upper and work are this workspace's.
     """
     root = Path(root).resolve()
     state = Path(environ.get('XDG_STATE_HOME') or Path.home() / '.local/state').resolve() / 'claude-devcontainer'
     base = state / 'dind-base' / name
     own = state / 'dind' / hashlib.sha256(os.fsencode(root)).hexdigest()[:24] / name
-    paths = {'base': base, 'data': base / 'data', 'uid': base / 'uid', 'upper': own / 'upper', 'work': own / 'work'}
+    paths = {'base': base, 'gens': base / 'gens', 'images': base / 'images.json', 'uid': base / 'uid',
+             'lock': base / 'lock', 'upper': own / 'upper', 'work': own / 'work'}
     for path in paths.values():
         if re.search(r"[\s,:\\'=]", str(path)):
             raise ValueError(f'DinD overlay path cannot contain whitespace, commas, colons, equals signs, '
                              f'backslashes or quotes: {path}')
     return paths
+
+
+def dind_generations(paths):
+    """The base's generations, the newest first, as an overlay's lowerdir lists them."""
+    found = [path for path in paths['gens'].iterdir() if path.name.isdigit()] if paths['gens'].is_dir() else []
+    return sorted(found, key=lambda path: int(path.name), reverse=True)
 
 
 def prepare_dind(settings, root=ROOT, environ=os.environ):
@@ -516,8 +531,8 @@ def prepare_dind(settings, root=ROOT, environ=os.environ):
         raise ValueError(f'docker.shared_base: {name} belongs to agent.uid = {paths["uid"].read_text().strip()}, '
                          f'not {uid}; DinD could not read its files. Use another base.')
     # Never clear upper/work: DinD's data survives ordinary recreation.
-    for key in ('data', 'upper', 'work'):
-        paths[key].mkdir(parents=True, exist_ok=True)
+    for path in (paths['gens'] / '0', paths['upper'], paths['work']):
+        path.mkdir(parents=True, exist_ok=True)
     paths['uid'].write_text(uid + '\n')
 
 
@@ -833,16 +848,19 @@ def workspace_compose(settings, root, environ=os.environ):
     if not settings['docker']['enabled']:
         dind = []
     if name := dind_store(settings):
-        # Copy-on-write over the shared base, like the Node overlay; DinD
-        # stores its data with fuse-overlayfs then, since the kernel's overlay
-        # cannot keep its upper directories on this overlay. A volume of its
-        # own name, as the options of one are fixed when Docker creates it.
+        # Copy-on-write over the shared base's generations, like the Node
+        # overlay; DinD stores its data with fuse-overlayfs then, since the
+        # kernel's overlay cannot keep its upper directories on this overlay.
+        # A volume for each generation, as the options of one are fixed when
+        # Docker creates it.
         paths = dind_paths(name, root, environ)
-        volume = 'dind-shared-' + name
+        # gens/0 is made by prepare_dind, after this the first time.
+        generations = dind_generations(paths) or [paths['gens'] / '0']
+        volume =f'dind-shared-{name}-{generations[0].name}'
         dind.append({'type': 'volume', 'source': volume, 'target': DIND_DATA})
         volumes[volume] = {'driver_opts': {
             'type': 'overlay', 'device': 'overlay',
-            'o': f'lowerdir={paths["data"]},upperdir={paths["upper"]},workdir={paths["work"]}'}}
+            'o': f'lowerdir={":".join(map(str, generations))},upperdir={paths["upper"]},workdir={paths["work"]}'}}
     elif settings['docker']['enabled'] and settings['docker']['map_agent_ids']:
         # Data laid out for the mapping of dind_ids, apart from dind-data's.
         dind.append({'type': 'volume', 'source': 'dind-data-mapped', 'target': DIND_DATA})

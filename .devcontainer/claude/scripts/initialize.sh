@@ -15,6 +15,14 @@ setting() {
     sed -n "s/^$1='\\(.*\\)'\$/\\1/p" "$config/.generated/settings.env"
 }
 CLAUDE_DEVCONTAINER_DIND=$(setting CLAUDE_DEVCONTAINER_DIND)
+# Over docker.shared_base, add the images of docker.images that the base lacks
+# as a new generation, and have DinD start over it. Without it, they still
+# load into this workspace's DinD, as below.
+if [ -n "$(setting CLAUDE_DEVCONTAINER_DIND_SHARED)" ]; then
+    python3 "$(dirname "$0")/dind-base.py" --auto ||
+        echo "warning: could not add docker.images to the shared DinD base; they load into this DinD instead." >&2
+    python3 "$(dirname "$0")/settings.py" generate
+fi
 # Only independent Git modes need a snapshot and an agent remote.
 if [ "$(setting CLAUDE_DEVCONTAINER_GIT_ISOLATION)" != unsafe_shared ]; then
     python3 "$(dirname "$0")/workspace-source.py"

@@ -314,7 +314,7 @@ DinDのdockerdはrootlessで、コンテナのUIDとGIDは外では別の番号�
 - UID 1000で動くコンテナが`/workspace`に書いたファイルは、agentのファイルになり、agentから編集・削除できます。
 - rootのコンテナもagentのファイルを読み書きできますが、新しく作ったファイルはdockerdのユーザーの所有になり、agentからは変更できません。消したいときは、DinDでrootのコンテナから消してください（`docker run --rm -v /workspace:/w busybox rm -r /w/<パス>`）。所有者をagentに戻すなら`chown -R 1000:1000`です。
 - dockerdのソケットはagentのグループに渡すので、agentからはこれまでどおり使えます。
-- この対応のため、DinDのデータはそれまでのvolume（`dind-data`）とは別の`dind-data-mapped`に置きます。イメージは次の`up`で読み込み直されます。古いvolumeは要らなければ削除してください。`shared_base`のベースも、対応ごとに別のディレクトリ（`<名前>.map-<UID>-<GID>`）になるので、`dind-base.py`で読み込み直してください。
+- この対応のため、DinDのデータはそれまでのvolume（`dind-data`）とは別の`dind-data-mapped`に置きます。イメージは次の`up`で読み込み直されます。古いvolumeは要らなければ削除してください。`shared_base`のベースも、対応ごとに別のディレクトリ（`<名前>.map-<UID>-<GID>`）になり、次の`up`で読み込み直されます。
 - `docker.map_agent_ids = false`にすると、以前の対応に戻ります。dockerdはagentのUIDで動き、コンテナのrootがagentになり、それ以外のユーザーはすべてDinDの内部のIDです。agentのUIDかGIDが65535より大きいときは、こちらにしてください。
 
 ```toml
@@ -358,18 +358,20 @@ shared_base = "common"
 
 全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`か`claude.local.toml`に書くのが便利です。`docker.enabled`が`false`のリポジトリでは無視されます。
 
-ベースへのイメージの読み込みは、ホストで次のように実行します。そのリポジトリで一度`devcontainer up`してDinDのimageを作ってから、ベースを使うすべての環境を停止して実行してください。
+`up`のたびに、`docker.images`のうちベースにないイメージを、ホストでpullしてからベースへ追加します。動いている環境を止める必要はありません。
+
+- ベースは「世代」を積み重ねたもので、イメージを追加すると新しい世代が上に重なります。一度できた世代は変更しないので、動いているDinDはそのまま使い続けられ、次に起動したときに新しい世代も使います。
+- 各リポジトリのDinDは、ベースに後から追加されたイメージにも、起動後に名前を付け直します。自分で読み込んだイメージや付けたタグは、そのまま残ります。
+- `docker.images`以外のイメージをベースへ追加するときは、ホストで次を実行します。これも動いている環境を止めずに実行できます。
 
 ```sh
-.devcontainer/claude/scripts/dind-base.py                    # docker.imagesを読み込む
-.devcontainer/claude/scripts/dind-base.py postgres:16 nginx  # 指定したイメージを読み込む
+.devcontainer/claude/scripts/dind-base.py postgres:16 nginx  # 指定したイメージを追加する
 ```
 
-- ベースは`~/.local/state/claude-devcontainer/dind-base/<名前>/data`、リポジトリごとの書き込み層は`~/.local/state/claude-devcontainer/dind/`の下に置きます。`up`のたびに`docker.images`のうちベースにないイメージは、書き込み層へ読み込みます。
+- ベースは`~/.local/state/claude-devcontainer/dind-base/<名前>/gens/`の下に世代ごとに、リポジトリごとの書き込み層は`~/.local/state/claude-devcontainer/dind/`の下に置きます。
 - ベースを使うDinDは、データをfuse-overlayfsで保存します（カーネルのoverlayはoverlayの上に書き込み層を置けないため）。共有しない場合より遅くなります。共有に切り替えると、DinDのデータは新しい置き場から始まります。
-- ベースを使うリポジトリの`agent.uid`は揃えてください。ベースを作ったときと異なるUIDでは`up`がエラーになります。
-- ベースは書き込み層の下にあるため、使っている環境の動作中は変更しないでください。`dind-base.py`は、ベースを使うDinDが動いていれば止まります。
-- ベースへ後から追加したイメージは、DinDがまだイメージ一覧を書き込んでいないリポジトリにしか見えません。見えないリポジトリは、停止して`~/.local/state/claude-devcontainer/dind/`の下のそのリポジトリの書き込み層を消すと、ベースから始め直せます（そのリポジトリのDinDのデータは消えます）。ベースからイメージを消すことはできません。
+- ベースは`agent.uid`と`agent.gid`、`docker.map_agent_ids`の組み合わせごとに別になります。
+- ベースからイメージを消すことはできません。世代が増えすぎた（目安として数十）ときや、ベースを作り直したいときは、ベースを使う環境をすべて停止し、`dind-base/<名前>`と、各リポジトリの`dind/`の下の書き込み層を消してください（DinDのファイルの所有者はホストのユーザーではないので、`sudo`が要ります）。
 
 ## ACPクライアントから使う
 
