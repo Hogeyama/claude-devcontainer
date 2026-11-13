@@ -210,14 +210,15 @@ git push -f agent HEAD:main
 
 ## 依存の共有と更新
 
-`node_modules`などの依存は、組み込みでは共有しません。ホストの依存をagentでも使うには、`claude.toml`の`agent.mounts`にCoW（`:cow`）で書きます。`/workspace/<パス>:cow`と書くと、リポジトリの同じパスのディレクトリをlower、agent専用の永続ディレクトリをupper/workとするoverlayになります。リポジトリにそのディレクトリがなければマウントせず、ホストにディレクトリも作りません。このため、全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`にも書けます。
+`node_modules`などの依存は、組み込みでは共有しません。ホストの依存をagentでも使うには、`claude.toml`の`agent.mounts`にCoW（`:cow`）で書きます。`"/workspace/<パス>" = "cow"`と書くと、リポジトリの同じパスのディレクトリをlower、agent専用の永続ディレクトリをupper/workとするoverlayになります。リポジトリにそのディレクトリがなければマウントせず、ホストにディレクトリも作りません。このため、全リポジトリ共通の`~/.config/claude-devcontainer/claude.toml`にも書けます。
 
 ```toml
-[agent]
-mounts = ["/workspace/node_modules:cow", "/workspace/packages/app/node_modules:cow"]
+[agent.mounts]
+"/workspace/node_modules" = "cow"
+"/workspace/packages/app/node_modules" = "cow"
 ```
 
-agentの書き込み・削除はupperに残り、ホストやpnpmのstoreには書き戻しません。upper/workは`$XDG_STATE_HOME`（未指定なら`~/.local/state`）の`claude-devcontainer/cow/`以下に、リポジトリとマウントごとに分かれて置かれます。overlayのオプションとして表現できない空白、カンマ、コロン、等号、バックスラッシュ、引用符を含むパスは拒否します。`/workspace`の下には`:cow`だけを書けます（`.git`と`.devcontainer`の下は不可）。
+agentの書き込み・削除はupperに残り、ホストやpnpmのstoreには書き戻しません。upper/workは`$XDG_STATE_HOME`（未指定なら`~/.local/state`）の`claude-devcontainer/cow/`以下に、リポジトリとマウントごとに分かれて置かれます。overlayのオプションとして表現できない空白、カンマ、コロン、等号、バックスラッシュ、引用符を含むパスは拒否します。`/workspace`の下には`cow`だけを書けます（`.git`と`.devcontainer`の下は不可）。
 
 npm、通常のpnpm、Yarnのnode_modulesモードを対象にします。Yarn PnPや外部のvirtual storeは自動対応しません。native addonにはホストとコンテナのNode・libc等の互換性が必要です。新しい依存をオンライン取得する仕組みではありません。Pythonの`.venv`など、ほかの依存ディレクトリも同じ書き方で共有できます。
 
