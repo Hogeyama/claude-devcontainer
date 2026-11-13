@@ -51,10 +51,5 @@ def project_name(root):
     return f'claude-{folder}-{workspace_id(root)[:8]}'
 
 
-def former_project_name(root):
-    """The name host mode gave the project before project_name."""
-    return 'cdc-' + workspace_id(root)
-
-
 def state_dir(root):
     return STATE / 'workspaces' / workspace_id(root)

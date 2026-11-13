@@ -36,23 +36,13 @@ def repository():
     return root
 
 
-def project(root):
-    """The compose project: layout.project_name, unless an environment made
-    under the former name has volumes, which hold its clone and DinD's data.
-    It keeps that name until removed with its volumes."""
-    former = layout.former_project_name(root)
-    result = subprocess.run(['docker', 'volume', 'ls', '-q', '--filter', f'label=com.docker.compose.project={former}'],
-                            capture_output=True, text=True)
-    return former if result.returncode == 0 and result.stdout.strip() else layout.project_name(root)
-
-
 def environment(root):
     state = layout.state_dir(root)
     state.mkdir(parents=True, exist_ok=True)
     return dict(os.environ, **{
         layout.WORKSPACE: str(root),
         layout.CONFIG_DIR: str(state),
-        'CLAUDE_DEVCONTAINER_PROJECT': project(root),
+        'CLAUDE_DEVCONTAINER_PROJECT': layout.project_name(root),
         'CLAUDE_DEVCONTAINER_CORE': str(layout.CORE),
     })
 
