@@ -166,6 +166,18 @@ class HostCommandTest(unittest.TestCase):
         self.assertTrue(compose)
         self.assertEqual(compose[-1][-2:], ['down', '--remove-orphans'])
 
+    def test_down_v_also_removes_the_volumes(self):
+        self.env['FAKE_PROJECTS'] = self.project() + '\n'
+        self.run_command('down', '-v', check=False)
+        compose = [call['argv'] for call in self.calls() if call['argv'][:2] == ['docker', 'compose']]
+        self.assertEqual(compose[-1][-3:], ['down', '--remove-orphans', '-v'])
+
+    def test_down_refuses_other_arguments(self):
+        result = self.run_command('down', '--rmi', 'all', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('usage:', result.stderr)
+        self.assertFalse(self.log.exists())
+
     def test_exec_runs_in_agent_and_preserves_command_arguments(self):
         self.env['FAKE_PROJECTS'] = self.project() + '\n'
         self.run_command('exec', 'sh', '-c', 'printf "%s" "hello world"')

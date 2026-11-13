@@ -8,6 +8,7 @@ goes to a state directory of this repository outside it (scripts/layout.py).
 Usage: claude-devcontainer          start unless running, then open claude in the agent
        claude-devcontainer up       start only
        claude-devcontainer down     stop and remove the containers
+       claude-devcontainer down -v  also remove the volumes: the agent's clone, uncommitted work and history
        claude-devcontainer code-server   start, then open the isolated editor (code-server.sh)
        claude-devcontainer code-server prepare   download the editor's Electron only
        claude-devcontainer compose ARGS...   docker compose for this environment
@@ -22,7 +23,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
 
-USAGE = 'usage: claude-devcontainer [up | down | code-server [prepare] | compose ARGS... | exec ARGS...]'
+USAGE = 'usage: claude-devcontainer [up | down [-v] | code-server [prepare] | compose ARGS... | exec ARGS...]'
 
 
 def repository():
@@ -87,7 +88,8 @@ def start(root, env, reuse=False):
 def main():
     args = sys.argv[1:]
     command = args[0] if args else ''
-    if command not in ('', 'up', 'down', 'code-server', 'compose', 'exec') or (command in ('up', 'down') and len(args) > 1) \
+    if command not in ('', 'up', 'down', 'code-server', 'compose', 'exec') or (command == 'up' and len(args) > 1) \
+            or (command == 'down' and args[1:] not in ([], ['-v'], ['--volumes'])) \
             or args == ['compose'] or (command == 'code-server' and args[1:] not in ([], ['prepare'])):
         sys.exit(USAGE)
     root = repository()
@@ -100,7 +102,7 @@ def main():
     if command in ('down', 'compose', 'exec'):
         # An environment of an earlier core may have services that this one's
         # compose file no longer has; down removes them too.
-        rest = args[1:] if command == 'compose' else ['down', '--remove-orphans']
+        rest = args[1:] if command == 'compose' else ['down', '--remove-orphans', *args[1:]]
         if command == 'exec':
             # As node, the user Dev Containers runs claude as; root goes
             # through compose exec explicitly.

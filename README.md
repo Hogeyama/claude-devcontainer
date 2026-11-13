@@ -400,6 +400,7 @@ sh .devcontainer/claude/scripts/install-host.sh
 claude-devcontainer          # 起動して（起動済みならそのまま）、agentの中でclaudeを開く
 claude-devcontainer up       # 起動だけ
 claude-devcontainer down     # 止める
+claude-devcontainer down -v  # 止めて、volume(agentのclone・未コミットの作業・Claudeの履歴・DinDのデータ)も消す
 claude-devcontainer code-server  # 起動して、隔離エディタを開く(codeServer.enabled が必要)
 claude-devcontainer compose logs proxy  # この環境の docker compose
 claude-devcontainer exec bash  # compose exec --user node agent bash の短縮形（rootで入るなら compose exec agent bash）
