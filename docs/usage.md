@@ -296,7 +296,7 @@ proxyは1環境につき1組の認証値を持ち、次の要求から新しい�
 
 ## DockerとTestcontainers
 
-DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは、同じ`[docker]`の`images`に`名前:tag`の形で並べてください。
+DinDは`.devcontainer/claude.toml`の`[docker]`に`enabled = true`と書いた場合だけ起動します。作業用コンテナから使うDockerは、専用のDinDコンテナで動作します。registry、外部DNS、ホストサービスには接続できません。必要なイメージは、`[docker.images]`に`"名前:tag" = true`の形で書いてください。
 
 agentの`/workspace`はDinDの`/workspace`にも同じパスで見えるので、`docker run -v /workspace/...:/app`やTestcontainersのバインドマウントがそのまま使えます。
 
@@ -321,7 +321,10 @@ DinDのdockerdはrootlessで、コンテナのUIDとGIDは外では別の番号�
 ```toml
 [docker]
 enabled = true
-images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
+
+[docker.images]
+"testcontainers/ryuk:0.14.0" = true
+"postgres:16" = true
 ```
 
 `devcontainer up`のたびに、イメージ読み込みスクリプトがホストにないイメージをホストでpullし、DinDへ読み込みます。

@@ -71,7 +71,7 @@ The working tree AND Git index, HEAD, refs and objects are the host's. Commits i
 Docker is available only if `$CLAUDE_DEVCONTAINER_DIND` is `1`. Otherwise `docker` cannot work, and the human has to set `enabled = true` under `[docker]` in `.devcontainer/claude.toml`.
 
 - DinD reaches no registry and no external DNS. `docker pull` fails, and so does any network access during a build (`apt-get install`, `npm install`, ...).
-- The only images are those the human listed in `images` under `[docker]` in `.devcontainer/claude.toml`; `docker images` shows them. If one is missing, give the human its exact `name:tag`.
+- The only images are those the human listed in `docker.images` in `.devcontainer/claude.toml`; `docker images` shows them. If one is missing, give the human its exact `name:tag`.
 - Build with `docker build --network=none`, from images already loaded and dependency files already on disk. Run Gradle with `--offline`.
 - Publish ports on `0.0.0.0` (`-p 8080` or `-p 18080:8080`) and connect to `127.0.0.1:<published port>`. Ports published on loopback only (`-p 127.0.0.1:8080:8080`) and port 2375 are not relayed.
 - Docker is rootless: a container's IDs are other IDs outside. A container user with your UID (`id -u`, usually 1000, as `node` in the node images) is you, so its files there are yours. A container's root is dockerd's own user (the UID in `$TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`, `/run/user/<UID>/docker.sock`): files it creates you can read but not change; remove them, or `chown -R "$(id -u):$(id -g)"` them, from a root container (`docker run --rm -v /workspace:/w busybox ...`). Other users are subordinate IDs (100000 + UID - 1). Prefer `--user "$(id -u):$(id -g)"` for containers that write into `/workspace`. This holds unless the human set `docker.map_agent_ids = false`; then a container's root is you.
@@ -86,7 +86,7 @@ Package registries are unavailable. In shared mode, ask the human to edit `.devc
 |---|---|
 | A command or language runtime | `.devcontainer/agent-setup.sh`, run as root when the image is built (after the human's own `~/.config/claude-devcontainer/agent-setup.sh`) |
 | An environment variable | `[agent.env]` of `.devcontainer/claude.toml`, as `NAME = "value"` (literal, no `$` expansion; not for secrets) |
-| An image for DinD | `images` under `[docker]` in `.devcontainer/claude.toml` |
+| An image for DinD | `docker.images` in `.devcontainer/claude.toml` |
 | Another host or API | `.devcontainer/claude.toml`, a `[proxy.hosts."api.example.com"]` table (the host name quoted) with the narrowest `routes` (`"GET /path"` or a bare path for any method). For a token, `inject` (e.g. `inject = { Authorization = "Bearer ${NOTION_API_KEY}" }`), `env = ["NOTION_API_KEY"]` for the dummy the tool reads, and the human's `NOTION_API_KEY` under `[secrets]` of `~/.config/claude-devcontainer/credentials.toml`. A host served over plain HTTP (port 80) needs `http = true`, which cannot be combined with `inject`. A host only this human uses goes in `.devcontainer/claude.local.toml` instead |
 | The nix dev shell of the repository's flake | `enabled = true` under `[nix]` in `.devcontainer/claude.toml` (already on if `$CLAUDE_DEVCONTAINER_NIX` is `1`) |
 | Environment variables, host directories, shared dependencies | `agent.env` and `agent.mounts` in `.devcontainer/claude.toml`; other volumes in `.devcontainer/compose.yaml` |

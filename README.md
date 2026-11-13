@@ -182,7 +182,15 @@ CLIで使っていた場合は、ホストで取り込んだリポジトリの�
 enabled = false
 ```
 
-配列も置き換えです。`claude.local.toml`に`docker.images`を書くと、`claude.toml`の一覧には足されず、その一覧だけになります。`proxy.hosts`は、同じホストの設定を丸ごと置き換えます。
+配列も置き換えです。ただし`agent.mounts`、`docker.images`、`codeServer.extensions`は項目ごとに混ぜます。テーブルでも配列でも書け、どちらで書いても足し合わされます。ほかのファイルにある項目は、テーブルに`false`を書くと外せます。
+
+```toml
+[docker.images]
+"redis:7" = true
+"postgres:16" = false # claude.tomlにあっても、このホストでは読み込まない
+```
+
+`proxy.hosts`は、同じホストの設定を丸ごと置き換えます。
 
 設定を変えたら、[終了する](#5-終了する)の手順で環境を停止し、`devcontainer up`で起動し直してください。`agent`、`acp`、`docker.enabled`、`nix.enabled`、`sumi.enabled`、`codeServer.enabled`、`codeServer.extensions`を変えたときは、リポジトリのルートで次を実行してコンテナも作り直してください。
 
@@ -292,10 +300,13 @@ share_projects = true
 ```toml
 [docker]
 enabled = true
-images = ["postgres:16", "testcontainers/ryuk:0.14.0"]
+
+[docker.images]
+"postgres:16" = true
+"testcontainers/ryuk:0.14.0" = true
 ```
 
-DinDは外部のregistryに接続できません。使うイメージは`images`に書いてください。`devcontainer up`のたびに、ホストがイメージを用意してDinDへ読み込みます。読み込みの詳細やポートへの接続方法は、[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。`shared_base = "名前"`を書くと、同じ名前を書いたリポジトリとイメージの置き場を共有します（[DinDのイメージを複数のリポジトリで共有する](docs/usage.md#dindのイメージを複数のリポジトリで共有する)）。
+DinDは外部のregistryに接続できません。使うイメージは`docker.images`に書いてください。`images = ["postgres:16"]`のような配列でも書けます。`devcontainer up`のたびに、ホストがイメージを用意してDinDへ読み込みます。読み込みの詳細やポートへの接続方法は、[DockerとTestcontainers](docs/usage.md#dockerとtestcontainers)を参照してください。`shared_base = "名前"`を書くと、同じ名前を書いたリポジトリとイメージの置き場を共有します（[DinDのイメージを複数のリポジトリで共有する](docs/usage.md#dindのイメージを複数のリポジトリで共有する)）。
 
 ### nixのdev shellを使う
 

@@ -75,10 +75,12 @@
 [docker]
 # Run Docker in DinD for the agent.
 # enabled = false
-# Images to load into DinD, as name:tag. The host pulls the ones it lacks on
+# Images to load into DinD, as "name:tag" = true, merged by image with the
+# global and local files; false drops another file's. The older list of
+# "name:tag" still works. The host pulls the ones it lacks on
 # `devcontainer up` and copies them in; DinD cannot reach a registry.
 # Testcontainers also needs the Ryuk image of the version your library uses.
-# images = ["testcontainers/ryuk:0.14.0", "postgres:16"]
+# images = { "testcontainers/ryuk:0.14.0" = true, "postgres:16" = true }
 # A base of DinD's data shared by the workspaces that name it, which run at
 # once, each copy-on-write over it. `up` adds the images of images that it
 # lacks, while other workspaces run; scripts/dind-base.py adds others. Empty:
@@ -190,7 +192,9 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # then open with claude/scripts/code-server.sh; no administrator rights.
 # See claude/code-server/README.md.
 enabled = false
-# Marketplace IDs, optionally @version,
-# installed into the agent's image at build time (rebuild and recreate the
-# agent after a change). anthropic.claude-code is always installed.
-extensions = [] # e.g. ["ms-python.python"]
+# Marketplace IDs, as ID = true for the latest or ID = "VERSION", merged by ID
+# with the global and local files; false drops another file's. The older list
+# of ID[@VERSION] still works. Installed into the agent's image at build time
+# (rebuild and recreate the agent after a change). anthropic.claude-code is
+# always installed.
+extensions = {} # e.g. { "ms-python.python" = true, "vscodevim.vim" = "1.27.3" }

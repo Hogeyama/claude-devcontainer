@@ -65,10 +65,10 @@ DEFAULTS = {
     'git': {'isolation': 'clone', 'shared_hidden_paths': [], 'inherit_remotes': True},
     'agent': {'uid': 1000, 'gid': 1000, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': {}},
     'acp': {'enabled': False, 'version': '0.90.0'},
-    'docker': {'enabled': False, 'images': [], 'shared_base': '', 'map_agent_ids': True},
+    'docker': {'enabled': False, 'images': {}, 'shared_base': '', 'map_agent_ids': True},
     'nix': {'enabled': False, 'ref': 'HEAD', 'shell': ''},
     'sumi': {'enabled': False, 'secrets': str(CONFIG / 'sumi/secrets.txt')},
-    'codeServer': {'enabled': False, 'extensions': []},
+    'codeServer': {'enabled': False, 'extensions': {}},
     'proxy': {'ca': '', 'connectors': [], 'web_search': False, 'hosts': {}},
     'subnets': {'proxy': '', 'dind': ''},
 }
@@ -93,7 +93,8 @@ RESERVED_ENV = {'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'DOCKER_HOST', 'CLAUDE_
 RESERVED_ENV_PREFIXES = ('TESTCONTAINERS_', PREFIX)
 CONNECTOR = re.compile(r'mcp(srv|rs)_[A-Za-z0-9]+')
 # A Marketplace extension ID, publisher.name, optionally @version.
-EXTENSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(@[0-9][0-9A-Za-z.+-]*)?')
+EXTENSION_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*')
+EXTENSION_VERSION = re.compile(r'[0-9][0-9A-Za-z.+-]*')
 # Exact package versions only, including prereleases; no moving tags or ranges.
 ACP_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
                          r'(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
@@ -175,12 +176,12 @@ def check(data, source):
             if key not in DEFAULTS[table]:
                 raise ValueError(f'{where}: unknown setting')
             default = DEFAULTS[table][key]
-            if (table, key) == ('agent', 'mounts'):
-                # A table by target, or the older list of SOURCE:TARGET[:MODE].
+            if (table, key) in KEYED:
+                # A table by item, or the older list.
                 if not isinstance(value, (dict, list)) or (
                         isinstance(value, list) and not all(isinstance(item, str) for item in value)):
                     raise ValueError(f'{where}: expected a table, or a list of strings')
-                mount_table(value, where)
+                KEYED[table, key](value, where)
                 continue
             # bool is an int in Python, but not a UID.
             if type(value) is not type(default) or (isinstance(value, list) and not all(isinstance(item, str) for item in value)):
@@ -208,15 +209,9 @@ def check(data, source):
     for key in ('uid', 'gid'):
         if agent.get(key, 1) <= 0:
             raise ValueError(f'{source}: agent.{key}: must be positive')
-    for image in docker.get('images', []):
-        if not image or re.search(r'[\s#]', image):
-            raise ValueError(f'{source}: docker.images: {image!r} is not an image name')
     if docker.get('shared_base') and not BASE_NAME.fullmatch(docker['shared_base']):
         raise ValueError(f'{source}: docker.shared_base: {docker["shared_base"]!r} is not a name '
                          '(letters, digits, _ . -)')
-    for item in data.get('codeServer', {}).get('extensions', []):
-        if not EXTENSION.fullmatch(item):
-            raise ValueError(f'{source}: codeServer.extensions: {item!r} is not an extension ID (publisher.name)')
     for item in proxy.get('connectors', []):
         if not CONNECTOR.fullmatch(item):
             raise ValueError(f'{source}: proxy.connectors: {item!r} is not a connector ID (mcpsrv_...)')
@@ -315,6 +310,52 @@ def resolve_mounts(mounts, base):
             for target, mount in mount_table(mounts).items()}
 
 
+def image_table(images, where='docker.images'):
+    """One file's docker.images, a table or the list form, as {image: True, or False}.
+
+    False drops the image that another file gives.
+    """
+    table = dict.fromkeys(images, True) if isinstance(images, list) else images
+    for image, keep in table.items():
+        if not image or re.search(r'[\s#]', image):
+            raise ValueError(f'{where}: {image!r} is not an image name')
+        if not isinstance(keep, bool):
+            raise ValueError(f'{where}: {image!r}: expected true, or false to drop the image of another file')
+    return table
+
+
+def extension_table(extensions, where='codeServer.extensions'):
+    """One file's codeServer.extensions, a table or the list form of ID[@VERSION],
+    as {ID: VERSION, or True for the latest, or False}.
+
+    False drops the extension that another file gives.
+    """
+    if isinstance(extensions, list):
+        table = {}
+        for item in extensions:
+            extension, at, version = item.partition('@')
+            if at and not EXTENSION_VERSION.fullmatch(version):
+                raise ValueError(f'{where}: {item!r}: expected ID@VERSION, as vscodevim.vim@1.27.3')
+            if extension in table:
+                raise ValueError(f'{where}: {extension} is given twice')
+            table[extension] = version if at else True
+    else:
+        table = extensions
+    for extension, version in table.items():
+        if not EXTENSION_ID.fullmatch(extension):
+            raise ValueError(f'{where}: {extension!r} is not an extension ID (publisher.name)')
+        if not (isinstance(version, bool) or isinstance(version, str) and EXTENSION_VERSION.fullmatch(version)):
+            raise ValueError(f'{where}: {extension}: expected true, a version such as "1.27.3", '
+                             'or false to drop the extension of another file')
+    return table
+
+
+# The settings that take a table by item, merged by key across the files, or
+# the older list.
+KEYED = {('agent', 'mounts'): mount_table, ('docker', 'images'): image_table,
+         ('codeServer', 'extensions'): extension_table}
+
+
 def agent_mounts(settings):
     """The merged agent.mounts as (source, target, mode)."""
     return [parse_mount(target, value) for target, value in settings['agent']['mounts'].items()]
@@ -399,10 +440,18 @@ def load(root=ROOT):
                 data[table][key] = str(resolve(value, source.parent))
         if 'mounts' in data.get('agent', {}):
             data['agent']['mounts'] = resolve_mounts(data['agent']['mounts'], source.parent)
+        if 'images' in data.get('docker', {}):
+            data['docker']['images'] = image_table(data['docker']['images'])
+        if 'extensions' in data.get('codeServer', {}):
+            data['codeServer']['extensions'] = extension_table(data['codeServer']['extensions'])
         settings = merge(settings, data)
-    # Merged by target; false drops another file's.
+    # Merged by key; false drops another file's.
     settings['agent']['mounts'] = {target: value for target, value in settings['agent']['mounts'].items()
                                    if value is not False}
+    settings['docker']['images'] = [image for image, keep in settings['docker']['images'].items() if keep]
+    settings['codeServer']['extensions'] = [extension if version is True else f'{extension}@{version}'
+                                            for extension, version in settings['codeServer']['extensions'].items()
+                                            if version is not False]
     subnets = settings['subnets']
     if subnets['proxy'] and subnets['proxy'] == subnets['dind']:
         raise ValueError('subnets: proxy and dind must differ')

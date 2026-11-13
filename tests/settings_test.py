@@ -131,10 +131,10 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(loaded['proxy']['ca'], self.root / '.devcontainer/local.pem')
 
     def test_local_merges_tables_and_replaces_values(self):
-        self.write('claude.toml', '[docker]\nenabled = true\nimages = ["a:1", "b:1"]\n[agent]\nuid = 1001\n')
-        self.write('claude.local.toml', '[docker]\nimages = ["c:1"]\n[agent]\ngid = 1002\n')
+        self.write('claude.toml', '[docker]\nenabled = true\nshared_base = "a"\n[agent]\nuid = 1001\n')
+        self.write('claude.local.toml', '[docker]\nshared_base = "b"\n[agent]\ngid = 1002\n')
         loaded = self.load()
-        self.assertEqual(loaded['docker'], {'enabled': True, 'images': ['c:1'], 'shared_base': '', 'map_agent_ids': True})
+        self.assertEqual(loaded['docker'], {'enabled': True, 'images': [], 'shared_base': 'b', 'map_agent_ids': True})
         self.assertEqual(loaded['agent'], {'uid': 1001, 'gid': 1002, 'extra_path': [], 'env': {}, 'share_projects': False, 'mounts': {}})
 
     def test_local_replaces_each_host_as_a_whole(self):
@@ -169,8 +169,10 @@ class SettingsTest(unittest.TestCase):
             ('[git]\nisolation = "clone"\n[acp]\nenabled = true\n', r'acp.enabled: needs git.isolation'),
             ('[agent]\nuid = true\n', r'agent.uid: expected an integer'),
             ('[agent]\nuid = 0\n', r'agent.uid: must be positive'),
-            ('[docker]\nimages = "busybox"\n', r'docker.images: expected a list'),
-            ('[docker]\nimages = [1]\n', r'docker.images: expected a list'),
+            ('[docker]\nimages = "busybox"\n', r'docker.images: expected a table, or a list'),
+            ('[docker]\nimages = [1]\n', r'docker.images: expected a table, or a list'),
+            ('[docker.images]\n"a b" = true\n', r'docker.images:'),
+            ('[docker.images]\n"busybox" = "1"\n', r'docker.images: .busybox.: expected true'),
             ('[docker]\nimages = ["a b"]\n', r'docker.images:'),
             ('[docker]\nenabled = true\nshared_base = "a/b"\n', r'docker.shared_base: .a/b. is not a name'),
             ('[docker]\nenabled = true\nshared_base = 1\n', r'docker.shared_base: expected a string'),
@@ -181,7 +183,11 @@ class SettingsTest(unittest.TestCase):
             ('[codeServer]\nenabled = true\nextensions = ["python"]\n', r'codeServer.extensions: .python. is not'),
             ('[codeServer]\nenabled = true\nextensions = ["a.b c"]\n', r'codeServer.extensions:'),
             ('[codeServer]\nextensions = ["ms-python.python"]\n', r'codeServer.extensions: needs codeServer.enabled'),
-            ('[codeServer]\nenabled = true\nextensions = "a.b"\n', r'codeServer.extensions: expected a list'),
+            ('[codeServer]\nenabled = true\nextensions = "a.b"\n', r'codeServer.extensions: expected a table, or a list'),
+            ('[codeServer]\nenabled = true\nextensions = ["a.b@"]\n', r'codeServer.extensions: .a.b@.: expected ID@VERSION'),
+            ('[codeServer]\nenabled = true\nextensions = ["a.b", "a.b@1"]\n', r'codeServer.extensions: a.b is given twice'),
+            ('[codeServer]\nenabled = true\nextensions = { "a.b@1" = true }\n', r'codeServer.extensions: .a.b@1. is not'),
+            ('[codeServer]\nenabled = true\nextensions = { "a.b" = "x" }\n', r'codeServer.extensions: a.b: expected true'),
             ('[codeServer]\nvscode = "/usr/bin/code"\n', r'codeServer.vscode: unknown setting'),
             ('[subnets]\nproxy = "10.0.256"\n', r'subnets.proxy:'),
             ('[subnets]\nproxy = "10.0"\n', r'subnets.proxy:'),
@@ -631,13 +637,22 @@ dind = "10.99.1"
         with self.assertRaisesRegex(ValueError, 'codeServer.enabled: expected true or false'):
             self.load()
 
-    def test_code_server_extension_override(self):
-        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python"]\n')
-        self.write('claude.local.toml', '[codeServer]\nextensions = ["vscodevim.vim@1.27.3", "a.b"]\n')
+    def test_code_server_extensions_merge_by_id(self):
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'claude.toml').write_text('[codeServer.extensions]\n"vscodevim.vim" = true\n"x.y" = true\n')
+        # The list form merges as well.
+        self.write('claude.toml', '[codeServer]\nenabled = true\nextensions = ["ms-python.python", "a.b@1.0.0"]\n')
+        self.write('claude.local.toml', '[codeServer.extensions]\n"vscodevim.vim" = "1.27.3"\n"x.y" = false\n')
         self.generate()
-        self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS'], "'vscodevim.vim@1.27.3 a.b'")
-        self.write('claude.local.toml', '[codeServer]\nextensions = []\n')
-        self.assertEqual(self.load()['codeServer']['extensions'], [])
+        self.assertEqual(self.env()['CLAUDE_DEVCONTAINER_CODE_SERVER_EXTENSIONS'],
+                         "'vscodevim.vim@1.27.3 ms-python.python a.b@1.0.0'")
+
+    def test_docker_images_merge_by_image(self):
+        settings.CONFIG.mkdir()
+        (settings.CONFIG / 'claude.toml').write_text('[docker.images]\n"testcontainers/ryuk:0.14.0" = true\n"a:1" = true\n')
+        self.write('claude.toml', '[docker]\nenabled = true\nimages = ["postgres:16", "a:1"]\n')
+        self.write('claude.local.toml', '[docker.images]\n"a:1" = false\n"redis:7" = true\n')
+        self.assertEqual(self.load()['docker']['images'], ['testcontainers/ryuk:0.14.0', 'postgres:16', 'redis:7'])
 
     def test_generate_with_defaults(self):
         out = self.generate()
