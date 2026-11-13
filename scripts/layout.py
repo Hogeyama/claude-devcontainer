@@ -9,6 +9,7 @@ environment; the state directory then stands in for .devcontainer/.
 import hashlib
 import os
 from pathlib import Path
+import re
 
 # The core: .devcontainer/claude/, or an installed version under DATA.
 CORE = Path(__file__).resolve().parents[1]
@@ -39,6 +40,20 @@ def compose_file(root, environ=os.environ):
 
 def workspace_id(root):
     return hashlib.sha256(os.fsencode(Path(root).resolve())).hexdigest()[:16]
+
+
+def project_name(root):
+    """The compose project of host mode: claude-<folder>-<hash>, the folder's
+    name for people to tell environments apart, and its path's hash so that
+    two folders of the same name differ."""
+    root = Path(root).resolve()
+    folder = re.sub(r'[^a-z0-9]+', '-', root.name.lower()).strip('-')[:40].strip('-') or 'workspace'
+    return f'claude-{folder}-{workspace_id(root)[:8]}'
+
+
+def former_project_name(root):
+    """The name host mode gave the project before project_name."""
+    return 'cdc-' + workspace_id(root)
 
 
 def state_dir(root):
