@@ -4,7 +4,7 @@
 //   hostexec serve [--listen ADDR] [--port N] [--ui-port N] [--map CONTAINER=HOST]...
 //   hostexec review [--ui-port N]
 //   hostexec ui-url [--ui-port N]
-//   hostexec snippet [--port N] [DIR]
+//   hostexec snippet [--port N] [DIR | --global]
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -301,9 +301,13 @@ function uiUrl(args: string[]): void {
   console.log(`http://127.0.0.1:${port(opts["ui-port"], DEFAULT_UI_PORT)}/#${readSecret(files().uiToken)}`);
 }
 
-/** The claude.local.toml block for one workspace. */
-export function snippet(dir: string, caPath: string, apiPort: number): string {
-  if (/["\\\p{Cc}]/u.test(dir) || /[^\x20-\x7e]/.test(dir)) {
+/**
+ * The proxy settings: for one workspace's claude.local.toml with its path, or
+ * (`dir` null) for claude-devcontainer's host mode, whose one claude.toml
+ * serves every workspace, with the path from the HOSTEXEC_WORKSPACE secret.
+ */
+export function snippet(dir: string | null, caPath: string, apiPort: number): string {
+  if (dir !== null && (/["\\\p{Cc}]/u.test(dir) || /[^\x20-\x7e]/.test(dir))) {
     die(`${dir}: the path must be printable ASCII without " or \\, to go in a header`);
   }
   return `# hostexec: commands on the host, one approval per run.
@@ -316,15 +320,39 @@ https = ${apiPort}
 
 [proxy.hosts."${HOST_NAME}".inject]
 Authorization = "Bearer \${HOSTEXEC_TOKEN}"
-X-Hostexec-Map = "/workspace=${dir}"
+X-Hostexec-Map = "/workspace=${dir ?? "${HOSTEXEC_WORKSPACE}"}"
 `;
+}
+
+/** The secrets, for ~/.config/claude-devcontainer/credentials.toml. */
+export function secretsSnippet(apiToken: string, global: boolean): string {
+  return `[secrets]
+HOSTEXEC_TOKEN = { command = "cat ${apiToken}" }
+${
+  global
+    ? `# claude-devcontainer's host command names the workspace in this variable.
+HOSTEXEC_WORKSPACE = { command = 'printf %s "$CLAUDE_DEVCONTAINER_WORKSPACE"' }
+`
+    : ""
+}`;
 }
 
 function printSnippet(args: string[]): void {
   const dirs = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--port");
-  const opts = options(args.filter((a) => !dirs.includes(a)), { port: "value" });
-  if (dirs.length > 1) die("one directory at a time");
-  process.stdout.write(snippet(resolve(dirs[0] ?? "."), files().ca, port(opts.port, DEFAULT_PORT)));
+  const opts = options(args.filter((a) => !dirs.includes(a)), { port: "value", global: "flag" });
+  if (dirs.length > 1 || (opts.global && dirs.length > 0)) die("one directory, or --global");
+  const f = files();
+  const apiPort = port(opts.port, DEFAULT_PORT);
+  if (opts.global) {
+    process.stdout.write(`# For ~/.config/claude-devcontainer/claude.toml (claude-devcontainer up):
+
+${snippet(null, f.ca, apiPort)}
+# For ~/.config/claude-devcontainer/credentials.toml:
+
+${secretsSnippet(f.apiToken, true)}`);
+  } else {
+    process.stdout.write(snippet(resolve(dirs[0] ?? "."), f.ca, apiPort));
+  }
 }
 
 const [command, ...rest] = process.argv.slice(2);
@@ -350,7 +378,7 @@ switch (command) {
         "       hostexec serve [--listen ADDR] [--port N] [--ui-port N] [--map CONTAINER=HOST]... [--no-notify]\n" +
         "       hostexec review [--ui-port N]\n" +
         "       hostexec ui-url [--ui-port N]\n" +
-        "       hostexec snippet [--port N] [DIR]",
+        "       hostexec snippet [--port N] [DIR | --global]",
     );
     process.exit(command === undefined || command === "--help" ? 0 : 2);
 }

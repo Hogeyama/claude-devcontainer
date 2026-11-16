@@ -68,6 +68,8 @@
 
    承認用のURL（`http://127.0.0.1:7879/#<token>`）が表示されるので、ブラウザで開きます。端末で承認する場合は、別の端末で`./hostexec review`を実行します。URLは`./hostexec ui-url`でも表示できます。
 
+   `.devcontainer`を取り込まずに`claude-devcontainer up`（ホストモード）で使う場合は、`claude.local.toml`の代わりに`hostexec snippet --global`の出力を使います（[ホストモード](#claude-devcontainerのホストモード)）。
+
 3. コンテナにクライアントを入れます。
 
    ```sh
@@ -121,6 +123,24 @@ Linuxでは、`host.docker.internal`はDockerのブリッジのホスト側の�
 - **通知**：`notify-send`には固定の文言だけを送ります。コンテナから来た文字列は含めません。
 
 `~/.config/hostexec/`をコンテナにmountしないでください。`api-token`があればproxyを経ずに依頼でき、`ui-token`があれば承認できます。
+
+## claude-devcontainerのホストモード
+
+`claude-devcontainer up`で起動する環境は、`~/.config/claude-devcontainer/claude.toml`だけを読み、ワークスペースの`claude.local.toml`を読みません。このファイルはすべてのワークスペースに共通なので、ワークスペースのパスを直接書けません。代わりに、パスを秘密`HOSTEXEC_WORKSPACE`として渡します。
+
+```sh
+./hostexec snippet --global
+```
+
+前半を`~/.config/claude-devcontainer/claude.toml`に、後半を`~/.config/claude-devcontainer/credentials.toml`の`[secrets]`に書きます。`X-Hostexec-Map`は`/workspace=${HOSTEXEC_WORKSPACE}`になり、`HOSTEXEC_WORKSPACE`は次のコマンドで求めます。
+
+```toml
+HOSTEXEC_WORKSPACE = { command = 'printf %s "$CLAUDE_DEVCONTAINER_WORKSPACE"' }
+```
+
+`CLAUDE_DEVCONTAINER_WORKSPACE`は、`claude-devcontainer`が秘密のコマンドに渡す環境変数で、ワークスペースのルートの絶対パスです。claude-devcontainerの内部の変数で、文書化されたものではありません。変わった場合はこの行を直してください。代わりに、ワークスペースごとに`[workspaces."/path/to/repo".secrets]`へ`HOSTEXEC_WORKSPACE = "/path/to/repo"`と書くこともできます。
+
+`devcontainer up`（リポジトリモード）はこの変数を設定しませんが、全体の`claude.toml`も読まないので、`hostexec snippet DIR`の設定と混ざることはありません。
 
 ## 開発
 
