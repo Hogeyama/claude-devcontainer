@@ -1,0 +1,4 @@
+#!/bin/sh
+# The host side of hostexec. See README.md.
+here=$(dirname "$(readlink -f "$0")")
+exec bun --no-env-file "$here/src/cli.ts" "$@"

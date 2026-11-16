@@ -1,0 +1,7 @@
+{
+  "name": "hostexec",
+  "private": true,
+  "type": "module",
+  "bin": { "hostexec": "hostexec" },
+  "scripts": { "test": "bun test" }
+}
