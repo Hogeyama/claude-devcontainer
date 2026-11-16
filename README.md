@@ -70,7 +70,7 @@
 
    `.devcontainer`を取り込まずに`claude-devcontainer up`（ホストモード）で使う場合は、`claude.local.toml`の代わりに`hostexec snippet --global`の出力を使います（[ホストモード](#claude-devcontainerのホストモード)）。
 
-3. コンテナでは、`snippet`の設定にある`agent.mounts`で、クライアントが`/usr/local/bin/hostexec`に読み取り専用でmountされます。
+3. コンテナでは、`snippet`の設定にある`agent.mounts`で、クライアントが`/usr/bin/hostexec`に読み取り専用でmountされます。
 
    ```sh
    hostexec -- uname -a

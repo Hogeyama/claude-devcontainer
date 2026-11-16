@@ -324,7 +324,7 @@ X-Hostexec-Map = "/workspace=${dir ?? "${HOSTEXEC_WORKSPACE}"}"
 
 # The client, read-only and on PATH.
 [agent.mounts]
-"/usr/local/bin/hostexec" = "${join(ROOT, "client", "hostexec")}"
+"/usr/bin/hostexec" = "${join(ROOT, "client", "hostexec")}"
 `;
 }
 
