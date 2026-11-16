@@ -172,6 +172,20 @@ inject = { X-Redmine-API-Key = "${REDMINE_API_KEY}" }
 
 `claude.toml`と同じくimageのビルド時に組み込みます。編集したら、環境を停止して`devcontainer up`で起動し直してください。不正な場合は起動処理が失敗し、`claude.local.toml:`で始まる理由を表示します。ホストの未追跡ファイルなのでcloneには入りません。秘密の値はこのファイルに書かず、`${NAME}`で参照してください。
 
+### ホストのサービスに接続する
+
+ホストで動かしているWebサーバーなどには、`host.docker.internal`という名前で接続できます。既定では通さないので、使う場合は`proxy.hosts`に書いてください。ホストごとに違うことが多いので、`claude.local.toml`に書くのが向いています。
+
+```toml
+[proxy.hosts."host.docker.internal"]
+routes = ["/.*"]                               # 必要なパスに絞る
+http = 8000                                    # http://host.docker.internal:8000/
+```
+
+- agentは、ほかの接続先と同じくproxyを通して接続します（`curl http://host.docker.internal:8000/`）。proxyだけがこの名前を知っていて、`proxy.hosts`と`routes`の制限がそのまま効きます。HTTPとHTTPSだけで、データベースなどにTCPで直接は接続できません。
+- Linuxでは、この名前はDockerのブリッジのホスト側のアドレス（通常`172.17.0.1`）を指します。ホストの`127.0.0.1`だけで待ち受けているサーバーには届かないので、`0.0.0.0`かそのアドレスで待ち受けてください。ホストのファイアウォールが止めることもあります。Docker Desktopでは、ホストの`127.0.0.1`に届きます。
+- ホストで動くサービスは、agentから見ればほかの接続先と同じく外部です。管理画面や認証なしのAPIなど、agentに触らせたくないものが同じportにあれば、`routes`で除いてください。
+
 ### 社内CAを信頼させる
 
 社内CAの証明書を使うホストへは、proxyが接続先の証明書を検証できず、502を返します。ホストにあるCA証明書（PEM、複数の証明書を連結したものも可）のパスを、`claude.toml`か`claude.local.toml`の`[proxy]`の`ca`に書いてください。相対パスは`.devcontainer/`が基準です。

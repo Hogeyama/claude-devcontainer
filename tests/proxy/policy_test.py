@@ -52,6 +52,12 @@ class ParseTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             policy.render(config.inject['github.com'][0][1], {})
 
+    def test_the_hosts_name_is_a_host_like_any(self):
+        # compose.yaml names the host so for the proxy alone; listing it is the opt-in.
+        config = policy.parse({'host.docker.internal': {'routes': ['GET /.*'], 'http': 8000}})
+        self.assertEqual(config.http, {'host.docker.internal': {8000}})
+        self.assertEqual(policy.parse({}).routes, {})
+
     def test_http(self):
         config = policy.parse({
             'mirror.example.com': {'routes': ['GET /debian/.+'], 'headers': ['X-A'], 'http': True},

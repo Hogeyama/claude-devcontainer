@@ -159,6 +159,11 @@ services:
       CLAUDE_DEVCONTAINER_WEB_SEARCH: ${CLAUDE_DEVCONTAINER_WEB_SEARCH:-0}
     tmpfs:
       - /run/proxy-credentials:uid=1000,gid=1000,mode=0700,size=1m
+    # The host, for proxy.hosts."host.docker.internal" (docs/network-policy.md).
+    # The name alone opens nothing: the proxy reaches only what proxy.hosts
+    # lists, and the agent reaches nothing but the proxy.
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - proxy-private-ca:/home/mitmproxy/.mitmproxy
       - public-ca:/public-ca
