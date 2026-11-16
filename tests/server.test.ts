@@ -100,6 +100,31 @@ describe("api", () => {
     expect(ev.at(-1)).toEqual({ event: "exit", exitCode: 4, signal: null });
   });
 
+  test("the proxy's X-Hostexec-Map names the workspace, over --map", async () => {
+    const pending = fetch(`http://127.0.0.1:${api.port}/run`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "X-Hostexec-Map": "/workspace=/usr" },
+      body: JSON.stringify({ argv: ["pwd"], cwd: "/workspace/bin" }),
+    });
+    const id = await waitHeld();
+    const { pending: list } = (await (await uiCall("/api/pending", {})).json()) as {
+      pending: { cwd: string }[];
+    };
+    expect(list[0]?.cwd).toBe("/usr/bin");
+    await uiCall("/api/decision", { id, approve: true });
+    const ev = await events(await pending);
+    expect(ev).toContainEqual({ event: "started", cwd: "/usr/bin" });
+  });
+
+  test("a bad X-Hostexec-Map is refused", async () => {
+    const res = await fetch(`http://127.0.0.1:${api.port}/run`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "X-Hostexec-Map": "relative" },
+      body: JSON.stringify({ argv: ["pwd"], cwd: "/workspace" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   test("denied", async () => {
     const pending = run({ argv: ["touch", "/tmp/should-not-exist"], cwd: "/" });
     const id = await waitHeld();

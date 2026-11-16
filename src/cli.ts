@@ -4,12 +4,13 @@
 //   hostexec serve [--listen ADDR] [--port N] [--ui-port N] [--map CONTAINER=HOST]...
 //   hostexec review [--ui-port N]
 //   hostexec ui-url [--ui-port N]
+//   hostexec snippet [--port N] [DIR]
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { apiHandler } from "./api.ts";
 import { Approvals } from "./approvals.ts";
@@ -149,23 +150,14 @@ function init(args: string[]): void {
   }
   console.log(`hostexec: set up in ${f.dir}
 
-Add to the workspace's .devcontainer/claude.local.toml (or claude.toml):
-
-  [proxy]
-  ca = "${f.ca}"
-
-  [proxy.hosts."${HOST_NAME}"]
-  routes = ["POST /run", "GET /client"]
-  https = ${DEFAULT_PORT}
-  inject = { Authorization = "Bearer \${HOSTEXEC_TOKEN}" }
-
-and to ~/.config/claude-devcontainer/credentials.toml:
+Add to ~/.config/claude-devcontainer/credentials.toml:
 
   [secrets]
   HOSTEXEC_TOKEN = { command = "cat ${f.apiToken}" }
 
-Then restart the environment, run \`hostexec serve\` on the host, and in the
-container:
+and, for each workspace, what \`hostexec snippet DIR\` prints to
+DIR/.devcontainer/claude.local.toml. Then restart the environment, run
+\`hostexec serve\` on the host, and in the container:
 
   curl -fsS https://${HOST_NAME}:${DEFAULT_PORT}/client -o ~/.local/bin/hostexec
   chmod +x ~/.local/bin/hostexec
@@ -202,7 +194,7 @@ function serve(args: string[]): void {
   const uiToken = readSecret(f.uiToken);
   const map: PathMap = ((opts.map as string[] | undefined) ?? []).map((spec) => {
     const m = parseMapping(spec);
-    return typeof m === "string" ? die(m) : m;
+    return typeof m === "string" ? die(`--map ${m}`) : m;
   });
   const approvals = new Approvals();
   const listen = (opts.listen as string | undefined) ?? DEFAULT_LISTEN;
@@ -309,6 +301,32 @@ function uiUrl(args: string[]): void {
   console.log(`http://127.0.0.1:${port(opts["ui-port"], DEFAULT_UI_PORT)}/#${readSecret(files().uiToken)}`);
 }
 
+/** The claude.local.toml block for one workspace. */
+export function snippet(dir: string, caPath: string, apiPort: number): string {
+  if (/["\\\p{Cc}]/u.test(dir) || /[^\x20-\x7e]/.test(dir)) {
+    die(`${dir}: the path must be printable ASCII without " or \\, to go in a header`);
+  }
+  return `# hostexec: commands on the host, one approval per run.
+[proxy]
+ca = "${caPath}"
+
+[proxy.hosts."${HOST_NAME}"]
+routes = ["POST /run", "GET /client"]
+https = ${apiPort}
+
+[proxy.hosts."${HOST_NAME}".inject]
+Authorization = "Bearer \${HOSTEXEC_TOKEN}"
+X-Hostexec-Map = "/workspace=${dir}"
+`;
+}
+
+function printSnippet(args: string[]): void {
+  const dirs = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--port");
+  const opts = options(args.filter((a) => !dirs.includes(a)), { port: "value" });
+  if (dirs.length > 1) die("one directory at a time");
+  process.stdout.write(snippet(resolve(dirs[0] ?? "."), files().ca, port(opts.port, DEFAULT_PORT)));
+}
+
 const [command, ...rest] = process.argv.slice(2);
 switch (command) {
   case "init":
@@ -323,12 +341,16 @@ switch (command) {
   case "ui-url":
     uiUrl(rest);
     break;
+  case "snippet":
+    printSnippet(rest);
+    break;
   default:
     console.error(
       "usage: hostexec init [--force]\n" +
         "       hostexec serve [--listen ADDR] [--port N] [--ui-port N] [--map CONTAINER=HOST]... [--no-notify]\n" +
         "       hostexec review [--ui-port N]\n" +
-        "       hostexec ui-url [--ui-port N]",
+        "       hostexec ui-url [--ui-port N]\n" +
+        "       hostexec snippet [--port N] [DIR]",
     );
     process.exit(command === undefined || command === "--help" ? 0 : 2);
 }

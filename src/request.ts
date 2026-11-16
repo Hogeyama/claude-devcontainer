@@ -87,14 +87,14 @@ export function mapPath(path: string, map: PathMap): string {
   return rest === "" ? best[1] : `${best[1].replace(/\/+$/, "")}/${rest}`;
 }
 
-/** Parse `--map CONTAINER=HOST`. */
+/** Parse `CONTAINER=HOST`, from --map or the proxy's X-Hostexec-Map. */
 export function parseMapping(spec: string): readonly [string, string] | string {
   const eq = spec.indexOf("=");
-  if (eq === -1) return `--map ${spec}: expected CONTAINER=HOST`;
+  if (eq === -1) return `${spec}: expected CONTAINER=HOST`;
   const from = spec.slice(0, eq);
   const to = spec.slice(eq + 1);
-  if (!isAbsolute(from) || !isAbsolute(to)) {
-    return `--map ${spec}: both paths must be absolute`;
+  if (!isAbsolute(from) || !isAbsolute(to) || spec.includes("\0")) {
+    return `${spec}: both paths must be absolute`;
   }
   const strip = (s: string) => normalize(s).replace(/(.)\/+$/, "$1");
   return [strip(from), strip(to)];

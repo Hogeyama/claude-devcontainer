@@ -4,11 +4,15 @@
 // container on the same bridge, say) and is refused.
 //
 //   POST /run     {argv, cwd, env}  → NDJSON events, see `Event`
+//                 X-Hostexec-Map: CONTAINER=HOST, which the proxy adds as well,
+//                 says where this workspace's container paths are on the host
 //   GET  /client                    → the Python client, to install in the container
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Approvals } from "./approvals.ts";
-import { MAX_BODY, type PathMap, parseExecRequest } from "./request.ts";
+import { MAX_BODY, type PathMap, parseExecRequest, parseMapping } from "./request.ts";
+
+export const MAP_HEADER = "x-hostexec-map";
 import { runOnHost } from "./run.ts";
 
 export const KEEPALIVE_MS = 10_000;
@@ -65,8 +69,17 @@ export function apiHandler(options: ApiOptions): (req: Request) => Promise<Respo
     if (!Number.isSafeInteger(length) || length > MAX_BODY) {
       return text(`hostexec: the body must have a Content-Length up to ${MAX_BODY}`, 400);
     }
+    // The proxy's mapping comes first, so it wins over a --map of the same
+    // container path: it names the workspace this request came from.
+    let map = options.map;
+    const header = req.headers.get(MAP_HEADER);
+    if (header !== null) {
+      const m = parseMapping(header);
+      if (typeof m === "string") return text(`hostexec: ${MAP_HEADER}: ${m}`, 400);
+      map = [m, ...options.map];
+    }
     const body = await req.text();
-    const exec = parseExecRequest(body, options.map);
+    const exec = parseExecRequest(body, map);
     if (typeof exec === "string") return text(`hostexec: ${exec}`, 400);
 
     const gone = new AbortController();
