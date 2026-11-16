@@ -70,14 +70,13 @@
 
    `.devcontainer`を取り込まずに`claude-devcontainer up`（ホストモード）で使う場合は、`claude.local.toml`の代わりに`hostexec snippet --global`の出力を使います（[ホストモード](#claude-devcontainerのホストモード)）。
 
-3. コンテナにクライアントを入れます。
+3. コンテナでは、`snippet`の設定にある`agent.mounts`で、クライアントが`/usr/local/bin/hostexec`に読み取り専用でmountされます。
 
    ```sh
-   mkdir -p ~/.local/bin
-   curl -fsS https://host.docker.internal:7878/client -o ~/.local/bin/hostexec
-   chmod +x ~/.local/bin/hostexec
    hostexec -- uname -a
    ```
+
+   mountを使わない場合は、APIから取得することもできます（`curl -fsS https://host.docker.internal:7878/client -o hostexec`）。
 
 hostexecは、エージェントにこの機能の存在を知らせません。使わせる場合は、CLAUDE.mdなどに「コンテナ内で動かないコマンド（`nix build`など）は`hostexec -- <コマンド>`で実行する」のように書いてください。
 

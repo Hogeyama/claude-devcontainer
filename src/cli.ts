@@ -321,6 +321,10 @@ https = ${apiPort}
 [proxy.hosts."${HOST_NAME}".inject]
 Authorization = "Bearer \${HOSTEXEC_TOKEN}"
 X-Hostexec-Map = "/workspace=${dir ?? "${HOSTEXEC_WORKSPACE}"}"
+
+# The client, read-only and on PATH.
+[agent.mounts]
+"/usr/local/bin/hostexec" = "${join(ROOT, "client", "hostexec")}"
 `;
 }
 
