@@ -168,6 +168,13 @@ inject = { Authorization = { basic = "x-access-token:${GITHUB_TOKEN}" } }
 # routes = ["GET /debian/.+"]
 # http = true
 
+# A server on the host, through the proxy, which alone knows the name. On
+# Linux it is Docker's bridge address: the server must listen on it or on
+# 0.0.0.0, not on 127.0.0.1. Usually one person's, for claude.local.toml:
+# [proxy.hosts."host.docker.internal"]
+# routes = ["/.*"]
+# http = 8000
+
 # An API with a token. An inline table must fit on one line; with more than
 # one header, write inject as its own table:
 # [proxy.hosts."api.notion.com"]
