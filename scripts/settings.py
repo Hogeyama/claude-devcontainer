@@ -946,7 +946,11 @@ def workspace_compose(settings, root, environ=os.environ):
         project.mkdir(parents=True, exist_ok=True)
         mounts.append({'type': 'bind', 'source': str(project), 'target': AGENT_PROJECT,
                        'bind': {'create_host_path': False}})
-    compose = {'services': {'agent': {'volumes': mounts}}}
+    # The host's folder of this workspace, for the agent to show (a status line,
+    # say). Host scripts read it as the workspace (scripts/layout.py); in the
+    # agent they do not run.
+    environment = {'CLAUDE_DEVCONTAINER_WORKSPACE': str(Path(root).resolve())}
+    compose = {'services': {'agent': {'volumes': mounts, 'environment': environment}}}
     if not settings['docker']['enabled']:
         dind = []
     if name := dind_store(settings):
