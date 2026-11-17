@@ -173,7 +173,10 @@ class ArchiveTest(unittest.TestCase):
         (self.root / '.devcontainer/claude/proxy').mkdir()
         shutil.copy(ROOT / '.devcontainer/claude/proxy/policy.py', self.root / '.devcontainer/claude/proxy/policy.py')
         result = subprocess.run([sys.executable, str(script / 'copy-host-config.py'), '--background'],
-                                env={**os.environ, 'CLAUDE_CONFIG_DIR': str(self.source),
+                                # As on the host: the agent's CLAUDE_DEVCONTAINER_WORKSPACE names the host's folder.
+                                env={**{name: value for name, value in os.environ.items()
+                                        if not name.startswith('CLAUDE_DEVCONTAINER_')},
+                                     'CLAUDE_CONFIG_DIR': str(self.source),
                                      'XDG_CONFIG_HOME': str(self.root / 'config'), 'XDG_STATE_HOME': str(self.root / 'state')},
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)

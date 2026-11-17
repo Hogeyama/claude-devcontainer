@@ -271,6 +271,11 @@ class SettingsTest(unittest.TestCase):
         lowerdir = compose['volumes']['dind-shared-common.map-1000-1000-10']['driver_opts']['o'].split(',')[0]
         self.assertEqual(lowerdir, 'lowerdir=' + ':'.join(str(paths['gens'] / name) for name in ('10', '2', '1', '0')))
 
+    def test_agent_knows_the_hosts_folder(self):
+        compose = json.loads((self.generate() / 'workspace.compose.yaml').read_text())
+        self.assertEqual(compose['services']['agent']['environment'],
+                         {'CLAUDE_DEVCONTAINER_WORKSPACE': str(self.root.resolve())})
+
     def test_dind_sees_the_clone(self):
         out = self.generate()
         self.assertNotIn('dind', json.loads((out / 'workspace.compose.yaml').read_text())['services'])

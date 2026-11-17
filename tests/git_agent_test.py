@@ -22,7 +22,9 @@ class GitAgentTest(unittest.TestCase):
         self.server = self.root / 'agent.git'
         config = self.root / 'gitconfig'
         config.write_text('[user]\n name = fixture\n email = fixture@example.com\n')
-        self.env = dict(os.environ, GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
+        # As on the host: the agent's CLAUDE_DEVCONTAINER_WORKSPACE names the host's folder.
+        host_env = {name: value for name, value in os.environ.items() if not name.startswith('CLAUDE_DEVCONTAINER_')}
+        self.env = dict(host_env, GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
                         FAKE_AGENT_REPO=str(self.server), FAKE_DOCKER_LOG=str(self.root / 'calls'),
                         FAKE_CONTAINERS='abc123\n')
         self.inspect = {'Config': {'Labels': {'com.docker.compose.project': 'fixture',

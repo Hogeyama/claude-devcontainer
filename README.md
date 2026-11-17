@@ -273,6 +273,7 @@ Gitの設定は自動ではコピーしません。credential helper、署名、
 > - `settings.json`の`env`もagentから見えます。秘密を書いているなら、`dotfiles/.claude/settings.json`にコンテナ用の設定を用意してください。
 > - コマンドのパスは、`/home/<user>/…`のような絶対パスではなく`~`か`$HOME`で書いてください。スクリプトが使うツールは`agent-setup.sh`で入れてください。
 > - `up`の後にホストで設定を変えたら、`.devcontainer/claude/scripts/copy-host-config.py`を実行すると反映されます。
+> - agentでは、環境変数`CLAUDE_DEVCONTAINER_WORKSPACE`にホストでのリポジトリのパス（例：`/home/me/src/my-app`）が入っています。agentの作業場所はどのリポジトリでも`/workspace`なので、どのリポジトリの環境かをstatus lineに出すときなどに使えます（`"command": "echo \"${CLAUDE_DEVCONTAINER_WORKSPACE:-$PWD}\""`）。
 
 ### セッション履歴をホストと共有する
 

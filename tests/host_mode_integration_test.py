@@ -48,6 +48,10 @@ class HostModeComposeTest(unittest.TestCase):
     def test_project_is_named_after_the_workspace(self):
         self.assertEqual(self.config()['name'], 'claude-repo')
 
+    def test_agent_knows_the_hosts_folder(self):
+        environment = self.config()['services']['agent']['environment']
+        self.assertEqual(environment['CLAUDE_DEVCONTAINER_WORKSPACE'], str(self.repo.resolve()))
+
     def test_only_the_proxy_knows_the_host(self):
         services = self.config()['services']
         self.assertIn('host.docker.internal=host-gateway', services['proxy']['extra_hosts'])
