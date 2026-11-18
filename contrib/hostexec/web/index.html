@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hostexec</title>
+    <link rel="icon" id="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>hostexec</h1>
+      <button id="notify" type="button">Notify me</button>
+    </header>
+    <p class="note">
+      An approved command runs on this host, as you. Read all of it first.
+      Arguments are shell words: inside <code>$'…'</code>, a backslash starts an escape such as <code>\n</code> or <code>‮</code>.
+    </p>
+    <p id="status">Loading…</p>
+    <main id="pending"></main>
+  </body>
+</html>

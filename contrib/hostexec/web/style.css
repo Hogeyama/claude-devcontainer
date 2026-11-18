@@ -1,0 +1,62 @@
+:root {
+  --bg: #f7f7f5;
+  --fg: #1d1d1b;
+  --muted: #6b6b66;
+  --card: #ffffff;
+  --border: #dcdcd6;
+  --approve: #1f6f43;
+  --deny: #9b2c2c;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615;
+    --fg: #e8e8e3;
+    --muted: #9a9a93;
+    --card: #20201f;
+    --border: #3a3a37;
+    --approve: #4caf7d;
+    --deny: #e06666;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 system-ui, sans-serif;
+}
+header { display: flex; align-items: center; justify-content: space-between; }
+h1 { font-size: 20px; margin: 8px 0; }
+.note, #status, .meta { color: var(--muted); }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+.card.done { opacity: 0.5; }
+.field { margin: 6px 0; }
+.label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+pre {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 14px/1.45 ui-monospace, monospace;
+}
+.buttons { display: flex; gap: 8px; }
+button {
+  font: inherit;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+button.approve { border-color: var(--approve); color: var(--approve); }
+button.deny { border-color: var(--deny); color: var(--deny); }
+button:disabled { opacity: 0.5; cursor: default; }

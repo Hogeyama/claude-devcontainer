@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""hostexec: ask, from inside a container, to run a command on the host.
+
+  hostexec [--cwd DIR] [--env NAME=VALUE | --env NAME]... [--] cmd [args...]
+
+The command runs only after a person approves it on the host, with PATH and
+HOME from the host plus exactly the variables given here (`--env NAME` copies
+this shell's value). The working directory defaults to the current one, as the
+server's --map translates it. Output streams back as the command runs; there
+is no stdin. The exit status is the command's, or 126 when the request is
+refused.
+
+The request goes through the container's proxy with curl, so HTTPS_PROXY and
+the proxy's CA apply as they do to any other request. HOSTEXEC_URL overrides
+https://host.docker.internal:7878.
+"""
+
+import base64
+import json
+import os
+import signal
+import subprocess
+import sys
+
+USAGE = "usage: hostexec [--cwd DIR] [--env NAME=VALUE | --env NAME]... [--] cmd [args...]"
+
+
+def fail(message, code=2):
+    print(f"hostexec: {message}", file=sys.stderr)
+    return code
+
+
+def parse(args):
+    cwd, env, i = os.getcwd(), {}, 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if a in ("--cwd", "--env") and i + 1 < len(args):
+            value = args[i + 1]
+            i += 2
+            if a == "--cwd":
+                cwd = os.path.abspath(value)
+            elif "=" in value:
+                name, _, v = value.partition("=")
+                env[name] = v
+            elif value in os.environ:
+                env[value] = os.environ[value]
+            else:
+                raise ValueError(f"--env {value}: not set here")
+        elif a in ("-h", "--help"):
+            print(__doc__.strip())
+            sys.exit(0)
+        elif a.startswith("-"):
+            raise ValueError(f"unknown option {a}")
+        else:
+            break
+    if i >= len(args):
+        raise ValueError("no command")
+    return {"argv": args[i:], "cwd": cwd, "env": env}
+
+
+def main(args):
+    try:
+        request = parse(args)
+    except ValueError as e:
+        print(USAGE, file=sys.stderr)
+        return fail(str(e))
+    url = os.environ.get("HOSTEXEC_URL", "https://host.docker.internal:7878").rstrip("/") + "/run"
+    # No --max-time: the request waits for a person, then for the command.
+    curl = subprocess.Popen(
+        ["curl", "-sS", "-N", "-X", "POST", "-H", "Content-Type: application/json",
+         "--data-binary", "@-", "-w", "\n%{http_code}\n", url],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    )
+    curl.stdin.write(json.dumps(request).encode())
+    curl.stdin.close()
+    out, err = sys.stdout.buffer, sys.stderr.buffer
+    result, lines = None, []
+    try:
+        for line in curl.stdout:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                lines.append(line)
+                continue
+            if not isinstance(event, dict):
+                lines.append(line)
+                continue
+            kind = event.get("event")
+            if kind == "held":
+                print("hostexec: waiting for approval on the host…", file=sys.stderr, flush=True)
+            elif kind in ("stdout", "stderr"):
+                stream = out if kind == "stdout" else err
+                stream.write(base64.b64decode(event["data"]))
+                stream.flush()
+            elif kind == "refused":
+                result = fail(f"refused on the host ({event.get('reason')})", 126)
+            elif kind == "exit":
+                if event.get("signal"):
+                    sig = event["signal"]
+                    print(f"hostexec: killed by {sig}", file=sys.stderr)
+                    number = getattr(signal, sig, None)
+                    result = 128 + (int(number) if number is not None else 15)
+                else:
+                    code = event.get("exitCode")
+                    result = code if isinstance(code, int) else 1
+    except KeyboardInterrupt:
+        # Closing the connection stops the command on the host.
+        curl.terminate()
+        curl.wait()
+        return 130
+    code = curl.wait()
+    if result is not None:
+        return result
+    # No event ended the stream: an error from the server, the proxy or curl.
+    text = b"".join(lines).decode(errors="replace").strip()
+    body, _, status = text.rpartition("\n")
+    detail = body.strip() or f"curl exit {code}"
+    return fail(f"refused ({status or 'no status'}): {detail}", 126)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
