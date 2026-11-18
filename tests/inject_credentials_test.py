@@ -240,6 +240,13 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(values['secrets'], {'GITHUB_TOKEN': 'pat-from-command', 'NOTION_API_KEY': 'secret with spaces',
                                              'MULTILINE': 'a\nb\n', 'HOST_SECRET_COPY': 'from-the-environment'})
 
+    def test_commands_learn_the_workspace(self):
+        command = '[secrets]\nWHERE = { command = \'printf %s "$CLAUDE_DEVCONTAINER_WORKSPACE"\' }\n'
+        self.assertEqual(self.load(command)['secrets'], {'WHERE': str(self.root.resolve())})
+        # In host mode the host command names it too; the root is what counts.
+        self.assertEqual(self.load(command, CLAUDE_DEVCONTAINER_WORKSPACE='/elsewhere')['secrets'],
+                         {'WHERE': str(self.root.resolve())})
+
     def test_only_the_named_secrets_run(self):
         marker = self.config.with_name('ran')
         values = self.load(f'[secrets]\nGITHUB_TOKEN = "gh"\nOTHER = {{ command = "touch {marker}" }}\n',

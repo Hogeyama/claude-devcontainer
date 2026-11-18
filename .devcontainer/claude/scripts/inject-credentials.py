@@ -144,7 +144,9 @@ def resolve(value, where):
     if isinstance(value, str):
         return value
     # stdin and stderr stay the caller's, for a secret manager's prompt and errors.
-    result = subprocess.run(['sh', '-c', value['command']], stdout=subprocess.PIPE)
+    # The command learns the workspace it is for, in either mode, as the agent does.
+    environment = {**os.environ, layout.WORKSPACE: str(Path(ROOT).resolve())}
+    result = subprocess.run(['sh', '-c', value['command']], stdout=subprocess.PIPE, env=environment)
     if result.returncode:
         raise Unavailable(f'{CONFIG}: {where}: the command failed with exit code {result.returncode}.')
     return result.stdout.decode().removesuffix('\n')

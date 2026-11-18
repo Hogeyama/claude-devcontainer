@@ -88,7 +88,7 @@ GITHUB_TOKEN = { command = "pass github/token/for-agent" }                  # pa
 # GITHUB_TOKEN = { command = "pass acme/github" }
 ```
 
-`command`はホストの`sh`で実行し、標準出力から最後の改行を除いたものを値にします。注入スクリプトは、`proxy.hosts`が参照する秘密のコマンドだけを実行します。コマンドが失敗した秘密は送らず、proxyがその秘密の名前を示して要求を拒否します。
+`command`はホストの`sh`で実行し、標準出力から最後の改行を除いたものを値にします。コマンドの環境変数`CLAUDE_DEVCONTAINER_WORKSPACE`には、どちらのモードでも、ワークスペースのホストでの絶対パスが入ります。注入スクリプトは、`proxy.hosts`が参照する秘密のコマンドだけを実行します。コマンドが失敗した秘密は送らず、proxyがその秘密の名前を示して要求を拒否します。
 
 > [!NOTE]
 > 認証情報の注入スクリプトは、このファイルのコマンドをホストで実行します。agentが書き換えられる作業ツリーの中には置かないでください。以前のシェル形式の`credentials`ファイルは読まなくなりました。残っていると警告を出すので、`credentials.toml`へ移してください。
